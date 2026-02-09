@@ -1,0 +1,47 @@
+version: "3.8"
+
+services:
+  whatsapp-webhook:
+    build: .
+    container_name: hans-ai-whatsapp
+    ports:
+      - "8003:8003"
+    environment:
+      - WHATSAPP_VERIFY_TOKEN=${WHATSAPP_VERIFY_TOKEN}
+      - WHATSAPP_PHONE_ID=${WHATSAPP_PHONE_ID}
+      - WHATSAPP_ACCESS_TOKEN=${WHATSAPP_ACCESS_TOKEN}
+      - OPENCLAW_URL=http://openclaw:8000
+      - LOG_LEVEL=info
+    depends_on:
+      - redis
+    networks:
+      - hans-ai-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  redis:
+    image: redis:7-alpine
+    container_name: hans-ai-redis-whatsapp
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - hans-ai-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  hans-ai-network:
+    driver: bridge
+
+volumes:
+  redis_data:
