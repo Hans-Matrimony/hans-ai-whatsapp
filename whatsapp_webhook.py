@@ -43,6 +43,7 @@ WHATSAPP_VERIFY_TOKEN = os.getenv("WHATSAPP_VERIFY_TOKEN")
 WHATSAPP_PHONE_ID = os.getenv("WHATSAPP_PHONE_ID")
 WHATSAPP_ACCESS_TOKEN = os.getenv("WHATSAPP_ACCESS_TOKEN")
 OPENCLAW_URL = os.getenv("OPENCLAW_URL")
+OPENCLAW_GATEWAY_TOKEN = os.getenv("OPENCLAW_GATEWAY_TOKEN")
 
 PORT = int(os.getenv("PORT", "8003"))
 
@@ -219,20 +220,38 @@ async def process_message(phone: str, message: str, message_id: str):
         return
 
     try:
+        headers = {
+            "Content-Type": "application/json"
+        }
+        if OPENCLAW_GATEWAY_TOKEN:
+            headers["Authorization"] = f"Bearer {OPENCLAW_GATEWAY_TOKEN}"
+
+        # Use OpenAI Chat Completions format
+        payload = {
+            "model": "openai/gpt-4o",  # Ensure this matches a valid model in OpenClaw
+            "messages": [
+                {"role": "user", "content": message}
+            ],
+            "user": phone  # Pass phone number as user ID for context
+        }
+
         response = await http_client.post(
-            f"{OPENCLAW_URL}/webhook/whatsapp",
-            json={
-                "from": phone,
-                "message": message,
-                "message_id": message_id
-            }
+            f"{OPENCLAW_URL}/v1/chat/completions",
+            json=payload,
+            headers=headers
         )
 
         if response.status_code == 200:
             data = response.json()
-            reply = data.get("response")
-            if reply:
-                await send_whatsapp_message(phone, reply)
+            # Parse OpenAI response format
+            if "choices" in data and len(data["choices"]) > 0:
+                reply = data["choices"][0]["message"]["content"]
+                if reply:
+                    await send_whatsapp_message(phone, reply)
+            else:
+                 logger.warning(f"Unexpected response format: {data}")
+        else:
+             logger.error(f"OpenClaw error {response.status_code}: {response.text}")
 
     except Exception as e:
         logger.error(f"Processing error: {e}", exc_info=True)
