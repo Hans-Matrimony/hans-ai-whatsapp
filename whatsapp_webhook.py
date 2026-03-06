@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from fastapi import Query
 
 # =============================================================================
 # Load Environment
@@ -159,14 +160,17 @@ async def health():
 
 @app.get("/webhook/whatsapp")
 async def verify_webhook(
-    hub_mode: str = None,
-    hub_verify_token: str = None,
-    hub_challenge: str = None
+    hub_mode: str = Query(None, alias="hub.mode"),
+    hub_verify_token: str = Query(None, alias="hub.verify_token"),
+    hub_challenge: str = Query(None, alias="hub.challenge")
 ):
+    logger.info(f"Verification attempt: mode={hub_mode}, token={hub_verify_token}")
+
     if hub_mode == "subscribe" and hub_verify_token == WHATSAPP_VERIFY_TOKEN:
         logger.info("Webhook verified successfully")
         return Response(content=hub_challenge, status_code=200)
 
+    logger.warning("Webhook verification failed")
     raise HTTPException(status_code=403, detail="Verification failed")
 
 
