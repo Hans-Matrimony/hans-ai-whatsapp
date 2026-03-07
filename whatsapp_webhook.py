@@ -236,7 +236,12 @@ async def process_message(phone: str, message: str, message_id: str):
             "messages": [
                 {"role": "user", "content": message}
             ],
-            "user": f"whatsapp:{phone}"  # Pass phone number as user ID for context
+            "user": phone,
+            "session": phone,
+            "metadata": {
+                "channel": "whatsapp",
+                "message_id": message_id
+            }
         }
 
         response = await http_client.post(
