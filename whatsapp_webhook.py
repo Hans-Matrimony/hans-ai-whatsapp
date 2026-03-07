@@ -46,6 +46,7 @@ WHATSAPP_PHONE_ID = os.getenv("WHATSAPP_PHONE_ID")
 WHATSAPP_ACCESS_TOKEN = os.getenv("WHATSAPP_ACCESS_TOKEN")
 OPENCLAW_URL = os.getenv("OPENCLAW_URL")
 OPENCLAW_GATEWAY_TOKEN = os.getenv("OPENCLAW_GATEWAY_TOKEN")
+MONGO_LOGGER_URL = os.getenv("MONGO_LOGGER_URL")
 
 PORT = int(os.getenv("PORT", "8003"))
 
@@ -75,6 +76,38 @@ async def close_http_client():
     if http_client:
         await http_client.aclose()
         logger.info("HTTP client closed")
+
+
+# =============================================================================
+# Mongo Logger
+# =============================================================================
+
+async def log_to_mongo(session_id: str, user_id: str, role: str, text: str, channel: str = "whatsapp"):
+    """Log chat message to MongoDB via the Mongo Logger service."""
+    if not MONGO_LOGGER_URL:
+        return
+
+    payload = {
+        "sessionId": session_id,
+        "userId": user_id,
+        "role": role,
+        "text": text,
+        "channel": channel
+    }
+
+    try:
+        response = await http_client.post(
+            f"{MONGO_LOGGER_URL}/webhook",
+            json=payload,
+            timeout=10.0
+        )
+        if response.status_code == 200:
+            logger.debug(f"Logged {role} message to MongoDB")
+        else:
+            logger.warning(f"Mongo Logger returned {response.status_code}")
+    except Exception as e:
+        # Don't fail the whole flow if logging fails
+        logger.warning(f"Failed to log to MongoDB: {e}")
 
 
 # =============================================================================
@@ -151,7 +184,8 @@ async def health():
         "status": "healthy",
         "service": "whatsapp-webhook",
         "whatsapp_configured": bool(WHATSAPP_PHONE_ID),
-        "openclaw_configured": bool(OPENCLAW_URL)
+        "openclaw_configured": bool(OPENCLAW_URL),
+        "mongo_logger_configured": bool(MONGO_LOGGER_URL)
     }
 
 
@@ -220,13 +254,20 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
 async def process_message(phone: str, message: str, message_id: str):
     logger.info(f"Incoming from {phone}: {message}")
 
+    # Create session/user IDs for logging
+    session_id = f"whatsapp:+{phone}"
+    user_id = f"+{phone}"
+
+    # Log user message to MongoDB
+    await log_to_mongo(session_id, user_id, "user", message, "whatsapp")
+
     if not OPENCLAW_URL:
         logger.warning("OPENCLAW_URL not set")
         return
 
     try:
 
-        # 👇 Send typing indicator immediately
+        # Send typing indicator immediately
         await send_typing_indicator(message_id)
 
         headers = {
@@ -271,6 +312,8 @@ async def process_message(phone: str, message: str, message_id: str):
 
         if reply:
             await send_whatsapp_message(phone, reply)
+            # Log assistant response to MongoDB
+            await log_to_mongo(session_id, user_id, "assistant", reply, "whatsapp")
 
     except Exception as e:
         logger.error(f"Processing error: {e}", exc_info=True)
