@@ -224,20 +224,22 @@ async def process_message(phone: str, message: str, message_id: str):
         return
 
     try:
-        headers = {"Content-Type": "application/json"}
+        headers = {
+            "Content-Type": "application/json"
+        }
 
         if OPENCLAW_GATEWAY_TOKEN:
             headers["Authorization"] = f"Bearer {OPENCLAW_GATEWAY_TOKEN}"
 
         payload = {
-            "agent": "astrologer",
             "model": "openai/gpt-4o",
             "input": message,
-            "session": phone,
-            "user": phone,
             "metadata": {
-                "message_id": message_id,
-                "channel": "whatsapp"
+                "agent": "astrologer",
+                "session": phone,
+                "user": phone,
+                "channel": "whatsapp",
+                "message_id": message_id
             }
         }
 
@@ -267,6 +269,8 @@ async def process_message(phone: str, message: str, message_id: str):
 
     except Exception as e:
         logger.error(f"Processing error: {e}", exc_info=True)
+
+
 # =============================================================================
 # Send Message API
 # =============================================================================
