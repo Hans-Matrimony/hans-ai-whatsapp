@@ -232,13 +232,13 @@ async def process_message(phone: str, message: str, message_id: str):
             headers["Authorization"] = f"Bearer {OPENCLAW_GATEWAY_TOKEN}"
 
         payload = {
+            "model": "agent:astrologer",  # Routes to astrologer agent
             "input": message,
-            "session": phone,
-            "user": phone
+            "user": phone,  # Stable session per WhatsApp user
         }
 
         response = await http_client.post(
-            f"{OPENCLAW_URL}/v1/agents/astrologer/respond",
+            f"{OPENCLAW_URL}/v1/responses",
             json=payload,
             headers=headers
         )
@@ -249,13 +249,21 @@ async def process_message(phone: str, message: str, message_id: str):
 
         data = response.json()
 
-        reply = data.get("text")
+        reply = None
+        if "output" in data:
+            for item in data["output"]:
+                if item.get("content"):
+                    for content in item["content"]:
+                        if content.get("text"):
+                            reply = content["text"]
+                            break
 
         if reply:
             await send_whatsapp_message(phone, reply)
 
     except Exception as e:
         logger.error(f"Processing error: {e}", exc_info=True)
+
 
 # =============================================================================
 # Send Message API
