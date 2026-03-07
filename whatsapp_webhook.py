@@ -234,7 +234,7 @@ async def process_message(phone: str, message: str, message_id: str):
         payload = {
             "model": "agent:astrologer",  # Routes to astrologer agent
             "input": message,
-            "user": f"whatsapp:direct:+{phone}",  # Creates stable session per WhatsApp user
+            "user": f"agent:astrologer:whatsapp:direct:+{phone}",  # Creates stable session per WhatsApp user
         }
 
         response = await http_client.post(
