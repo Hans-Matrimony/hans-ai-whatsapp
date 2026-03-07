@@ -232,7 +232,7 @@ async def process_message(phone: str, message: str, message_id: str):
 
         # Use OpenAI Chat Completions format
         payload = {
-            "model": "openai/gpt-4o",  # Ensure this matches a valid model in OpenClaw
+            "agent": "astrologer",
             "messages": [
                 {"role": "user", "content": message}
             ],
