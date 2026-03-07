@@ -225,7 +225,8 @@ async def process_message(phone: str, message: str, message_id: str):
 
     try:
         headers = {
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "x-openclaw-session-key": f"agent:astrologer:whatsapp:{phone}",  # Exact session key
         }
 
         if OPENCLAW_GATEWAY_TOKEN:
