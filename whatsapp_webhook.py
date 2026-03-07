@@ -232,10 +232,15 @@ async def process_message(phone: str, message: str, message_id: str):
         if OPENCLAW_GATEWAY_TOKEN:
             headers["Authorization"] = f"Bearer {OPENCLAW_GATEWAY_TOKEN}"
 
+        # Create envelope matching WORKFLOW.md expected format
+        timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        envelope = f"[From: WhatsApp User (+{phone}) at {timestamp}]"
+        input_with_envelope = f"{envelope}\n{message}"
+
         payload = {
             "model": "agent:astrologer",  # Routes to astrologer agent
-            "input": message,
-            "user": phone
+            "input": input_with_envelope,  # Message with envelope
+            "user": f"+{phone}"
         }
 
         response = await http_client.post(
