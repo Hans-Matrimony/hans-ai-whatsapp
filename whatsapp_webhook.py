@@ -226,7 +226,7 @@ async def process_message(phone: str, message: str, message_id: str):
     try:
         headers = {
             "Content-Type": "application/json",
-            "x-openclaw-session-key": f"agent:astrologer:whatsapp:{phone}",  # Exact session key
+            "x-openclaw-session-key": f"agent:astrologer:whatsapp:direct:+{phone}",  # Exact session key
         }
 
         if OPENCLAW_GATEWAY_TOKEN:
@@ -235,7 +235,7 @@ async def process_message(phone: str, message: str, message_id: str):
         payload = {
             "model": "agent:astrologer",  # Routes to astrologer agent
             "input": message,
-            "user": f"whatsapp:direct:+{phone}",  # Just the channel + user, no agent prefix
+            "user": phone
         }
 
         response = await http_client.post(
