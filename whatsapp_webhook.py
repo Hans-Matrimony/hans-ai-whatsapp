@@ -224,18 +224,21 @@ async def process_message(phone: str, message: str, message_id: str):
         return
 
     try:
-        headers = {
-            "Content-Type": "application/json"
-        }
+        headers = {"Content-Type": "application/json"}
 
         if OPENCLAW_GATEWAY_TOKEN:
             headers["Authorization"] = f"Bearer {OPENCLAW_GATEWAY_TOKEN}"
 
         payload = {
             "agent": "astrologer",
+            "model": "openai/gpt-4o",
             "input": message,
             "session": phone,
-            "user": phone
+            "user": phone,
+            "metadata": {
+                "message_id": message_id,
+                "channel": "whatsapp"
+            }
         }
 
         response = await http_client.post(
@@ -251,8 +254,6 @@ async def process_message(phone: str, message: str, message_id: str):
         data = response.json()
 
         reply = None
-
-        # Safely extract text
         if "output" in data:
             for item in data["output"]:
                 if item.get("content"):
@@ -263,12 +264,9 @@ async def process_message(phone: str, message: str, message_id: str):
 
         if reply:
             await send_whatsapp_message(phone, reply)
-        else:
-            logger.warning(f"No reply text found: {data}")
 
     except Exception as e:
         logger.error(f"Processing error: {e}", exc_info=True)
-
 # =============================================================================
 # Send Message API
 # =============================================================================
