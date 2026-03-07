@@ -225,6 +225,10 @@ async def process_message(phone: str, message: str, message_id: str):
         return
 
     try:
+
+        # 👇 Send typing indicator immediately
+        await send_typing_indicator(message_id)
+
         headers = {
             "Content-Type": "application/json",
             "x-openclaw-session-key": f"agent:astrologer:whatsapp:direct:+{phone}",  # Exact session key
@@ -315,6 +319,28 @@ async def send_whatsapp_message(phone: str, message: str):
     logger.error(f"WhatsApp send failed: {response.text}")
     return None
 
+
+async def send_typing_indicator(message_id: str):
+    if not WHATSAPP_PHONE_ID or not WHATSAPP_ACCESS_TOKEN:
+        return
+
+    url = f"{FB_API_URL}/{WHATSAPP_PHONE_ID}/messages"
+
+    headers = {
+        "Authorization": f"Bearer {WHATSAPP_ACCESS_TOKEN}",
+        "Content-Type": "application/json"
+    }
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "status": "read",
+        "message_id": message_id,
+        "typing_indicator": {
+            "type": "text"
+        }
+    }
+
+    await http_client.post(url, headers=headers, json=payload)
 
 # =============================================================================
 # Root
