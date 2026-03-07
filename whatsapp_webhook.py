@@ -227,44 +227,47 @@ async def process_message(phone: str, message: str, message_id: str):
         headers = {
             "Content-Type": "application/json"
         }
+
         if OPENCLAW_GATEWAY_TOKEN:
             headers["Authorization"] = f"Bearer {OPENCLAW_GATEWAY_TOKEN}"
 
-        # Use OpenAI Chat Completions format
         payload = {
             "agent": "astrologer",
-            "messages": [
-                {"role": "user", "content": message}
-            ],
-            "user": phone,
+            "input": message,
             "session": phone,
-            "metadata": {
-                "channel": "whatsapp",
-                "message_id": message_id
-            }
+            "user": phone
         }
 
         response = await http_client.post(
-            f"{OPENCLAW_URL}/v1/chat/completions",
+            f"{OPENCLAW_URL}/v1/responses",
             json=payload,
             headers=headers
         )
 
-        if response.status_code == 200:
-            data = response.json()
-            # Parse OpenAI response format
-            if "choices" in data and len(data["choices"]) > 0:
-                reply = data["choices"][0]["message"]["content"]
-                if reply:
-                    await send_whatsapp_message(phone, reply)
-            else:
-                 logger.warning(f"Unexpected response format: {data}")
+        if response.status_code != 200:
+            logger.error(f"OpenClaw error {response.status_code}: {response.text}")
+            return
+
+        data = response.json()
+
+        reply = None
+
+        # Safely extract text
+        if "output" in data:
+            for item in data["output"]:
+                if item.get("content"):
+                    for content in item["content"]:
+                        if content.get("text"):
+                            reply = content["text"]
+                            break
+
+        if reply:
+            await send_whatsapp_message(phone, reply)
         else:
-             logger.error(f"OpenClaw error {response.status_code}: {response.text}")
+            logger.warning(f"No reply text found: {data}")
 
     except Exception as e:
         logger.error(f"Processing error: {e}", exc_info=True)
-
 
 # =============================================================================
 # Send Message API
