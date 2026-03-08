@@ -20,7 +20,7 @@ case "$SERVICE_TYPE" in
         echo "Starting Celery worker..."
         exec celery -A app.services.celery_app worker \
             --loglevel=info \
-            --concurrency=${CELERY_CONCURRENCY:-50} \
+            --concurrency=${CELERY_CONCURRENCY:-20} \
             --max-tasks-per-child=100 \
             --queues=celery,whatsapp
         ;;
