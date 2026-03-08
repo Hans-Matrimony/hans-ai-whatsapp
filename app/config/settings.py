@@ -25,7 +25,7 @@ class Settings(BaseSettings):
 
     # OpenClaw Configuration
     openclaw_url: str = Field(..., description="OpenClaw Gateway URL")
-    openclaw_api_key: Optional[str] = Field(None, description="Optional API key")
+    openclaw_gateway_token: Optional[str] = Field(None, description="Gateway auth token")
     openclaw_timeout: int = Field(default=60, description="Timeout in seconds")
 
     # Message Processing

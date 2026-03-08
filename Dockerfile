@@ -26,6 +26,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY whatsapp_webhook.py /app/
 COPY app/ /app/app/
+COPY entrypoint.sh /app/entrypoint.sh
+
+# Make entrypoint executable
+RUN chmod +x /app/entrypoint.sh
 
 # Create non-root user
 RUN useradd -m -u 1000 whatsapp && \
@@ -35,9 +39,9 @@ USER whatsapp
 # Expose port
 EXPOSE 8003
 
-# Health check
+# Health check (only for web service)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8003/health || exit 1
 
-# Run application
-CMD ["uvicorn", "whatsapp_webhook:app", "--host", "0.0.0.0", "--port", "8003"]
+# Set default command (can be overridden)
+CMD ["/app/entrypoint.sh"]

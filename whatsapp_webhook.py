@@ -1,26 +1,26 @@
 #!/usr/bin/env python3
 """
 WhatsApp Webhook Handler for Hans AI Dashboard
-Production Ready Version
+Production Ready Version with Celery Task Queue
 """
 
 import os
 import logging
-import json
-from typing import Optional, Dict, Any
+from typing import Optional
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI, Request, BackgroundTasks, HTTPException, status
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel, Field
+from fastapi.responses import Response
+from pydantic import BaseModel
 from dotenv import load_dotenv
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from fastapi import Query
-from datetime import datetime
+
+from app.services.tasks import process_message_task
 
 # =============================================================================
 # Load Environment
@@ -59,58 +59,6 @@ FB_API_URL = "https://graph.facebook.com/v18.0"
 limiter = Limiter(key_func=get_remote_address)
 
 # =============================================================================
-# HTTP Client
-# =============================================================================
-
-http_client: Optional[httpx.AsyncClient] = None
-
-
-async def init_http_client():
-    global http_client
-    http_client = httpx.AsyncClient(timeout=60.0)
-    logger.info("HTTP client initialized")
-
-
-async def close_http_client():
-    global http_client
-    if http_client:
-        await http_client.aclose()
-        logger.info("HTTP client closed")
-
-
-# =============================================================================
-# Mongo Logger
-# =============================================================================
-
-async def log_to_mongo(session_id: str, user_id: str, role: str, text: str, channel: str = "whatsapp"):
-    """Log chat message to MongoDB via the Mongo Logger service."""
-    if not MONGO_LOGGER_URL:
-        return
-
-    payload = {
-        "sessionId": session_id,
-        "userId": user_id,
-        "role": role,
-        "text": text,
-        "channel": channel
-    }
-
-    try:
-        response = await http_client.post(
-            f"{MONGO_LOGGER_URL}/webhook",
-            json=payload,
-            timeout=10.0
-        )
-        if response.status_code == 200:
-            logger.debug(f"Logged {role} message to MongoDB")
-        else:
-            logger.warning(f"Mongo Logger returned {response.status_code}")
-    except Exception as e:
-        # Don't fail the whole flow if logging fails
-        logger.warning(f"Failed to log to MongoDB: {e}")
-
-
-# =============================================================================
 # Lifespan
 # =============================================================================
 
@@ -129,13 +77,11 @@ async def lifespan(app: FastAPI):
     if missing:
         logger.warning(f"⚠ Missing ENV variables: {missing}")
 
-    await init_http_client()
     logger.info("✅ Server Ready")
 
     yield
 
     logger.info("🛑 Shutting down server...")
-    await close_http_client()
 
 
 # =============================================================================
@@ -180,12 +126,25 @@ class MessageResponse(BaseModel):
 
 @app.get("/health")
 async def health():
+    """Health check endpoint."""
+    from app.services.celery_app import celery_app
+
+    # Check if Celery workers are available
+    celery_status = "unknown"
+    try:
+        inspector = celery_app.control.inspect()
+        active = inspector.active()
+        celery_status = "connected" if active else "no_workers"
+    except Exception:
+        celery_status = "disconnected"
+
     return {
         "status": "healthy",
         "service": "whatsapp-webhook",
         "whatsapp_configured": bool(WHATSAPP_PHONE_ID),
         "openclaw_configured": bool(OPENCLAW_URL),
-        "mongo_logger_configured": bool(MONGO_LOGGER_URL)
+        "mongo_logger_configured": bool(MONGO_LOGGER_URL),
+        "celery_status": celery_status
     }
 
 
@@ -215,7 +174,8 @@ async def verify_webhook(
 
 @app.post("/webhook/whatsapp")
 @limiter.limit("100/minute")
-async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
+async def receive_webhook(request: Request):
+    """Receive WhatsApp webhook and queue message processing via Celery."""
     try:
         data = await request.json()
 
@@ -233,90 +193,15 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
                 text = msg.get("text", {}).get("body", "")
 
                 if text:
-                    background_tasks.add_task(
-                        process_message,
-                        phone,
-                        text,
-                        message_id
-                    )
+                    # Queue task to Celery for async processing
+                    process_message_task.delay(phone, text, message_id)
+                    logger.info(f"Queued message from {phone} for processing")
 
         return {"status": "ok"}
 
     except Exception as e:
         logger.error(f"Webhook error: {e}", exc_info=True)
         return {"status": "error"}
-
-
-# =============================================================================
-# Message Processing
-# =============================================================================
-
-async def process_message(phone: str, message: str, message_id: str):
-    logger.info(f"Incoming from {phone}: {message}")
-
-    # Create session/user IDs for logging
-    session_id = f"whatsapp:+{phone}"
-    user_id = f"+{phone}"
-
-    # Log user message to MongoDB
-    await log_to_mongo(session_id, user_id, "user", message, "whatsapp")
-
-    if not OPENCLAW_URL:
-        logger.warning("OPENCLAW_URL not set")
-        return
-
-    try:
-
-        # Send typing indicator immediately
-        await send_typing_indicator(message_id)
-
-        headers = {
-            "Content-Type": "application/json",
-            "x-openclaw-session-key": f"agent:astrologer:whatsapp:direct:+{phone}",  # Exact session key
-        }
-
-        if OPENCLAW_GATEWAY_TOKEN:
-            headers["Authorization"] = f"Bearer {OPENCLAW_GATEWAY_TOKEN}"
-
-        # Create envelope matching WORKFLOW.md expected format
-        timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-        envelope = f"[From: WhatsApp User (+{phone}) at {timestamp}]"
-        input_with_envelope = f"{envelope}\n{message}"
-
-        payload = {
-            "model": "agent:astrologer",  # Routes to astrologer agent
-            "input": input_with_envelope,  # Message with envelope
-            "user": f"+{phone}"
-        }
-
-        response = await http_client.post(
-            f"{OPENCLAW_URL}/v1/responses",
-            json=payload,
-            headers=headers
-        )
-
-        if response.status_code != 200:
-            logger.error(f"OpenClaw error {response.status_code}: {response.text}")
-            return
-
-        data = response.json()
-
-        reply = None
-        if "output" in data:
-            for item in data["output"]:
-                if item.get("content"):
-                    for content in item["content"]:
-                        if content.get("text"):
-                            reply = content["text"]
-                            break
-
-        if reply:
-            await send_whatsapp_message(phone, reply)
-            # Log assistant response to MongoDB
-            await log_to_mongo(session_id, user_id, "assistant", reply, "whatsapp")
-
-    except Exception as e:
-        logger.error(f"Processing error: {e}", exc_info=True)
 
 
 # =============================================================================
@@ -336,6 +221,7 @@ async def send_message(request: Request, body: SendMessageRequest):
 
 
 async def send_whatsapp_message(phone: str, message: str):
+    """Send message via WhatsApp API (for /send endpoint)."""
     if not WHATSAPP_PHONE_ID or not WHATSAPP_ACCESS_TOKEN:
         logger.error("WhatsApp credentials missing")
         return None
@@ -354,36 +240,15 @@ async def send_whatsapp_message(phone: str, message: str):
         "text": {"body": message}
     }
 
-    response = await http_client.post(url, headers=headers, json=payload)
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(url, headers=headers, json=payload)
 
-    if response.status_code in [200, 201]:
-        return response.json().get("messages", [{}])[0].get("id")
+        if response.status_code in [200, 201]:
+            return response.json().get("messages", [{}])[0].get("id")
 
-    logger.error(f"WhatsApp send failed: {response.text}")
-    return None
+        logger.error(f"WhatsApp send failed: {response.text}")
+        return None
 
-
-async def send_typing_indicator(message_id: str):
-    if not WHATSAPP_PHONE_ID or not WHATSAPP_ACCESS_TOKEN:
-        return
-
-    url = f"{FB_API_URL}/{WHATSAPP_PHONE_ID}/messages"
-
-    headers = {
-        "Authorization": f"Bearer {WHATSAPP_ACCESS_TOKEN}",
-        "Content-Type": "application/json"
-    }
-
-    payload = {
-        "messaging_product": "whatsapp",
-        "status": "read",
-        "message_id": message_id,
-        "typing_indicator": {
-            "type": "text"
-        }
-    }
-
-    await http_client.post(url, headers=headers, json=payload)
 
 # =============================================================================
 # Root
