@@ -27,9 +27,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY whatsapp_webhook.py /app/
 COPY app/ /app/app/
 COPY entrypoint.sh /app/entrypoint.sh
+COPY healthcheck.sh /app/healthcheck.sh
 
-# Make entrypoint executable
-RUN chmod +x /app/entrypoint.sh
+# Make scripts executable
+RUN chmod +x /app/entrypoint.sh /app/healthcheck.sh
 
 # Create non-root user
 RUN useradd -m -u 1000 whatsapp && \
@@ -38,10 +39,6 @@ USER whatsapp
 
 # Expose port
 EXPOSE 8003
-
-# Health check script (supports web and worker services)
-COPY healthcheck.sh /app/healthcheck.sh
-RUN chmod +x /app/healthcheck.sh
 
 # Health check only applies to web service
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
