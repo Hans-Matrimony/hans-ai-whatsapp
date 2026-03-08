@@ -39,9 +39,13 @@ USER whatsapp
 # Expose port
 EXPOSE 8003
 
-# Health check (only for web service)
+# Health check script (supports web and worker services)
+COPY healthcheck.sh /app/healthcheck.sh
+RUN chmod +x /app/healthcheck.sh
+
+# Health check only applies to web service
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8003/health || exit 1
+    CMD /app/healthcheck.sh
 
 # Set default command (can be overridden)
 CMD ["/app/entrypoint.sh"]
