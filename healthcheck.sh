@@ -1,12 +1,11 @@
 #!/bin/bash
 # Health check script - only applies to web service
-# Worker service (SERVICE_TYPE=worker) always returns healthy
+# Worker, beat, and flower services always return healthy
 
 SERVICE_TYPE=${SERVICE_TYPE:-web}
 
-if [ "$SERVICE_TYPE" = "worker" ] || [ "$SERVICE_TYPE" = "beat" ]; then
-    # Worker/beat services don't have HTTP endpoints
-    # If Celery is running, container is healthy
+if [ "$SERVICE_TYPE" = "worker" ] || [ "$SERVICE_TYPE" = "beat" ] || [ "$SERVICE_TYPE" = "flower" ]; then
+    # Worker/beat/flower services - if running, container is healthy
     exit 0
 fi
 
