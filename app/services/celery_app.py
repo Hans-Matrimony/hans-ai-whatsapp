@@ -27,9 +27,9 @@ celery_app.conf.update(
     result_expires=3600,  # Results expire after 1 hour
     result_extended=True,
 
-    # Rate limiting
+    # Rate limiting - increased for higher capacity
     task_annotations={
-        'app.services.tasks.process_message_task': {'rate_limit': '10/m'}
+        'app.services.tasks.process_message_task': {'rate_limit': '100/m'}
     },
 
     # Routing (optional - for multiple queues)
