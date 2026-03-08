@@ -21,7 +21,8 @@ case "$SERVICE_TYPE" in
         exec celery -A app.services.celery_app worker \
             --loglevel=info \
             --concurrency=${CELERY_CONCURRENCY:-4} \
-            --max-tasks-per-child=100
+            --max-tasks-per-child=100 \
+            --queues=celery,whatsapp
         ;;
 
     beat)
