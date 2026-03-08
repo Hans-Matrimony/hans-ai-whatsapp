@@ -35,7 +35,10 @@ case "$SERVICE_TYPE" in
         echo "Starting Flower monitoring..."
         exec celery -A app.services.celery_app flower \
             --port=5555 \
-            --broker=${CELERY_BROKER_URL}
+            --broker=${CELERY_BROKER_URL} \
+            --basic_auth=${FLOWER_USER:-admin}:${FLOWER_PASSWORD:-admin} \
+            --max_tasks=10000 \
+            --db=/tmp/flower.db
         ;;
 
     *)
