@@ -50,3 +50,7 @@ celery_app.conf.beat_schedule = {
         'schedule': 300.0,  # 5 minutes
     },
 }
+
+# Import tasks to register them with Celery
+# This must happen after app creation so tasks can use @celery_app.task decorator
+from app.services import tasks  # noqa: E402, F401
