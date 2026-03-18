@@ -21,17 +21,17 @@ FB_API_URL = "https://graph.facebook.com/v18.0"
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
-def process_message_task(self, phone: str, message: str, message_id: str):
+def process_message_task(self, phone: str, message: str, message_id: str, message_type: str = "text", media_info: dict = None):
     """
     Process incoming WhatsApp message asynchronously.
     Retries up to 3 times with 60 second delay on failure.
     """
     try:
-        logger.info(f"[Celery] Processing message from {phone}: {message[:50]}...")
+        logger.info(f"[Celery] Processing {message_type} from {phone}: {message[:50]}...")
 
         # Run async code in sync context
         import asyncio
-        result = asyncio.run(_process_message_async(phone, message, message_id))
+        result = asyncio.run(_process_message_async(phone, message, message_id, message_type, media_info))
         return result
 
     except Exception as e:
@@ -40,13 +40,49 @@ def process_message_task(self, phone: str, message: str, message_id: str):
         raise self.retry(exc=e, countdown=2 ** self.request.retries)
 
 
-async def _process_message_async(phone: str, message: str, message_id: str):
+async def _download_whatsapp_media(media_id: str) -> dict:
+    """Download media file from WhatsApp servers.
+    Returns dict with url and mime_type, or None if failed.
+    """
+    if not WHATSAPP_ACCESS_TOKEN:
+        logger.warning("Cannot download media: no access token")
+        return None
+
+    url = f"{FB_API_URL}/{media_id}"
+
+    headers = {
+        "Authorization": f"Bearer {WHATSAPP_ACCESS_TOKEN}"
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # First get media info (which contains the download URL)
+            response = await client.get(url, headers=headers)
+
+            if response.status_code != 200:
+                logger.error(f"Failed to get media info: {response.text}")
+                return None
+
+            media_data = response.json()
+            return {
+                "url": media_data.get("url"),
+                "mime_type": media_data.get("mime_type"),
+                "file_size": media_data.get("file_size"),
+                "media_type": media_data.get("media_type")  # image, audio, video, document
+            }
+
+    except Exception as e:
+        logger.error(f"Error downloading media: {e}")
+        return None
+
+
+async def _process_message_async(phone: str, message: str, message_id: str, message_type: str = "text", media_info: dict = None):
     """Async implementation of message processing."""
     session_id = f"whatsapp:+{phone}"
     user_id = f"+{phone}"
 
-    # Log user message to MongoDB
-    await _log_to_mongo(session_id, user_id, "user", message, "whatsapp")
+    # Log user message to MongoDB with media info
+    await _log_to_mongo(session_id, user_id, "user", message, "whatsapp", message_type, media_info)
 
     if not OPENCLAW_URL:
         logger.warning("OPENCLAW_URL not set")
@@ -64,16 +100,34 @@ async def _process_message_async(phone: str, message: str, message_id: str):
         if OPENCLAW_GATEWAY_TOKEN:
             headers["Authorization"] = f"Bearer {OPENCLAW_GATEWAY_TOKEN}"
 
-        # Create envelope
+        # Create envelope with media context
         timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
         envelope = f"[From: WhatsApp User (+{phone}) at {timestamp}]"
-        input_with_envelope = f"{envelope}\n{message}"
+
+        # Add media type context to the input
+        if message_type != "text" and media_info:
+            media_context = f" [Media Type: {message_type}"
+            if message_type == "image" and media_info.get("caption"):
+                media_context += f", Caption: {media_info['caption']}"
+            elif message_type == "document" and media_info.get("filename"):
+                media_context += f", Filename: {media_info['filename']}"
+            media_context += "]"
+            input_with_envelope = f"{envelope}{media_context}\n{message}"
+        else:
+            input_with_envelope = f"{envelope}\n{message}"
 
         payload = {
             "model": "agent:astrologer",
             "input": input_with_envelope,
             "user": f"+{phone}"
         }
+
+        # Add media metadata to payload for AI context
+        if media_info:
+            payload["metadata"] = {
+                "message_type": message_type,
+                "media_info": media_info
+            }
 
         response = await client.post(
             f"{OPENCLAW_URL}/v1/responses",
@@ -103,6 +157,49 @@ async def _process_message_async(phone: str, message: str, message_id: str):
             return {"status": "sent", "message_id": message_id}
 
         return {"status": "no_reply"}
+
+
+async def _send_media_message(client: httpx.AsyncClient, phone: str, media_url: str, media_type: str = "image", caption: str = None) -> dict:
+    """Send media message via WhatsApp API."""
+    if not WHATSAPP_PHONE_ID or not WHATSAPP_ACCESS_TOKEN:
+        logger.error("WhatsApp credentials missing")
+        return {"error": "Credentials missing"}
+
+    url = f"{FB_API_URL}/{WHATSAPP_PHONE_ID}/messages"
+
+    headers = {
+        "Authorization": f"Bearer {WHATSAPP_ACCESS_TOKEN}",
+        "Content-Type": "application/json"
+    }
+
+    # Build media payload
+    media_key = media_type  # image, audio, video, document
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": phone,
+        "type": media_type,
+        media_key: {
+            "link": media_url
+        }
+    }
+
+    # Add caption for images/videos
+    if caption and media_type in ["image", "video"]:
+        payload[media_key]["caption"] = caption
+
+    # Add filename for documents
+    if media_type == "document" and caption:
+        payload[media_key]["filename"] = caption
+
+    response = await client.post(url, headers=headers, json=payload)
+
+    if response.status_code in [200, 201]:
+        msg_id = response.json().get("messages", [{}])[0].get("id")
+        logger.info(f"Sent {media_type} to {phone}")
+        return {"success": True, "message_id": msg_id}
+
+    logger.error(f"WhatsApp send failed: {response.text}")
+    return {"error": response.text}
 
 
 @celery_app.task
@@ -181,7 +278,7 @@ async def _send_typing_indicator(client: httpx.AsyncClient, message_id: str):
         logger.warning(f"Failed to send typing indicator: {e}")
 
 
-async def _log_to_mongo(session_id: str, user_id: str, role: str, text: str, channel: str):
+async def _log_to_mongo(session_id: str, user_id: str, role: str, text: str, channel: str, message_type: str = "text", media_info: dict = None):
     """Log chat message to MongoDB."""
     if not MONGO_LOGGER_URL:
         return
@@ -191,8 +288,13 @@ async def _log_to_mongo(session_id: str, user_id: str, role: str, text: str, cha
         "userId": user_id,
         "role": role,
         "text": text,
-        "channel": channel
+        "channel": channel,
+        "messageType": message_type
     }
+
+    # Add media info if present
+    if media_info:
+        payload["mediaInfo"] = media_info
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:

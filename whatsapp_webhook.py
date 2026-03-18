@@ -190,12 +190,51 @@ async def receive_webhook(request: Request):
             for msg in value["messages"]:
                 phone = msg.get("from")
                 message_id = msg.get("id")
-                text = msg.get("text", {}).get("body", "")
 
-                if text:
-                    # Queue task to Celery for async processing
-                    process_message_task.delay(phone, text, message_id)
-                    logger.info(f"Queued message from {phone} for processing")
+                # Extract message type and content
+                message_type = msg.get("type", "text")
+                text_content = ""
+                media_info = None
+
+                if message_type == "text":
+                    text_content = msg.get("text", {}).get("body", "")
+                elif message_type == "image":
+                    media_id = msg.get("image", {}).get("id")
+                    caption = msg.get("image", {}).get("caption", "")
+                    text_content = f"[Image: {caption}]" if caption else "[Image]"
+                    media_info = {"type": "image", "id": media_id, "caption": caption}
+                elif message_type == "audio":
+                    media_id = msg.get("audio", {}).get("id")
+                    text_content = "[Audio message]"
+                    media_info = {"type": "audio", "id": media_id}
+                elif message_type == "video":
+                    media_id = msg.get("video", {}).get("id")
+                    caption = msg.get("video", {}).get("caption", "")
+                    text_content = f"[Video: {caption}]" if caption else "[Video]"
+                    media_info = {"type": "video", "id": media_id, "caption": caption}
+                elif message_type == "document":
+                    media_id = msg.get("document", {}).get("id")
+                    filename = msg.get("document", {}).get("filename", "")
+                    text_content = f"[Document: {filename}]" if filename else "[Document]"
+                    media_info = {"type": "document", "id": media_id, "filename": filename}
+                elif message_type == "sticker":
+                    media_id = msg.get("sticker", {}).get("id")
+                    text_content = "[Sticker]"
+                    media_info = {"type": "sticker", "id": media_id}
+                else:
+                    # Unknown type - log but still process
+                    text_content = f"[{message_type}]"
+                    logger.info(f"Unknown message type: {message_type}")
+
+                # Queue task to Celery for async processing
+                process_message_task.delay(
+                    phone=phone,
+                    message=text_content,
+                    message_id=message_id,
+                    message_type=message_type,
+                    media_info=media_info
+                )
+                logger.info(f"Queued {message_type} from {phone} for processing")
 
         return {"status": "ok"}
 
