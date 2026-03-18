@@ -353,6 +353,13 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
         if has_image_data:
             # Use OpenClaw's input_image format — sends full base64 image
             mime = media_info.get("mime_type", "image/jpeg")
+            
+            # Ensure mime is one of the allowed types by the schema
+            allowed_mimes = ["image/jpeg", "image/png", "image/gif", "image/webp"]
+            if mime not in allowed_mimes:
+                # Default to jpeg if an unsupported mime type is used
+                mime = "image/jpeg"
+                
             content_parts = [
                 {"type": "input_text", "text": text_content},
                 {
