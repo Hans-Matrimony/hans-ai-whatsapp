@@ -47,6 +47,7 @@ WHATSAPP_ACCESS_TOKEN = os.getenv("WHATSAPP_ACCESS_TOKEN")
 OPENCLAW_URL = os.getenv("OPENCLAW_URL")
 OPENCLAW_GATEWAY_TOKEN = os.getenv("OPENCLAW_GATEWAY_TOKEN")
 MONGO_LOGGER_URL = os.getenv("MONGO_LOGGER_URL")
+MONGO_LOGGER_TOKEN = os.getenv("MONGO_LOGGER_TOKEN")
 
 PORT = int(os.getenv("PORT", "8003"))
 
@@ -243,7 +244,103 @@ async def receive_webhook(request: Request):
         return {"status": "error"}
 
 
+
+async def log_to_mongo_logger(session_id: str, user_id: str, role: str, text: str, channel: str = "whatsapp"):
+    """
+    Log message directly to the MongoDB logger bridge.
+    """
+    if not MONGO_LOGGER_URL or not http_client:
+        return
+
+    payload = {
+        "sessionId": session_id,
+        "userId": user_id,
+        "role": role,
+        "text": text,
+        "channel": channel,
+        "timestamp": None # Will be set by logger if None
+    }
+
+    headers = {"Content-Type": "application/json"}
+    if MONGO_LOGGER_TOKEN:
+        headers["Authorization"] = f"Bearer {MONGO_LOGGER_TOKEN}"
+
+    try:
+        await http_client.post(MONGO_LOGGER_URL, json=payload, headers=headers, timeout=10.0)
+    except Exception as e:
+        logger.warning(f"Mongo logger request failed: {e}")
+
+
 # =============================================================================
+<<<<<<< HEAD
+=======
+# Message Processing
+# =============================================================================
+
+async def process_message(phone: str, message: str, message_id: str):
+    logger.info(f"Incoming from {phone}: {message}")
+
+    # 1. Log User Message to Mongo
+    await log_to_mongo_logger(
+        session_id=message_id,
+        user_id=phone,
+        role="user",
+        text=message,
+        channel="whatsapp"
+    )
+
+    if not OPENCLAW_URL:
+        logger.warning("OPENCLAW_URL not set")
+        return
+
+    try:
+        headers = {
+            "Content-Type": "application/json"
+        }
+        if OPENCLAW_GATEWAY_TOKEN:
+            headers["Authorization"] = f"Bearer {OPENCLAW_GATEWAY_TOKEN}"
+
+        # Use OpenAI Chat Completions format
+        payload = {
+            "model": "zai/glm-4.7",  # Matching openclaw.json default
+            "messages": [
+                {"role": "user", "content": message}
+            ],
+            "user": phone  # Pass phone number as user ID for context
+        }
+
+        response = await http_client.post(
+            f"{OPENCLAW_URL}/v1/chat/completions",
+            json=payload,
+            headers=headers
+        )
+
+        if response.status_code == 200:
+            data = response.json()
+            # Parse OpenAI response format
+            if "choices" in data and len(data["choices"]) > 0:
+                reply = data["choices"][0]["message"]["content"]
+                if reply:
+                    await send_whatsapp_message(phone, reply)
+                    # 2. Log Assistant Reply to Mongo
+                    await log_to_mongo_logger(
+                        session_id=message_id,
+                        user_id=phone,
+                        role="assistant",
+                        text=reply,
+                        channel="whatsapp"
+                    )
+            else:
+                 logger.warning(f"Unexpected response format: {data}")
+        else:
+             logger.error(f"OpenClaw error {response.status_code}: {response.text}")
+
+    except Exception as e:
+        logger.error(f"Processing error: {e}", exc_info=True)
+
+
+# =============================================================================
+>>>>>>> b611286d1d265efc96163c60d507ce0c49a8aefa
 # Send Message API
 # =============================================================================
 

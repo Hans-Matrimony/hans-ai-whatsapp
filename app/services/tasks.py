@@ -2,11 +2,12 @@
 Celery tasks for asynchronous message processing
 """
 import os
+import re
 import logging
 import base64
 import tempfile
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Tuple, List
 from pathlib import Path
 
 import httpx
@@ -152,6 +153,139 @@ async def _download_whatsapp_media_file(media_id: str) -> dict:
         return None
 
 
+def _extract_media_from_reply(text: str) -> Tuple[str, List[dict]]:
+    """Parse MEDIA: tokens and MEDIA_BASE64: tokens from agent response text.
+    Returns (clean_text, list_of_media_items).
+    Each media item is: {"type": "url"|"base64", "value": ..., "mime_type": ...}
+    """
+    media_items = []
+    clean_lines = []
+
+    for line in text.split("\n"):
+        stripped = line.strip()
+
+        # Check for MEDIA_BASE64: <mime_type> <base64_data>
+        b64_match = re.match(r'^MEDIA_BASE64:\s*(\S+)\s+(\S+)$', stripped)
+        if b64_match:
+            mime_type = b64_match.group(1)
+            b64_data = b64_match.group(2)
+            media_items.append({"type": "base64", "value": b64_data, "mime_type": mime_type})
+            logger.info(f"Found MEDIA_BASE64 in response: mime={mime_type}, len={len(b64_data)}")
+            continue
+
+        # Check for MEDIA: <path_or_url>
+        media_match = re.match(r'^MEDIA:\s*(.+)$', stripped)
+        if media_match:
+            media_path = media_match.group(1).strip().strip('"').strip("'")
+            if media_path.startswith('http://') or media_path.startswith('https://'):
+                media_items.append({"type": "url", "value": media_path})
+                logger.info(f"Found MEDIA URL in response: {media_path}")
+            else:
+                # Local file path — can't access across containers,
+                # log warning but keep line so user sees context
+                logger.warning(f"Found MEDIA local path in response (not accessible across containers): {media_path}")
+                # Don't add to media_items, can't use it
+            continue
+
+        clean_lines.append(line)
+
+    clean_text = "\n".join(clean_lines).strip()
+    return clean_text, media_items
+
+
+async def _upload_base64_to_whatsapp_media(client: httpx.AsyncClient, b64_data: str, mime_type: str) -> Optional[str]:
+    """Upload base64-encoded image to WhatsApp Media API.
+    Returns media_id on success, None on failure.
+    """
+    if not WHATSAPP_PHONE_ID or not WHATSAPP_ACCESS_TOKEN:
+        logger.error("WhatsApp credentials missing for media upload")
+        return None
+
+    url = f"{FB_API_URL}/{WHATSAPP_PHONE_ID}/media"
+
+    try:
+        # Decode base64 to binary
+        file_bytes = base64.b64decode(b64_data)
+
+        # Determine file extension from mime type
+        ext_map = {
+            "image/png": "chart.png",
+            "image/jpeg": "chart.jpg",
+            "image/webp": "chart.webp",
+        }
+        filename = ext_map.get(mime_type, "chart.png")
+
+        # Upload as multipart form data
+        files = {
+            "file": (filename, file_bytes, mime_type),
+        }
+        data = {
+            "messaging_product": "whatsapp",
+            "type": mime_type,
+        }
+        headers = {
+            "Authorization": f"Bearer {WHATSAPP_ACCESS_TOKEN}",
+        }
+
+        response = await client.post(url, headers=headers, data=data, files=files)
+
+        if response.status_code in [200, 201]:
+            media_id = response.json().get("id")
+            logger.info(f"Uploaded media to WhatsApp: media_id={media_id}")
+            return media_id
+
+        logger.error(f"WhatsApp media upload failed: {response.status_code} {response.text}")
+        return None
+
+    except Exception as e:
+        logger.error(f"Error uploading media to WhatsApp: {e}", exc_info=True)
+        return None
+
+
+async def _send_whatsapp_image(client: httpx.AsyncClient, phone: str, media_id: str = None, image_url: str = None, caption: str = None) -> dict:
+    """Send image message via WhatsApp API using media_id or URL."""
+    if not WHATSAPP_PHONE_ID or not WHATSAPP_ACCESS_TOKEN:
+        logger.error("WhatsApp credentials missing")
+        return {"error": "Credentials missing"}
+
+    url = f"{FB_API_URL}/{WHATSAPP_PHONE_ID}/messages"
+
+    headers = {
+        "Authorization": f"Bearer {WHATSAPP_ACCESS_TOKEN}",
+        "Content-Type": "application/json"
+    }
+
+    # Build image payload — prefer media_id (uploaded), fallback to URL
+    image_obj = {}
+    if media_id:
+        image_obj["id"] = media_id
+    elif image_url:
+        image_obj["link"] = image_url
+    else:
+        logger.error("No media_id or image_url provided for image send")
+        return {"error": "No image source"}
+
+    if caption:
+        image_obj["caption"] = caption[:1024]  # WhatsApp caption limit
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": phone,
+        "type": "image",
+        "image": image_obj
+    }
+
+    response = await client.post(url, headers=headers, json=payload)
+
+    if response.status_code in [200, 201]:
+        msg_id = response.json().get("messages", [{}])[0].get("id")
+        logger.info(f"Sent image to {phone}, msg_id={msg_id}")
+        return {"success": True, "message_id": msg_id}
+
+    logger.error(f"WhatsApp image send failed: {response.status_code} {response.text}")
+    return {"error": response.text}
+
+
 async def _process_message_async(phone: str, message: str, message_id: str, message_type: str = "text", media_info: dict = None):
     """Async implementation of message processing."""
     session_id = f"whatsapp:+{phone}"
@@ -164,22 +298,24 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
     if media_info and media_info.get("id"):
         media_file_data = await _download_whatsapp_media_file(media_info["id"])
         if media_file_data:
-            logger.info(f"Downloaded media file: {message_type}, size: {media_file_data['size_bytes']} bytes")
-            # Add base64 data to media_info for agent
+            logger.info(f"Downloaded media file: {message_type}, size: {media_file_data['size_bytes']} bytes, base64_len: {len(media_file_data['base64'])}")
             media_info["base64_data"] = media_file_data["base64"]
             media_info["mime_type"] = media_file_data["mime_type"]
             media_info["extension"] = media_file_data["extension"]
         else:
             logger.warning(f"Failed to download media file: {media_info.get('id')}")
 
-    # Log user message to MongoDB with media info
-    await _log_to_mongo(session_id, user_id, "user", message, "whatsapp", message_type, media_info)
+    # Log user message to MongoDB (exclude large base64 data from log)
+    log_media_info = None
+    if media_info:
+        log_media_info = {k: v for k, v in media_info.items() if k != "base64_data"}
+    await _log_to_mongo(session_id, user_id, "user", message, "whatsapp", message_type, log_media_info)
 
     if not OPENCLAW_URL:
         logger.warning("OPENCLAW_URL not set")
         return {"error": "OpenClaw URL not configured"}
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=120.0) as client:
         # Send typing indicator
         await _send_typing_indicator(client, message_id)
 
@@ -195,56 +331,73 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
         timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
         envelope = f"[From: WhatsApp User (+{phone}) at {timestamp}]"
 
-        # Add media type context to the input
+        # Build context text (no image data in text — that goes via input_image)
         if message_type != "text" and media_info:
             media_context = f" [Media Type: {message_type}"
             if message_type == "image" and media_info.get("caption"):
                 media_context += f", Caption: {media_info['caption']}"
             elif message_type == "document" and media_info.get("filename"):
                 media_context += f", Filename: {media_info['filename']}"
-            # Add base64 data prefix - agent can parse this for image analysis
-            if media_info.get("base64_data"):
-                # For images, use data URI format that vision models can understand
-                if message_type in ["image", "photo", "sticker"]:
-                    media_context += f", Data: data:{media_info.get('mime_type', 'image/jpeg')};base64,{media_info['base64_data'][:100]}..."
-                else:
-                    media_context += f", Base64: {media_info['base64_data'][:50]}..."
             media_context += "]"
-            input_with_envelope = f"{envelope}{media_context}\n{message}"
+            text_content = f"{envelope}{media_context}\n{message}"
         else:
-            input_with_envelope = f"{envelope}\n{message}"
+            text_content = f"{envelope}\n{message}"
+
+        # Build input: use structured content parts when image is present
+        has_image_data = (
+            media_info
+            and media_info.get("base64_data")
+            and message_type in ["image", "photo", "sticker"]
+        )
+
+        if has_image_data:
+            # Use OpenClaw's input_image format — sends full base64 image
+            mime = media_info.get("mime_type", "image/jpeg")
+            content_parts = [
+                {"type": "input_text", "text": text_content},
+                {
+                    "type": "input_image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": mime,
+                        "data": media_info["base64_data"],  # FULL base64, not truncated
+                    },
+                },
+            ]
+            payload_input = [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": content_parts,
+                }
+            ]
+            logger.info(f"Sending image to OpenClaw via input_image: mime={mime}, b64_len={len(media_info['base64_data'])}")
+        else:
+            # Plain text input
+            payload_input = text_content
 
         payload = {
             "model": "agent:astrologer",
-            "input": input_with_envelope,
-            "user": f"+{phone}"
+            "input": payload_input,
+            "user": f"+{phone}",
         }
 
-        # Add media metadata to payload for AI context
-        # Note: OpenClaw expects string values in metadata, not nested objects
+        # Add lightweight metadata (no base64 in metadata — it goes in input_image)
         if media_info:
             payload["metadata"] = {
                 "message_type": message_type,
                 "media_type": media_info.get("type", message_type),
-                "media_id": media_info.get("id", "")
+                "media_id": media_info.get("id", ""),
             }
-            # Add caption/filename as string if present
             if "caption" in media_info:
                 payload["metadata"]["media_caption"] = media_info["caption"]
             if "filename" in media_info:
                 payload["metadata"]["media_filename"] = media_info["filename"]
-            # Add base64 data so agent can analyze the media without auth
-            if "base64_data" in media_info:
-                payload["metadata"]["media_base64"] = media_info["base64_data"]
-            if "mime_type" in media_info:
-                payload["metadata"]["media_mime_type"] = media_info["mime_type"]
-            if "extension" in media_info:
-                payload["metadata"]["media_extension"] = media_info["extension"]
 
         response = await client.post(
             f"{OPENCLAW_URL}/v1/responses",
             json=payload,
-            headers=headers
+            headers=headers,
         )
 
         if response.status_code != 200:
@@ -253,7 +406,7 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
 
         data = response.json()
 
-        # Extract reply from response
+        # Extract reply text from response
         reply = None
         if "output" in data:
             for item in data["output"]:
@@ -263,12 +416,37 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
                             reply = content["text"]
                             break
 
-        if reply:
-            await _send_whatsapp_message(client, phone, reply)
-            await _log_to_mongo(session_id, user_id, "assistant", reply, "whatsapp")
-            return {"status": "sent", "message_id": message_id}
+        if not reply:
+            return {"status": "no_reply"}
 
-        return {"status": "no_reply"}
+        # Parse MEDIA: / MEDIA_BASE64: tokens from response
+        clean_reply, media_items = _extract_media_from_reply(reply)
+
+        # Send text reply (split on double-newline for separate bubbles)
+        if clean_reply:
+            bubbles = [b.strip() for b in clean_reply.split("\n\n") if b.strip()]
+            for bubble in bubbles:
+                await _send_whatsapp_message(client, phone, bubble)
+
+        # Send any media items as images
+        for media_item in media_items:
+            if media_item["type"] == "base64":
+                # Upload base64 image to WhatsApp Media API, then send
+                media_id = await _upload_base64_to_whatsapp_media(
+                    client,
+                    media_item["value"],
+                    media_item.get("mime_type", "image/png"),
+                )
+                if media_id:
+                    await _send_whatsapp_image(client, phone, media_id=media_id, caption="Kundli Chart")
+                else:
+                    logger.error("Failed to upload media to WhatsApp")
+            elif media_item["type"] == "url":
+                # Send image directly via URL
+                await _send_whatsapp_image(client, phone, image_url=media_item["value"])
+
+        await _log_to_mongo(session_id, user_id, "assistant", clean_reply or reply, "whatsapp")
+        return {"status": "sent", "message_id": message_id}
 
 
 async def _send_media_message(client: httpx.AsyncClient, phone: str, media_url: str, media_type: str = "image", caption: str = None) -> dict:
