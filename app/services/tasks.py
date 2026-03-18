@@ -3,8 +3,11 @@ Celery tasks for asynchronous message processing
 """
 import os
 import logging
+import base64
+import tempfile
 from datetime import datetime
 from typing import Optional
+from pathlib import Path
 
 import httpx
 from app.services.celery_app import celery_app
@@ -76,22 +79,98 @@ async def _download_whatsapp_media(media_id: str) -> dict:
         return None
 
 
+async def _download_whatsapp_media_file(media_id: str) -> dict:
+    """Download the actual media file content from WhatsApp servers.
+    Returns dict with base64 data, mime_type, and file extension.
+    This is needed because WhatsApp media URLs require authentication.
+    """
+    if not WHATSAPP_ACCESS_TOKEN:
+        logger.warning("Cannot download media file: no access token")
+        return None
+
+    # First get media info to get the download URL
+    info_url = f"{FB_API_URL}/{media_id}"
+    headers = {
+        "Authorization": f"Bearer {WHATSAPP_ACCESS_TOKEN}"
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # Get media info
+            info_response = await client.get(info_url, headers=headers)
+            if info_response.status_code != 200:
+                logger.error(f"Failed to get media info: {info_response.text}")
+                return None
+
+            media_data = info_response.json()
+            download_url = media_data.get("url")
+            mime_type = media_data.get("mime_type", "")
+
+            if not download_url:
+                logger.error("No download URL in media response")
+                return None
+
+            # Download the actual file using the URL (still needs auth)
+            file_response = await client.get(download_url, headers=headers)
+            if file_response.status_code != 200:
+                logger.error(f"Failed to download media file: {file_response.status_code}")
+                return None
+
+            # Convert to base64
+            file_content = file_response.content
+            base64_data = base64.b64encode(file_content).decode('utf-8')
+
+            # Determine file extension from mime type
+            extension_map = {
+                "image/jpeg": ".jpg",
+                "image/png": ".png",
+                "image/webp": ".webp",
+                "image/gif": ".gif",
+                "audio/mpeg": ".mp3",
+                "audio/mp4": ".m4a",
+                "audio/amr": ".amr",
+                "audio/ogg": ".ogg",
+                "video/mp4": ".mp4",
+                "video/3gpp": ".3gp",
+                "application/pdf": ".pdf",
+                "text/plain": ".txt",
+                "application/msword": ".doc",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+            }
+            extension = extension_map.get(mime_type, ".bin")
+
+            return {
+                "base64": base64_data,
+                "mime_type": mime_type,
+                "extension": extension,
+                "size_bytes": len(file_content),
+                "media_type": media_data.get("media_type", "unknown")
+            }
+
+    except Exception as e:
+        logger.error(f"Error downloading media file: {e}", exc_info=True)
+        return None
+
+
 async def _process_message_async(phone: str, message: str, message_id: str, message_type: str = "text", media_info: dict = None):
     """Async implementation of message processing."""
     session_id = f"whatsapp:+{phone}"
     user_id = f"+{phone}"
 
-    # Download media if present (image, audio, video, document)
-    media_data = None
+    # Download media file if present (image, audio, video, document)
+    # This downloads the actual file content and converts to base64
+    # because WhatsApp media URLs require authentication
+    media_file_data = None
     if media_info and media_info.get("id"):
-        media_data = await _download_whatsapp_media(media_info["id"])
-        if media_data and media_data.get("url"):
-            logger.info(f"Downloaded media: {message_type}, URL: {media_data['url'][:50]}...")
-            # Update media_info with download URL for agent
-            media_info["download_url"] = media_data["url"]
-            media_info["mime_type"] = media_data.get("mime_type", "")
+        media_file_data = await _download_whatsapp_media_file(media_info["id"])
+        if media_file_data:
+            logger.info(f"Downloaded media file: {message_type}, size: {media_file_data['size_bytes']} bytes")
+            # Add base64 data to media_info for agent
+            media_info["base64_data"] = media_file_data["base64"]
+            media_info["mime_type"] = media_file_data["mime_type"]
+            media_info["extension"] = media_file_data["extension"]
         else:
-            logger.warning(f"Failed to download media: {media_info.get('id')}")
+            logger.warning(f"Failed to download media file: {media_info.get('id')}")
 
     # Log user message to MongoDB with media info
     await _log_to_mongo(session_id, user_id, "user", message, "whatsapp", message_type, media_info)
@@ -123,9 +202,13 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
                 media_context += f", Caption: {media_info['caption']}"
             elif message_type == "document" and media_info.get("filename"):
                 media_context += f", Filename: {media_info['filename']}"
-            # Add download URL if available - agent can use this to analyze the media
-            if media_info.get("download_url"):
-                media_context += f", URL: {media_info['download_url']}"
+            # Add base64 data prefix - agent can parse this for image analysis
+            if media_info.get("base64_data"):
+                # For images, use data URI format that vision models can understand
+                if message_type in ["image", "photo", "sticker"]:
+                    media_context += f", Data: data:{media_info.get('mime_type', 'image/jpeg')};base64,{media_info['base64_data'][:100]}..."
+                else:
+                    media_context += f", Base64: {media_info['base64_data'][:50]}..."
             media_context += "]"
             input_with_envelope = f"{envelope}{media_context}\n{message}"
         else:
@@ -150,11 +233,13 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
                 payload["metadata"]["media_caption"] = media_info["caption"]
             if "filename" in media_info:
                 payload["metadata"]["media_filename"] = media_info["filename"]
-            # Add download URL so agent can access the actual media file
-            if "download_url" in media_info:
-                payload["metadata"]["media_url"] = media_info["download_url"]
+            # Add base64 data so agent can analyze the media without auth
+            if "base64_data" in media_info:
+                payload["metadata"]["media_base64"] = media_info["base64_data"]
             if "mime_type" in media_info:
                 payload["metadata"]["media_mime_type"] = media_info["mime_type"]
+            if "extension" in media_info:
+                payload["metadata"]["media_extension"] = media_info["extension"]
 
         response = await client.post(
             f"{OPENCLAW_URL}/v1/responses",
