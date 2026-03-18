@@ -123,11 +123,18 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
         }
 
         # Add media metadata to payload for AI context
+        # Note: OpenClaw expects string values in metadata, not nested objects
         if media_info:
             payload["metadata"] = {
                 "message_type": message_type,
-                "media_info": media_info
+                "media_type": media_info.get("type", message_type),
+                "media_id": media_info.get("id", "")
             }
+            # Add caption/filename as string if present
+            if "caption" in media_info:
+                payload["metadata"]["media_caption"] = media_info["caption"]
+            if "filename" in media_info:
+                payload["metadata"]["media_filename"] = media_info["filename"]
 
         response = await client.post(
             f"{OPENCLAW_URL}/v1/responses",
