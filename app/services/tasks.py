@@ -81,6 +81,18 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
     session_id = f"whatsapp:+{phone}"
     user_id = f"+{phone}"
 
+    # Download media if present (image, audio, video, document)
+    media_data = None
+    if media_info and media_info.get("id"):
+        media_data = await _download_whatsapp_media(media_info["id"])
+        if media_data and media_data.get("url"):
+            logger.info(f"Downloaded media: {message_type}, URL: {media_data['url'][:50]}...")
+            # Update media_info with download URL for agent
+            media_info["download_url"] = media_data["url"]
+            media_info["mime_type"] = media_data.get("mime_type", "")
+        else:
+            logger.warning(f"Failed to download media: {media_info.get('id')}")
+
     # Log user message to MongoDB with media info
     await _log_to_mongo(session_id, user_id, "user", message, "whatsapp", message_type, media_info)
 
@@ -111,6 +123,9 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
                 media_context += f", Caption: {media_info['caption']}"
             elif message_type == "document" and media_info.get("filename"):
                 media_context += f", Filename: {media_info['filename']}"
+            # Add download URL if available - agent can use this to analyze the media
+            if media_info.get("download_url"):
+                media_context += f", URL: {media_info['download_url']}"
             media_context += "]"
             input_with_envelope = f"{envelope}{media_context}\n{message}"
         else:
@@ -135,6 +150,11 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
                 payload["metadata"]["media_caption"] = media_info["caption"]
             if "filename" in media_info:
                 payload["metadata"]["media_filename"] = media_info["filename"]
+            # Add download URL so agent can access the actual media file
+            if "download_url" in media_info:
+                payload["metadata"]["media_url"] = media_info["download_url"]
+            if "mime_type" in media_info:
+                payload["metadata"]["media_mime_type"] = media_info["mime_type"]
 
         response = await client.post(
             f"{OPENCLAW_URL}/v1/responses",
