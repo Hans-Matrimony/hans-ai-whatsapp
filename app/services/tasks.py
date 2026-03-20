@@ -449,8 +449,45 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
                 else:
                     logger.error("Failed to upload media to WhatsApp")
             elif media_item["type"] == "url":
-                # Send image directly via URL
-                await _send_whatsapp_image(client, phone, image_url=media_item["value"])
+                # DALL-E URLs are temporary SAS tokens - need to download first
+                # WhatsApp cannot access these directly
+                logger.info(f"Processing DALL-E URL: {media_item['value'][:100]}...")
+
+                # Download the image from DALL-E URL
+                try:
+                    async with httpx.AsyncClient(timeout=30.0) as dl_client:
+                        dl_response = await dl_client.get(media_item["value"])
+                        if dl_response.status_code != 200:
+                            logger.error(f"Failed to download DALL-E image: {dl_response.status_code}")
+                            continue
+
+                        # Get content type
+                        content_type = dl_response.headers.get("content-type", "image/png")
+                        if content_type.startswith("image/"):
+                            mime_type = content_type.split(";")[0]
+                        else:
+                            mime_type = "image/png"
+
+                        # Convert to base64
+                        image_bytes = dl_response.content
+                        base64_data = base64.b64encode(image_bytes).decode('utf-8')
+
+                        # Upload to WhatsApp Media API
+                        logger.info(f"Uploading DALL-E image to WhatsApp Media API (size: {len(image_bytes)} bytes)")
+                        media_id = await _upload_base64_to_whatsapp_media(
+                            client,
+                            base64_data,
+                            mime_type,
+                        )
+
+                        if media_id:
+                            logger.info(f"DALL-E image uploaded successfully: media_id={media_id}")
+                            await _send_whatsapp_image(client, phone, media_id=media_id, caption="Kundli Chart")
+                        else:
+                            logger.error("Failed to upload DALL-E image to WhatsApp Media API")
+
+                except Exception as e:
+                    logger.error(f"Error processing DALL-E URL: {e}", exc_info=True)
 
         await _log_to_mongo(session_id, user_id, "assistant", clean_reply or reply, "whatsapp")
         return {"status": "sent", "message_id": message_id}
