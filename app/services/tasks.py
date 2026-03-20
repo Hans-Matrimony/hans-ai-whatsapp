@@ -177,15 +177,55 @@ def _extract_media_from_reply(text: str) -> Tuple[str, List[dict]]:
         media_match = re.match(r'^MEDIA:\s*(.+)$', stripped)
         if media_match:
             media_path = media_match.group(1).strip().strip('"').strip("'")
+
+            # Direct URL
             if media_path.startswith('http://') or media_path.startswith('https://'):
                 media_items.append({"type": "url", "value": media_path})
                 logger.info(f"Found MEDIA URL in response: {media_path}")
-            else:
-                # Local file path — can't access across containers,
-                # log warning but keep line so user sees context
-                logger.warning(f"Found MEDIA local path in response (not accessible across containers): {media_path}")
-                # Don't add to media_items, can't use it
+                continue  # Skip adding this line to clean text
+
+            # Check for Markdown link syntax: [text](url) or ![text](url)
+            md_match = re.search(r'!?\[([^\]]*)\]\((https?://[^)]+)\)', media_path)
+            if md_match:
+                url = md_match.group(2)
+                media_items.append({"type": "url", "value": url})
+                logger.info(f"Found MEDIA URL in markdown link: {url[:80]}...")
+                continue
+
+            # Check for DALL-E URL embedded in malformed text
+            dalle_in_media = re.search(r'https://oaidalleapiprodscus\.[^\"\)\s]+', media_path)
+            if dalle_in_media:
+                dalle_url = dalle_in_media.group(0)
+                media_items.append({"type": "url", "value": dalle_url})
+                logger.info(f"Found DALL-E URL in MEDIA line: {dalle_url[:80]}...")
+                continue
+
+            # Local file path — can't access across containers,
+            # log warning but keep line so user sees context
+            logger.warning(f"Found MEDIA local path in response (not accessible across containers): {media_path}")
+            # Don't add to media_items, can't use it
             continue
+
+        # FALLBACK: Check for DALL-E URLs (oaidalleapiprodscus) even in malformed lines
+        # Agent sometimes outputs: "MEDIA:Kundli Chart](https://oaidalleapiprodscus...)"
+        # or "[MEDIA: Kundli Chart](url)" - try to extract the URL anyway
+        dalle_match = re.search(r'https://oaidalleapiprodscus\.[^\"\)\s]+', line)
+        if dalle_match:
+            dalle_url = dalle_match.group(0)
+            media_items.append({"type": "url", "value": dalle_url})
+            logger.info(f"Found DALL-E URL in malformed line: {dalle_url[:80]}...")
+            # Remove the entire line from output (it contains broken markdown)
+            continue
+
+        # Check for other image URLs in markdown link format [text](url)
+        url_match = re.search(r'\[([^\]]+)\]\((https?://[^\)]+)\)', line)
+        if url_match:
+            url = url_match.group(2)
+            # Only extract if it looks like an image URL (common image hosts)
+            if any(host in url for host in ['oaidalleapiprodscus', 'blob.core.windows.net', 'images.unsplash', 'imgur']):
+                media_items.append({"type": "url", "value": url})
+                logger.info(f"Found image URL in markdown link: {url[:80]}...")
+                continue
 
         clean_lines.append(line)
 
