@@ -161,8 +161,15 @@ def _extract_media_from_reply(text: str) -> Tuple[str, List[dict]]:
     media_items = []
     clean_lines = []
 
+    logger.info(f"[DEBUG] _extract_media_from_reply: Processing {len(text)} chars, {len(text.split(chr(10)))} lines")
+    logger.info(f"[DEBUG] First 300 chars: {repr(text[:300])}")
+
     for line in text.split("\n"):
         stripped = line.strip()
+
+        # Log lines that might contain media
+        if 'MEDIA' in stripped.upper() or 'oaidalleapiprodscus' in stripped or 'blob.core.windows.net' in stripped:
+            logger.info(f"[DEBUG] Checking potential media line: {repr(stripped[:100])}")
 
         # Check for MEDIA_BASE64: <mime_type> <base64_data>
         b64_match = re.match(r'^MEDIA_BASE64:\s*(\S+)\s+(\S+)$', stripped)
@@ -177,6 +184,7 @@ def _extract_media_from_reply(text: str) -> Tuple[str, List[dict]]:
         media_match = re.match(r'^MEDIA:\s*(.+)$', stripped)
         if media_match:
             media_path = media_match.group(1).strip().strip('"').strip("'")
+            logger.info(f"[DEBUG] MEDIA: regex matched, path: {repr(media_path[:100])}")
 
             # Direct URL
             if media_path.startswith('http://') or media_path.startswith('https://'):
@@ -467,7 +475,9 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
             return {"status": "no_reply"}
 
         # Parse MEDIA: / MEDIA_BASE64: tokens from response
+        logger.info(f"[DEBUG] Raw reply from agent (first 500 chars): {reply[:500]}...")
         clean_reply, media_items = _extract_media_from_reply(reply)
+        logger.info(f"[DEBUG] Extracted {len(media_items)} media items, clean_reply length: {len(clean_reply)}")
 
         # Send text reply (split on double-newline for separate bubbles)
         if clean_reply:
