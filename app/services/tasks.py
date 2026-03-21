@@ -487,17 +487,21 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
                             logger.info(f"[RESPONSE_DEBUG] Content {cidx} text preview: {repr(text_preview)}")
 
         # Extract reply text from response
-        reply = None
+        # CONCATENATE all text content entries (don't just take the first one)
+        reply_parts = []
         if "output" in data:
             for item in data["output"]:
                 if item.get("content"):
                     for content in item["content"]:
                         if content.get("text"):
-                            reply = content["text"]
-                            break
+                            reply_parts.append(content["text"])
 
-        if not reply:
+        if not reply_parts:
+            logger.error(f"[RESPONSE_ERROR] No text content found in response")
             return {"status": "no_reply"}
+
+        reply = "\n\n".join(reply_parts)
+        logger.info(f"[RESPONSE_DEBUG] Concatenated {len(reply_parts)} text parts, total length: {len(reply)}")
 
         # Parse MEDIA: / MEDIA_BASE64: tokens from response
         logger.info(f"[DEBUG] Raw reply from agent (first 500 chars): {reply[:500]}...")
