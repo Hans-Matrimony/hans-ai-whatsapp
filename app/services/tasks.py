@@ -506,7 +506,12 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
                 # Download the image from DALL-E URL
                 try:
                     async with httpx.AsyncClient(timeout=30.0) as dl_client:
-                        dl_response = await dl_client.get(media_item["value"])
+                        # Decode URL if it's been double-encoded (sometimes happens with Markdown links)
+                        from urllib.parse import unquote
+                        decoded_url = unquote(media_item["value"])
+                        logger.debug(f"Decoded URL: {decoded_url[:100]}...")
+
+                        dl_response = await dl_client.get(decoded_url)
                         if dl_response.status_code != 200:
                             logger.error(f"Failed to download DALL-E image: {dl_response.status_code}")
                             continue
