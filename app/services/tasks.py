@@ -566,6 +566,14 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
                                 query_params['sig'] = sig_value
                                 logger.info(f"[URL_V2.1] Final decoded signature: {sig_value[:100]}...")
 
+                                # Validate decoded signature format
+                                # Azure SAS signatures should be base64-like: alphanumeric, +, /, =
+                                # Should NOT contain % characters (those should have been decoded)
+                                if '%' in sig_value:
+                                    logger.error(f"[URL_V2.1] WARNING: Signature STILL contains % after decoding: {sig_value[:100]}...")
+                                else:
+                                    logger.info(f"[URL_V2.1] ✓ Signature looks clean (no % chars)")
+
                                 # Reconstruct URL with decoded signature
                                 new_query = urlencode(query_params, doseq=True)
                                 url_to_fetch = urlunparse((
@@ -581,19 +589,20 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
                             else:
                                 logger.warning(f"[URL_V2.1] sig parameter not found in query params")
 
-                        # Now download with the fully decoded URL
-                        logger.info(f"[DOWNLOAD] Starting download with fully decoded URL...")
+                        # Now download with the decoded signature URL
+                        logger.info(f"[URL_V2.1] Starting download with decoded signature...")
+                        logger.info(f"[URL_V2.1] Download URL (first 150 chars): {url_to_fetch[:150]}")
                         dl_response = await dl_client.get(url_to_fetch)
 
-                        logger.info(f"[DOWNLOAD] Response status: {dl_response.status_code}")
-                        logger.info(f"[DOWNLOAD] Response headers: {dict(dl_response.headers)}")
+                        logger.info(f"[URL_V2.1] Response status: {dl_response.status_code}")
+                        logger.info(f"[URL_V2.1] Response headers: {dict(dl_response.headers)}")
 
                         if dl_response.status_code != 200:
-                            logger.error(f"[DOWNLOAD_ERROR] Failed to download DALL-E image: {dl_response.status_code}")
-                            logger.error(f"[DOWNLOAD_ERROR] URL used (first 200 chars): {url_to_fetch[:200]}")
-                            logger.error(f"[DOWNLOAD_ERROR] Response body (first 500 chars): {dl_response.text[:500]}")
+                            logger.error(f"[URL_V2.1] ERROR: Failed to download DALL-E image: {dl_response.status_code}")
+                            logger.error(f"[URL_V2.1] URL used (first 200 chars): {url_to_fetch[:200]}")
+                            logger.error(f"[URL_V2.1] Response body (first 500 chars): {dl_response.text[:500]}")
 
-                            # Check if signature still has encoding issues
+                            # Check signature state in failed URL
                             if 'sig=' in url_to_fetch:
                                 sig_start = url_to_fetch.find('sig=') + 4
                                 sig_end = url_to_fetch.find('&', sig_start)
@@ -601,9 +610,11 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
                                     sig_end = len(url_to_fetch)
                                 signature = url_to_fetch[sig_start:sig_end]
                                 if '%' in signature:
-                                    logger.error(f"[DOWNLOAD_ERROR] Signature STILL contains encoded chars: {signature}")
+                                    logger.error(f"[URL_V2.1] ERROR: Signature STILL contains % chars: {signature[:100]}...")
+                                    logger.error(f"[URL_V2.1] This means signature is still over-encoded despite our fix!")
                                 else:
-                                    logger.error(f"[DOWNLOAD_ERROR] Signature looks clean but download failed: {signature}")
+                                    logger.error(f"[URL_V2.1] ERROR: Signature looks clean but download still failed: {signature[:100]}...")
+                                    logger.error(f"[URL_V2.1] This might be a different issue (expiration, permissions, etc.)")
 
                             continue
 
