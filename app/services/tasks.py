@@ -246,6 +246,16 @@ def _extract_media_from_reply(text: str) -> Tuple[str, List[dict]]:
                 logger.info(f"Found image URL in markdown link: {url[:80]}...")
                 continue
 
+        # Check for data URL in markdown format ![alt](data:image/...)
+        data_url_match = re.search(r'\[([^\]]+)\]\((data:image/([^;]+);base64,([^\)]+))\)', line)
+        if data_url_match:
+            mime_type = f"image/{data_url_match.group(3)}"
+            b64_data = data_url_match.group(4)
+            media_items.append({"type": "base64", "value": b64_data, "mime_type": mime_type})
+            logger.info(f"Found data URL in markdown link: {mime_type}, size={len(b64_data)} chars")
+            # Remove the entire line from output (the base64 string is too long)
+            continue
+
         clean_lines.append(line)
 
     clean_text = "\n".join(clean_lines).strip()
