@@ -509,23 +509,78 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
                         from urllib.parse import unquote_plus
                         url_to_fetch = media_item["value"]
 
-                        # First attempt: Try with the URL as-is
-                        logger.info(f"[URL_ATTEMPT] Attempting download with original URL")
+                        # [VERSION_MARKER] v2.0 - Repeated decoding with detailed logging
+                        logger.info(f"[URL_V2] ORIGINAL URL (first 150 chars): {url_to_fetch[:150]}")
+
+                        # Extract and log signature specifically to verify encoding
+                        if 'sig=' in url_to_fetch:
+                            sig_start = url_to_fetch.find('sig=') + 4
+                            sig_end = url_to_fetch.find('&', sig_start)
+                            if sig_end == -1:
+                                sig_end = len(url_to_fetch)
+                            signature = url_to_fetch[sig_start:sig_end]
+                            logger.info(f"[URL_V2] Original signature: {signature}")
+
+                        # Repeatedly decode until no more encoded characters remain
+                        # This handles triple, double, or single encoding
+                        prev_length = 0
+                        max_iterations = 5  # Prevent infinite loop
+                        iteration = 0
+
+                        while '%' in url_to_fetch and iteration < max_iterations:
+                            prev_length = len(url_to_fetch)
+                            url_to_fetch = unquote_plus(url_to_fetch)
+                            iteration += 1
+                            logger.info(f"[URL_DECODE] Iteration {iteration}: {prev_length} -> {len(url_to_fetch)} chars")
+
+                            # Log signature after this iteration
+                            if 'sig=' in url_to_fetch:
+                                sig_start = url_to_fetch.find('sig=') + 4
+                                sig_end = url_to_fetch.find('&', sig_start)
+                                if sig_end == -1:
+                                    sig_end = len(url_to_fetch)
+                                signature = url_to_fetch[sig_start:sig_end]
+                                logger.info(f"[URL_DECODE] Signature after iteration {iteration}: {signature}")
+
+                            if len(url_to_fetch) == prev_length:
+                                # No more changes - fully decoded
+                                break
+
+                        logger.info(f"[URL_FINAL] Fully decoded URL ({len(url_to_fetch)} chars)")
+
+                        # Final signature check
+                        if 'sig=' in url_to_fetch:
+                            sig_start = url_to_fetch.find('sig=') + 4
+                            sig_end = url_to_fetch.find('&', sig_start)
+                            if sig_end == -1:
+                                sig_end = len(url_to_fetch)
+                            signature = url_to_fetch[sig_start:sig_end]
+                            logger.info(f"[URL_FINAL] Final signature: {signature}")
+
+                        # Now download with the fully decoded URL
+                        logger.info(f"[DOWNLOAD] Starting download with fully decoded URL...")
                         dl_response = await dl_client.get(url_to_fetch)
 
-                        # If 403 error, URL might be encoded - try decoding
-                        if dl_response.status_code == 403:
-                            logger.warning(f"[URL_ATTEMPT] Got 403, URL might be double-encoded. Decoding and retrying...")
-                            decoded_url = unquote_plus(url_to_fetch)
-                            logger.info(f"[URL_ATTEMPT] Retrying with decoded URL (was {len(url_to_fetch)} chars, now {len(decoded_url)} chars)")
-                            dl_response = await dl_client.get(decoded_url)
+                        logger.info(f"[DOWNLOAD] Response status: {dl_response.status_code}")
+                        logger.info(f"[DOWNLOAD] Response headers: {dict(dl_response.headers)}")
 
                         if dl_response.status_code != 200:
-                            logger.error(f"Failed to download DALL-E image: {dl_response.status_code}")
-                            logger.error(f"URL used (first 200 chars): {url_to_fetch[:200]}")
-                            continue
-                        if dl_response.status_code != 200:
-                            logger.error(f"Failed to download DALL-E image: {dl_response.status_code}")
+                            logger.error(f"[DOWNLOAD_ERROR] Failed to download DALL-E image: {dl_response.status_code}")
+                            logger.error(f"[DOWNLOAD_ERROR] URL used (first 200 chars): {url_to_fetch[:200]}")
+                            logger.error(f"[DOWNLOAD_ERROR] Response body (first 500 chars): {dl_response.text[:500]}")
+
+                            # Check if signature still has encoding issues
+                            if 'sig=' in url_to_fetch:
+                                sig_start = url_to_fetch.find('sig=') + 4
+                                sig_end = url_to_fetch.find('&', sig_start)
+                                if sig_end == -1:
+                                    sig_end = len(url_to_fetch)
+                                signature = url_to_fetch[sig_start:sig_end]
+                                if '%' in signature:
+                                    logger.error(f"[DOWNLOAD_ERROR] Signature STILL contains encoded chars: {signature}")
+                                else:
+                                    logger.error(f"[DOWNLOAD_ERROR] Signature looks clean but download failed: {signature}")
+
                             continue
 
                         # Get content type
