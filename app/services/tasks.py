@@ -472,6 +472,20 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
 
         data = response.json()
 
+        # [DEBUG] Log the entire response structure
+        logger.info(f"[RESPONSE_DEBUG] Response keys: {list(data.keys())}")
+        if "output" in data:
+            logger.info(f"[RESPONSE_DEBUG] Number of output items: {len(data['output'])}")
+            for idx, item in enumerate(data["output"]):
+                logger.info(f"[RESPONSE_DEBUG] Output item {idx}: type={item.get('type')}, keys={list(item.keys())}")
+                if "content" in item:
+                    logger.info(f"[RESPONSE_DEBUG] Item {idx} has {len(item['content'])} content entries")
+                    for cidx, content in enumerate(item["content"]):
+                        logger.info(f"[RESPONSE_DEBUG] Content {cidx}: type={content.get('type')}, has_text={'text' in content}")
+                        if "text" in content:
+                            text_preview = content["text"][:200] if content["text"] else ""
+                            logger.info(f"[RESPONSE_DEBUG] Content {cidx} text preview: {repr(text_preview)}")
+
         # Extract reply text from response
         reply = None
         if "output" in data:
