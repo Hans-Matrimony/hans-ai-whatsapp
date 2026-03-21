@@ -188,8 +188,8 @@ def _extract_media_from_reply(text: str) -> Tuple[str, List[dict]]:
 
             # Direct URL
             if media_path.startswith('http://') or media_path.startswith('https://'):
-                # [URL_V2] Log the URL AS RECEIVED from OpenClaw, before any processing
-                logger.info(f"[URL_V2] URL_AS_RECEIVED from OpenClaw: {media_path[:200]}...")
+                # [URL_V2.1] Log the URL AS RECEIVED from OpenClaw, before any processing
+                logger.info(f"[URL_V2.1] URL_AS_RECEIVED from OpenClaw: {media_path[:200]}...")
                 # Extract and log signature if present
                 if 'sig=' in media_path:
                     sig_start = media_path.find('sig=') + 4
@@ -197,10 +197,10 @@ def _extract_media_from_reply(text: str) -> Tuple[str, List[dict]]:
                     if sig_end == -1:
                         sig_end = len(media_path)
                     signature = media_path[sig_start:sig_end]
-                    logger.info(f"[URL_V2] Signature AS_RECEIVED: {signature}")
+                    logger.info(f"[URL_V2.1] Signature AS_RECEIVED: {signature}")
 
                 media_items.append({"type": "url", "value": media_path})
-                logger.info(f"[URL_V2] Added URL to media_items: {media_path[:80]}...")
+                logger.info(f"[URL_V2.1] Added URL to media_items: {media_path[:80]}...")
                 continue  # Skip adding this line to clean text
 
             # Check for Markdown link syntax: [text](url) or ![text](url)
