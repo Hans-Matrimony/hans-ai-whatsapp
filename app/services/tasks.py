@@ -506,12 +506,24 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
                 # Download the image from DALL-E URL
                 try:
                     async with httpx.AsyncClient(timeout=30.0) as dl_client:
-                        # Decode URL if it's been double-encoded (sometimes happens with Markdown links)
-                        from urllib.parse import unquote
-                        decoded_url = unquote(media_item["value"])
-                        logger.debug(f"Decoded URL: {decoded_url[:100]}...")
+                        from urllib.parse import unquote_plus
+                        url_to_fetch = media_item["value"]
 
-                        dl_response = await dl_client.get(decoded_url)
+                        # First attempt: Try with the URL as-is
+                        logger.info(f"[URL_ATTEMPT] Attempting download with original URL")
+                        dl_response = await dl_client.get(url_to_fetch)
+
+                        # If 403 error, URL might be encoded - try decoding
+                        if dl_response.status_code == 403:
+                            logger.warning(f"[URL_ATTEMPT] Got 403, URL might be double-encoded. Decoding and retrying...")
+                            decoded_url = unquote_plus(url_to_fetch)
+                            logger.info(f"[URL_ATTEMPT] Retrying with decoded URL (was {len(url_to_fetch)} chars, now {len(decoded_url)} chars)")
+                            dl_response = await dl_client.get(decoded_url)
+
+                        if dl_response.status_code != 200:
+                            logger.error(f"Failed to download DALL-E image: {dl_response.status_code}")
+                            logger.error(f"URL used (first 200 chars): {url_to_fetch[:200]}")
+                            continue
                         if dl_response.status_code != 200:
                             logger.error(f"Failed to download DALL-E image: {dl_response.status_code}")
                             continue
