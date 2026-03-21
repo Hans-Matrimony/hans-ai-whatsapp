@@ -520,53 +520,66 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
                         from urllib.parse import unquote_plus
                         url_to_fetch = media_item["value"]
 
-                        # [VERSION_MARKER] v2.0 - Repeated decoding with detailed logging
-                        logger.info(f"[URL_V2] ORIGINAL URL (first 150 chars): {url_to_fetch[:150]}")
+                        # [VERSION_MARKER] v2.1 - Smart signature-only decoding
+                        logger.info(f"[URL_V2.1] ORIGINAL URL (first 150 chars): {url_to_fetch[:150]}")
 
                         # Extract and log signature specifically to verify encoding
-                        if 'sig=' in url_to_fetch:
+                        if 'sig=' not in url_to_fetch:
+                            logger.warning(f"[URL_V2.1] No signature found in URL, using as-is")
+                        else:
                             sig_start = url_to_fetch.find('sig=') + 4
                             sig_end = url_to_fetch.find('&', sig_start)
                             if sig_end == -1:
                                 sig_end = len(url_to_fetch)
-                            signature = url_to_fetch[sig_start:sig_end]
-                            logger.info(f"[URL_V2] Original signature: {signature}")
+                            original_signature = url_to_fetch[sig_start:sig_end]
+                            logger.info(f"[URL_V2.1] Original signature: {original_signature}")
 
-                        # Repeatedly decode until no more encoded characters remain
-                        # This handles triple, double, or single encoding
-                        prev_length = 0
-                        max_iterations = 5  # Prevent infinite loop
-                        iteration = 0
+                            # Smart decode: Only decode the signature parameter, not the entire URL
+                            # This preserves legitimate URL encoding in path/query while fixing over-encoded signatures
+                            from urllib.parse import urlparse, urlunparse, urlencode, parse_qsl
 
-                        while '%' in url_to_fetch and iteration < max_iterations:
-                            prev_length = len(url_to_fetch)
-                            url_to_fetch = unquote_plus(url_to_fetch)
-                            iteration += 1
-                            logger.info(f"[URL_DECODE] Iteration {iteration}: {prev_length} -> {len(url_to_fetch)} chars")
+                            parsed = urlparse(url_to_fetch)
+                            query_params = dict(parse_qsl(parsed.query))
 
-                            # Log signature after this iteration
-                            if 'sig=' in url_to_fetch:
-                                sig_start = url_to_fetch.find('sig=') + 4
-                                sig_end = url_to_fetch.find('&', sig_start)
-                                if sig_end == -1:
-                                    sig_end = len(url_to_fetch)
-                                signature = url_to_fetch[sig_start:sig_end]
-                                logger.info(f"[URL_DECODE] Signature after iteration {iteration}: {signature}")
+                            if 'sig' in query_params:
+                                sig_value = query_params['sig']
+                                logger.info(f"[URL_V2.1] Signature from query params: {sig_value[:100]}...")
 
-                            if len(url_to_fetch) == prev_length:
-                                # No more changes - fully decoded
-                                break
+                                # Repeatedly decode ONLY the signature until stable
+                                prev_sig = sig_value
+                                max_iterations = 5
+                                iteration = 0
 
-                        logger.info(f"[URL_FINAL] Fully decoded URL ({len(url_to_fetch)} chars)")
+                                while '%' in sig_value and iteration < max_iterations:
+                                    prev_sig = sig_value
+                                    sig_value = unquote_plus(sig_value)
+                                    iteration += 1
+                                    logger.info(f"[URL_V2.1] Sig decode iteration {iteration}: {len(prev_sig)} -> {len(sig_value)} chars")
+                                    logger.info(f"[URL_V2.1] Signature after iteration {iteration}: {sig_value[:100]}...")
 
-                        # Final signature check
-                        if 'sig=' in url_to_fetch:
-                            sig_start = url_to_fetch.find('sig=') + 4
-                            sig_end = url_to_fetch.find('&', sig_start)
-                            if sig_end == -1:
-                                sig_end = len(url_to_fetch)
-                            signature = url_to_fetch[sig_start:sig_end]
-                            logger.info(f"[URL_FINAL] Final signature: {signature}")
+                                    if len(sig_value) == len(prev_sig):
+                                        # Check if no actual changes occurred (stable)
+                                        if sig_value == prev_sig:
+                                            break
+
+                                # Update query params with decoded signature
+                                query_params['sig'] = sig_value
+                                logger.info(f"[URL_V2.1] Final decoded signature: {sig_value[:100]}...")
+
+                                # Reconstruct URL with decoded signature
+                                new_query = urlencode(query_params, doseq=True)
+                                url_to_fetch = urlunparse((
+                                    parsed.scheme,
+                                    parsed.netloc,
+                                    parsed.path,
+                                    parsed.params,
+                                    new_query,
+                                    parsed.fragment
+                                ))
+
+                                logger.info(f"[URL_V2.1] Reconstructed URL with decoded signature")
+                            else:
+                                logger.warning(f"[URL_V2.1] sig parameter not found in query params")
 
                         # Now download with the fully decoded URL
                         logger.info(f"[DOWNLOAD] Starting download with fully decoded URL...")
