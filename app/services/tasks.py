@@ -522,19 +522,34 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
         # Extract reply text from response
         # CONCATENATE all text content entries (don't just take the first one)
         reply_parts = []
+        tool_outputs = []
+
         if "output" in data:
             for item in data["output"]:
-                if item.get("content"):
+                # Process agent messages (type: message)
+                if item.get("type") == "message" and item.get("content"):
                     for content in item["content"]:
                         if content.get("text"):
                             reply_parts.append(content["text"])
 
-        if not reply_parts:
-            logger.error(f"[RESPONSE_ERROR] No text content found in response")
+                # Process tool execution outputs (type: tool, execution, etc.)
+                # Tool outputs contain MEDIA_BASE64 tokens from script execution
+                if item.get("type") in ["tool", "execution", "function"] and item.get("content"):
+                    for content in item["content"]:
+                        # Extract text from tool outputs (contains MEDIA_BASE64)
+                        if content.get("text"):
+                            tool_outputs.append(content["text"])
+                            logger.info(f"[TOOL_OUTPUT] Found tool output: {content['text'][:100]}...")
+
+        if not reply_parts and not tool_outputs:
+            logger.error(f"[RESPONSE_ERROR] No content found in response")
             return {"status": "no_reply"}
 
-        reply = "\n\n".join(reply_parts)
-        logger.info(f"[RESPONSE_DEBUG] Concatenated {len(reply_parts)} text parts, total length: {len(reply)}")
+        # Combine agent messages and tool outputs
+        # Tool outputs go FIRST so MEDIA_BASE64 is extracted before agent text
+        all_parts = tool_outputs + reply_parts
+        reply = "\n\n".join(all_parts)
+        logger.info(f"[RESPONSE_DEBUG] Concatenated {len(reply_parts)} text parts + {len(tool_outputs)} tool outputs, total length: {len(reply)}")
 
         # Parse MEDIA: / MEDIA_BASE64: tokens from response
         logger.info(f"[DEBUG] Raw reply from agent (first 500 chars): {reply[:500]}...")
