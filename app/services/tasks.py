@@ -282,7 +282,7 @@ def _extract_media_from_reply(text: str) -> Tuple[str, List[dict]]:
         if url_match:
             url = url_match.group(2)
             # Only extract if it looks like an image URL (common image hosts)
-            if any(host in url for host in ['oaidalleapiprodscus', 'blob.core.windows.net', 'images.unsplash', 'imgur']):
+            if any(host in url for host in ['oaidalleapiprodscus', 'blob.core.windows.net', 'images.unsplash', 'imgur', 'i.ibb.co', 'ibb.co']):
                 media_items.append({"type": "url", "value": url})
                 logger.info(f"Found image URL in markdown link: {url[:80]}...")
                 continue
