@@ -213,6 +213,14 @@ def _extract_media_from_reply(text: str) -> Tuple[str, List[dict]]:
             logger.info(f"Found OpenClaw media_base64 in response: mime={mime_type}, len={len(b64_data)}")
             continue
 
+        # Check for IMAGE_URL: https://... (Kundli image uploaded to dashboard)
+        image_url_match = re.match(r'^IMAGE_URL:\s*(https?://\S+)$', stripped)
+        if image_url_match:
+            image_url = image_url_match.group(1)
+            media_items.append({"type": "url", "value": image_url})
+            logger.info(f"Found IMAGE_URL in response: {image_url}")
+            continue
+
         # Check for MEDIA: <path_or_url>
         media_match = re.match(r'^MEDIA:\s*(.+)$', stripped)
         if media_match:
