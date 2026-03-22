@@ -204,6 +204,15 @@ def _extract_media_from_reply(text: str) -> Tuple[str, List[dict]]:
             logger.info(f"Found KUNDLI_IMAGE in response: mime={mime_type}, len={len(b64_data)}")
             continue
 
+        # Check for data:media_base64:mime_type,base64_data (OpenClaw WhatsApp plugin format)
+        openclaw_media_match = re.match(r'^data:media_base64:([^,]+),(.+)$', stripped)
+        if openclaw_media_match:
+            mime_type = openclaw_media_match.group(1)
+            b64_data = openclaw_media_match.group(2)
+            media_items.append({"type": "base64", "value": b64_data, "mime_type": mime_type})
+            logger.info(f"Found OpenClaw media_base64 in response: mime={mime_type}, len={len(b64_data)}")
+            continue
+
         # Check for MEDIA: <path_or_url>
         media_match = re.match(r'^MEDIA:\s*(.+)$', stripped)
         if media_match:
