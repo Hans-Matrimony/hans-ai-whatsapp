@@ -164,6 +164,21 @@ def _extract_media_from_reply(text: str) -> Tuple[str, List[dict]]:
     logger.info(f"[DEBUG] _extract_media_from_reply: Processing {len(text)} chars, {len(text.split(chr(10)))} lines")
     logger.info(f"[DEBUG] First 300 chars: {repr(text[:300])}")
 
+    # FIRST: Check for data URLs in the full text BEFORE splitting into lines
+    # This handles cases where base64 spans multiple lines
+    data_url_match = re.search(r'\!\[([^\]]+)\]\((data:image/[^;]+;base64,[^\)]+)\)', text, re.DOTALL)
+    if data_url_match:
+        data_url = data_url_match.group(2)
+        # Extract mime type and base64 data
+        if 'base64,' in data_url:
+            mime_part, b64_part = data_url.split('base64,', 1)
+            mime_type = mime_part.replace('data:image/', '').replace(';', '')
+            b64_data = b64_part.rstrip(')')
+            media_items.append({"type": "base64", "value": b64_data, "mime_type": f"image/{mime_type}"})
+            logger.info(f"Found data URL in markdown: image/{mime_type}, size={len(b64_data)} chars")
+            # Remove the entire image markdown from text
+            text = text.replace(data_url_match.group(0), '')
+
     for line in text.split("\n"):
         stripped = line.strip()
 
@@ -247,10 +262,18 @@ def _extract_media_from_reply(text: str) -> Tuple[str, List[dict]]:
                 continue
 
         # Check for data URL in markdown format ![alt](data:image/...)
-        data_url_match = re.search(r'\[([^\]]+)\]\((data:image/([^;]+);base64,([^\)]+))\)', line)
+        # Try multiline match first (DOTALL flag makes . match newlines)
+        data_url_match = re.search(r'\[([^\]]+)\]\((data:image/([^;]+);base64,.+?)\)', line, re.DOTALL)
+        if not data_url_match:
+            # Try single-line match
+            data_url_match = re.search(r'\[([^\]]+)\]\((data:image/([^;]+);base64,[^\)]+)\)', line)
         if data_url_match:
             mime_type = f"image/{data_url_match.group(3)}"
             b64_data = data_url_match.group(4)
+            # Remove 'data:image/png;base64,' prefix if present
+            if b64_data.startswith('data:'):
+                # Extract just the base64 part
+                b64_data = b64_data.split('base64,')[1]
             media_items.append({"type": "base64", "value": b64_data, "mime_type": mime_type})
             logger.info(f"Found data URL in markdown link: {mime_type}, size={len(b64_data)} chars")
             # Remove the entire line from output (the base64 string is too long)
