@@ -195,6 +195,15 @@ def _extract_media_from_reply(text: str) -> Tuple[str, List[dict]]:
             logger.info(f"Found MEDIA_BASE64 in response: mime={mime_type}, len={len(b64_data)}")
             continue
 
+        # Check for KUNDLI_IMAGE: <mime_type> <base64_data> (custom format to avoid OpenClaw plugin)
+        kundli_match = re.match(r'^KUNDLI_IMAGE:\s*(\S+)\s+(\S+)$', stripped)
+        if kundli_match:
+            mime_type = kundli_match.group(1)
+            b64_data = kundli_match.group(2)
+            media_items.append({"type": "base64", "value": b64_data, "mime_type": mime_type})
+            logger.info(f"Found KUNDLI_IMAGE in response: mime={mime_type}, len={len(b64_data)}")
+            continue
+
         # Check for MEDIA: <path_or_url>
         media_match = re.match(r'^MEDIA:\s*(.+)$', stripped)
         if media_match:
