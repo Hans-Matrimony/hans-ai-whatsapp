@@ -214,11 +214,14 @@ def _extract_media_from_reply(text: str) -> Tuple[str, List[dict]]:
             continue
 
         # Check for IMAGE_URL: https://... (Kundli image uploaded to dashboard)
-        image_url_match = re.match(r'^IMAGE_URL:\s*(https?://\S+)$', stripped)
+        # Now robustly handles LLM hallucinated markdown: IMAGE_URL: [text](https://...)
+        image_url_match = re.search(r'^IMAGE_URL:\s*(?:\[[^\]]*\]\()?(https?://[^\)\s]+)\)?', stripped)
         if image_url_match:
             image_url = image_url_match.group(1)
             media_items.append({"type": "url", "value": image_url})
             logger.info(f"Found IMAGE_URL in response: {image_url}")
+            # If it was a markdown link, we should clean it from the output so it doesn't show
+            line = line.replace(image_url_match.group(0), "")
             continue
 
         # Check for MEDIA: <path_or_url>
@@ -282,9 +285,10 @@ def _extract_media_from_reply(text: str) -> Tuple[str, List[dict]]:
         if url_match:
             url = url_match.group(2)
             # Only extract if it looks like an image URL (common image hosts)
-            if any(host in url for host in ['oaidalleapiprodscus', 'blob.core.windows.net', 'images.unsplash', 'imgur', 'i.ibb.co', 'ibb.co']):
+            if any(host in url for host in ['oaidalleapiprodscus', 'blob.core.windows.net', 'images.unsplash', 'imgur', 'i.ibb.co', 'ibb.co', 'hansastro.com', 'localhost']):
                 media_items.append({"type": "url", "value": url})
                 logger.info(f"Found image URL in markdown link: {url[:80]}...")
+                line = line.replace(url_match.group(0), "")
                 continue
 
         # Check for data URL in markdown format ![alt](data:image/...)
