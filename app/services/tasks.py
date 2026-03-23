@@ -213,9 +213,9 @@ def _extract_media_from_reply(text: str) -> Tuple[str, List[dict]]:
             logger.info(f"Found OpenClaw media_base64 in response: mime={mime_type}, len={len(b64_data)}")
             continue
 
-        # Check for IMAGE_URL: https://... (Kundli image uploaded to dashboard)
+        # Check for IMAGE_URL: or IMAGE: https://... (Kundli image uploaded to dashboard)
         # Now robustly handles LLM hallucinated markdown: IMAGE_URL: [text](https://...)
-        image_url_match = re.search(r'^IMAGE_URL:\s*(?:\[[^\]]*\]\()?(https?://[^\)\s]+)\)?', stripped)
+        image_url_match = re.search(r'^(?:IMAGE_URL|IMAGE):\s*(?:\[[^\]]*\]\()?(https?://[^\)\s]+)\)?', stripped)
         if image_url_match:
             image_url = image_url_match.group(1)
             media_items.append({"type": "url", "value": image_url})
