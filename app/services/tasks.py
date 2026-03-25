@@ -1013,24 +1013,39 @@ async def _check_inactive_users():
                     user_context = await _get_user_context(user_id)
                     logger.info(f"[Proactive Nudge] User context: {user_context}")
 
-                    # Generate nudge message
-                    nudge_message = _generate_nudge_message(user_id, user_context, inactive_minutes)
-                    logger.info(f"[Proactive Nudge] Generated message: {nudge_message[:50]}...")
+                    # Generate nudge message bubbles
+                    nudge_messages = _generate_nudge_message(user_id, user_context, inactive_minutes)
+                    logger.info(f"[Proactive Nudge] Generated {len(nudge_messages)} message bubbles")
 
-                    if nudge_message:
-                        # Send nudge
+                    if nudge_messages:
+                        # Send each message bubble separately
                         phone = user_id.lstrip("+")
-                        send_result = await _send_whatsapp_message(client, phone, nudge_message)
+                        all_sent_successfully = True
 
-                        if "error" not in send_result:
+                        for idx, msg in enumerate(nudge_messages):
+                            # Add small delay between messages to mimic natural conversation
+                            if idx > 0:
+                                import asyncio
+                                await asyncio.sleep(1.5)  # 1.5 second delay between bubbles
+
+                            send_result = await _send_whatsapp_message(client, phone, msg)
+
+                            if "error" in send_result:
+                                logger.error(f"[Proactive Nudge] ✗ Failed to send bubble {idx+1} to {user_id}: {send_result}")
+                                all_sent_successfully = False
+                                break
+                            else:
+                                logger.info(f"[Proactive Nudge] ✓ Sent bubble {idx+1}/{len(nudge_messages)} to {user_id}")
+
+                                # Log each bubble to MongoDB
+                                session_id = f"whatsapp:{user_id}"
+                                await _log_to_mongo(session_id, user_id, "assistant", msg, "whatsapp")
+
+                        if all_sent_successfully:
                             nudges_sent += 1
-                            logger.info(f"[Proactive Nudge] ✓ Sent nudge to {user_id} (inactive: {inactive_minutes:.0f} mins)")
-
-                            # Log to MongoDB
-                            session_id = f"whatsapp:{user_id}"
-                            await _log_to_mongo(session_id, user_id, "assistant", nudge_message, "whatsapp")
+                            logger.info(f"[Proactive Nudge] ✓ Successfully sent all {len(nudge_messages)} bubbles to {user_id} (inactive: {inactive_minutes:.0f} mins)")
                         else:
-                            logger.error(f"[Proactive Nudge] ✗ Failed to send to {user_id}: {send_result}")
+                            logger.error(f"[Proactive Nudge] ✗ Failed to send complete nudge to {user_id}")
 
                 except Exception as e:
                     logger.error(f"[Proactive Nudge] Error processing {user_id}: {e}", exc_info=True)
@@ -1121,8 +1136,8 @@ async def _get_user_context(user_id: str) -> dict:
     return context
 
 
-def _generate_nudge_message(user_id: str, context: dict, inactive_minutes: float) -> str:
-    """Generate personalized nudge message based on user context."""
+def _generate_nudge_message(user_id: str, context: dict, inactive_minutes: float) -> list:
+    """Generate personalized nudge messages as separate bubbles based on user context."""
     name = context.get("name")
     language = context.get("language", "Hinglish")
     last_topic = context.get("last_topic")
@@ -1136,46 +1151,109 @@ def _generate_nudge_message(user_id: str, context: dict, inactive_minutes: float
     inactive_hours = inactive_minutes / 60
     inactive_days = inactive_hours / 24
 
-    # Topic-based personalized messages
+    # Topic-based personalized messages (each message bubble will be sent separately)
     topic_messages = {
         "marriage": {
             "hinglish": [
-                f"Arre {greeting}! Kya ho gaya?\n\nPichli baat humne shaadi ki thi na, koi update hai?\n\nAchhi timing aa rahi hai aapke liye.",
-                f"{greeting} ji! Kya haal hai aajkal?\n\nShaadi ki baat ki thi, koi nayi progress hui?\n\nBas batana, main hoon na.",
+                [
+                    f"Arre {greeting}! Kya ho gaya?",
+                    "Pichli baat humne shaadi ki thi na, koi update hai?",
+                    "Achhi timing aa rahi hai aapke liye."
+                ],
+                [
+                    f"{greeting} ji! Kya haal hai aajkal?",
+                    "Shaadi ki baat ki thi, koi nayi progress hui?",
+                    "Bas batana, main hoon na."
+                ]
             ],
             "english": [
-                f"Oh wow {greeting}! How have you been?\n\nWe were discussing your marriage last time. Any updates?\n\nThe timing looks favorable!",
-                f"{greeting} ji! Hope you're doing well.\n\nFollowing up on our marriage discussion - any news?\n\nLet me know how things are going.",
+                [
+                    f"Oh wow {greeting}! How have you been?",
+                    "We were discussing your marriage last time. Any updates?",
+                    "The timing looks favorable!"
+                ],
+                [
+                    f"{greeting} ji! Hope you're doing well.",
+                    "Following up on our marriage discussion - any news?",
+                    "Let me know how things are going."
+                ]
             ]
         },
         "career": {
             "hinglish": [
-                f"{greeting} ji! Kya haal hai aajkal?\n\nJob change ki baat hui thi, koi update hai job mein?\n\nNaye opportunities aa sakte hain ab.",
-                f"Arre {greeting}! Kaise ho aajkal?\n\nCareer ki baat karte the, kuch naya hua?\n\nBest time hai abhi opportunities ke liye.",
+                [
+                    f"{greeting} ji! Kya haal hai aajkal?",
+                    "Job change ki baat hui thi, koi update hai job mein?",
+                    "Naye opportunities aa sakte hain ab."
+                ],
+                [
+                    f"Arre {greeting}! Kaise ho aajkal?",
+                    "Career ki baat karte the, kuch naya hua?",
+                    "Best time hai abhi opportunities ke liye."
+                ]
             ],
             "english": [
-                f"{greeting} ji! How's everything going?\n\nFollowing up on our career discussion - any updates on the job front?\n\nGood opportunities might be coming your way!",
-                f"Oh wow {greeting}! Hope you're doing well.\n\nHow's your job search going? Any new developments?\n\nJust checking in!",
+                [
+                    f"{greeting} ji! How's everything going?",
+                    "Following up on our career discussion - any updates on the job front?",
+                    "Good opportunities might be coming your way!"
+                ],
+                [
+                    f"Oh wow {greeting}! Hope you're doing well.",
+                    "How's your job search going? Any new developments?",
+                    "Just checking in!"
+                ]
             ]
         },
         "health": {
             "hinglish": [
-                f"{greeting} ji! Kaise ho aaj?\n\nHealth ki baat hui thi, ab kaisa feel ho raha hai?\n\nUpay follow kar rahe ho na?",
-                f"Arre {greeting}! Kya haal hai?\n\nHealth ki chinta hai, sab theek thik ho raha hai na?\n\nBas bata, main hoon na.",
+                [
+                    f"{greeting} ji! Kaise ho aaj?",
+                    "Health ki baat hui thi, ab kaisa feel ho raha hai?",
+                    "Upay follow kar rahe ho na?"
+                ],
+                [
+                    f"Arre {greeting}! Kya haal hai?",
+                    "Health ki chinta hai, sab theek thik ho raha hai na?",
+                    "Bas bata, main hoon na."
+                ]
             ],
             "english": [
-                f"{greeting} ji! How are you doing today?\n\nFollowing up on our health discussion - how are you feeling now?\n\nHope the remedies are helping!",
-                f"Oh wow {greeting}! Hope you're doing well.\n\nHow's your health now? Any improvements?\n\nJust wanted to check in!",
+                [
+                    f"{greeting} ji! How are you doing today?",
+                    "Following up on our health discussion - how are you feeling now?",
+                    "Hope the remedies are helping!"
+                ],
+                [
+                    f"Oh wow {greeting}! Hope you're doing well.",
+                    "How's your health now? Any improvements?",
+                    "Just wanted to check in!"
+                ]
             ]
         },
         "education": {
             "hinglish": [
-                f"{greeting} ji! Padhai kaise chal rahi hai?\n\nStudies ki baat hui thi, kaisa progress hai?\n\nBest of luck!",
-                f"Arre {greeting}! Exams ki taiyari kaise ho rahi hai?\n\nPadhai mein koi help chahiye toh batana.",
+                [
+                    f"{greeting} ji! Padhai kaise chal rahi hai?",
+                    "Studies ki baat hui thi, kaisa progress hai?",
+                    "Best of luck!"
+                ],
+                [
+                    f"Arre {greeting}! Exams ki taiyari kaise ho rahi hai?",
+                    "Padhai mein koi help chahiye toh batana."
+                ]
             ],
             "english": [
-                f"{greeting} ji! How are your studies going?\n\nFollowing up on your education discussion - any progress?\n\nHope everything's going well!",
-                f"Oh wow {greeting}! Hope studies are going well.\n\nAny updates on your education front?\n\nJust checking in!",
+                [
+                    f"{greeting} ji! How are your studies going?",
+                    "Following up on your education discussion - any progress?",
+                    "Hope everything's going well!"
+                ],
+                [
+                    f"Oh wow {greeting}! Hope studies are going well.",
+                    "Any updates on your education front?",
+                    "Just checking in!"
+                ]
             ]
         }
     }
@@ -1187,12 +1265,28 @@ def _generate_nudge_message(user_id: str, context: dict, inactive_minutes: float
         # General messages when no specific topic
         messages = {
             "hinglish": [
-                f"Arre {greeting}! Kya ho gaya?\n\nKafi din ho gaye baat, kaise ho aaj?\n\nKoi sawaal ho toh zaroor batana.",
-                f"{greeting} ji! Kaise ho aajkal?\n\nKuch bhi chahte ho toh puch sakte ho, main hoon na.\n\nKoi bhi problem ho, share kar lijiye.",
+                [
+                    f"Arre {greeting}! Kya ho gaya?",
+                    "Kafi din ho gaye baat, kaise ho aaj?",
+                    "Koi sawaal ho toh zaroor batana."
+                ],
+                [
+                    f"{greeting} ji! Kaise ho aajkal?",
+                    "Kuch bhi chahte ho toh puch sakte ho, main hoon na.",
+                    "Koi bhi problem ho, share kar lijiye."
+                ]
             ],
             "english": [
-                f"Oh wow {greeting}! How have you been?\n\nIt's been a while. Anything specific you want to discuss?\n\nFeel free to ask!",
-                f"{greeting} ji! Long time no see!\n\nHow have you been? Any questions or concerns?\n\nI'm here to help!",
+                [
+                    f"Oh wow {greeting}! How have you been?",
+                    "It's been a while. Anything specific you want to discuss?",
+                    "Feel free to ask!"
+                ],
+                [
+                    f"{greeting} ji! Long time no see!",
+                    "How have you been? Any questions or concerns?",
+                    "I'm here to help!"
+                ]
             ]
         }
 
@@ -1202,5 +1296,5 @@ def _generate_nudge_message(user_id: str, context: dict, inactive_minutes: float
     else:
         template_list = messages["english"]
 
-    # Return first template (can add random selection later)
+    # Return first template (list of separate message bubbles)
     return template_list[0]
