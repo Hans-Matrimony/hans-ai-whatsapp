@@ -900,3 +900,206 @@ def health_check_task():
     """Periodic health check task."""
     logger.info("[Celery] Health check - worker is running")
     return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
+
+
+@celery_app.task
+def proactive_nudge_task():
+    """
+    Send proactive nudges to inactive WhatsApp users.
+    Runs every 5 minutes to check for users inactive for 5+ minutes.
+    """
+    import asyncio
+    from datetime import timedelta
+
+    try:
+        logger.info("[Proactive Nudge] Starting check for inactive users...")
+
+        # Check if within active hours (9 AM - 9 PM IST)
+        from datetime import datetime
+        import pytz
+        ist = pytz.timezone('Asia/Kolkata')
+        now_ist = datetime.now(ist)
+        current_hour = now_ist.hour
+
+        if not (9 <= current_hour < 21):
+            logger.info(f"[Proactive Nudge] Outside active hours ({current_hour}:00 IST), skipping")
+            return {"status": "outside_active_hours"}
+
+        # Query MongoDB Logger for inactive users
+        result = asyncio.run(_check_inactive_users())
+
+        logger.info(f"[Proactive Nudge] Completed: {result}")
+        return result
+
+    except Exception as e:
+        logger.error(f"[Proactive Nudge] Task failed: {e}", exc_info=True)
+        return {"error": str(e)}
+
+
+async def _check_inactive_users():
+    """Check for inactive users and send nudges."""
+    if not MONGO_LOGGER_URL:
+        logger.warning("[Proactive Nudge] MONGO_LOGGER_URL not configured")
+        return {"error": "MongoDB URL not configured"}
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        # Get all users from MongoDB Logger
+        response = await client.get(f"{MONGO_LOGGER_URL}/messages")
+        if response.status_code != 200:
+            logger.error(f"[Proactive Nudge] Failed to fetch users: {response.status_code}")
+            return {"error": "Failed to fetch users"}
+
+        data = response.json()
+        users = data.get("users", [])
+
+        now = datetime.utcnow()
+        nudges_sent = 0
+        users_checked = 0
+
+        for user in users:
+            user_id = user.get("userId", "")
+            if not user_id or not user_id.startswith("+"):
+                continue
+
+            for session in user.get("sessions", []):
+                channel = session.get("channel", "").lower()
+                if "whatsapp" not in channel:
+                    continue
+
+                # Get last message time
+                last_msg_str = session.get("lastMessageTime", "")
+                if not last_msg_str:
+                    continue
+
+                try:
+                    # Parse timestamp
+                    if last_msg_str.endswith('Z'):
+                        last_msg_time = datetime.fromisoformat(last_msg_str.replace('Z', '+00:00'))
+                    else:
+                        last_msg_time = datetime.fromisoformat(last_msg_str)
+
+                    # Calculate inactive minutes
+                    inactive_minutes = (now - last_msg_time).total_seconds() / 60
+
+                    # Skip if:
+                    # - Inactive for less than 5 minutes
+                    # - Inactive for more than 24 hours (WhatsApp window)
+                    if not (5 <= inactive_minutes <= 1440):
+                        logger.debug(f"[Proactive Nudge] {user_id}: inactive for {inactive_minutes:.0f} mins (skipping)")
+                        continue
+
+                    users_checked += 1
+
+                    # Get user context from Mem0
+                    user_context = await _get_user_context(user_id)
+
+                    # Generate nudge message
+                    nudge_message = _generate_nudge_message(user_id, user_context, inactive_minutes)
+
+                    if nudge_message:
+                        # Send nudge
+                        phone = user_id.lstrip("+")
+                        await _send_whatsapp_message(client, phone, nudge_message)
+                        nudges_sent += 1
+                        logger.info(f"[Proactive Nudge] Sent nudge to {user_id} (inactive: {inactive_minutes:.0f} mins)")
+
+                        # Log to MongoDB
+                        session_id = f"whatsapp:{user_id}"
+                        await _log_to_mongo(session_id, user_id, "assistant", nudge_message, "whatsapp")
+
+                except Exception as e:
+                    logger.error(f"[Proactive Nudge] Error processing {user_id}: {e}")
+                    continue
+
+        return {
+            "status": "completed",
+            "users_checked": users_checked,
+            "nudges_sent": nudges_sent,
+            "timestamp": now.isoformat()
+        }
+
+
+async def _get_user_context(user_id: str) -> dict:
+    """Get user context from Mem0 (name, language, last topic)."""
+    import subprocess
+    import json
+
+    try:
+        # Call mem0_client.py
+        result = subprocess.run(
+            ["python3", "openclawforaiastro/skills/mem0/mem0_client.py", "list", "--user-id", user_id, "--limit", "50"],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+
+        if result.returncode == 0:
+            memories = result.stdout.strip()
+
+            # Parse memories for context
+            context = {
+                "name": None,
+                "language": "Hinglish",  # Default
+                "last_topic": None
+            }
+
+            for line in memories.split("\n"):
+                line_lower = line.lower()
+                if "name:" in line_lower or "naam:" in line_lower:
+                    # Extract name
+                    for word in line.split():
+                        if word[0].isupper() and len(word) > 2:
+                            context["name"] = word
+                            break
+
+                # Detect language preference
+                if any(word in line for word in ["Shaadi", "vivah", "kundli", "upay"]):
+                    context["language"] = "Hinglish"
+                elif any(word in line for word in ["Marriage", "career", "remedy"]):
+                    context["language"] = "English"
+
+            return context
+
+    except Exception as e:
+        logger.warning(f"[Proactive Nudge] Failed to get Mem0 context for {user_id}: {e}")
+
+    return {"name": None, "language": "Hinglish", "last_topic": None}
+
+
+def _generate_nudge_message(user_id: str, context: dict, inactive_minutes: float) -> str:
+    """Generate personalized nudge message based on user context."""
+    name = context.get("name")
+    language = context.get("language", "Hinglish")
+
+    # Use "ji" if name known, otherwise use generic greeting
+    if name:
+        greeting = f"{name} ji"
+    else:
+        greeting = "Hello"
+
+    inactive_hours = inactive_minutes / 60
+
+    # Hinglish templates
+    if language == "Hinglish":
+        if inactive_hours < 1:
+            templates = [
+                f"Arre {greeting}! Kya ho gaya?\n\nKafi ho gaya baat, kaise ho aaj?\n\nKoi sawaal ho toh zaroor batana.",
+            ]
+        else:
+            templates = [
+                f"Arre {greeting}! Kya ho gaya?\n\nKafi din ho gaye, kaise ho aaj?\n\nKoi sawaal ho toh zaroor batana.",
+            ]
+
+    # English templates
+    else:
+        if inactive_hours < 1:
+            templates = [
+                f"Oh wow {greeting}! How have you been?\n\nIs there anything specific you want to know?\n\nFeel free to ask!",
+            ]
+        else:
+            templates = [
+                f"Oh wow {greeting}! Long time no see.\n\nHow have you been?\n\nIf you have any questions, feel free to ask.",
+            ]
+
+    # Return first template (can add more variety later)
+    return templates[0]

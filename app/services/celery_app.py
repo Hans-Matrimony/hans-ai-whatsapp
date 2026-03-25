@@ -49,6 +49,10 @@ celery_app.conf.beat_schedule = {
         'task': 'app.services.tasks.health_check_task',
         'schedule': 300.0,  # 5 minutes
     },
+    'proactive-nudge-every-5-minutes': {
+        'task': 'app.services.tasks.proactive_nudge_task',
+        'schedule': 300.0,  # 5 minutes
+    },
 }
 
 # Import tasks to register them with Celery
