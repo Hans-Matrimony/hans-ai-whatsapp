@@ -967,7 +967,8 @@ async def _check_inactive_users():
             logger.error(f"[Proactive Nudge] Exception fetching users: {e}", exc_info=True)
             return {"error": f"Exception fetching users: {e}"}
 
-        now = datetime.utcnow()
+        from datetime import timezone
+        now = datetime.now(timezone.utc)
         nudges_sent = 0
         users_checked = 0
 
