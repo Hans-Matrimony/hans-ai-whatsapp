@@ -1000,9 +1000,10 @@ async def _check_inactive_users():
                     logger.debug(f"[Proactive Nudge] {user_id}: inactive for {inactive_minutes:.0f} mins")
 
                     # Skip if:
-                    # - Inactive for less than 5 minutes
+                    # - Inactive for less than 8 hours (480 minutes)
                     # - Inactive for more than 24 hours (WhatsApp window)
-                    if not (5 <= inactive_minutes <= 1440):
+                    if not (480 <= inactive_minutes <= 1440):
+                        logger.debug(f"[Proactive Nudge] {user_id}: inactive for {inactive_minutes:.0f} mins (skipping - too recent)")
                         continue
 
                     users_checked += 1
@@ -1045,17 +1046,77 @@ async def _check_inactive_users():
 
 async def _get_user_context(user_id: str) -> dict:
     """Get user context from Mem0 (name, language, last topic)."""
-    # For now, return default context
-    # Mem0 integration would require the mem0_client.py which is in openclawforaiastro
-    # and may not be accessible from the hans-ai-whatsapp container
+    import subprocess
+    import json
+
     context = {
         "name": None,
         "language": "Hinglish",  # Default for Indian users
         "last_topic": None
     }
 
-    # Extract name from user_id if it's a phone number (can't do much without Mem0)
-    # In production, you might want to call an API to get user data
+    try:
+        # Call mem0_client.py script
+        mem0_client_path = "/app/openclawforaiastro/skills/mem0/mem0_client.py"
+
+        # Run the mem0 client to list memories for this user
+        result = subprocess.run(
+            ["python3", mem0_client_path, "list", "--user-id", user_id, "--limit", "100"],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+
+        if result.returncode == 0:
+            memories = result.stdout.strip()
+
+            # Parse memories to extract context
+            for line in memories.split("\n"):
+                # Extract name
+                if not context["name"]:
+                    if "name:" in line.lower() or "naam:" in line.lower():
+                        words = line.split()
+                        for word in words:
+                            if word[0].isupper() and len(word) > 2 and word not in ["Name:", "Naam:"]:
+                                context["name"] = word
+                                break
+
+                # Detect language preference from previous messages
+                line_lower = line.lower()
+                hinglish_keywords = ["shaadi", "vivah", "kundli", "upay", "kundali", "man-", "mangal"]
+                english_keywords = ["marriage", "career", "job", "remedy", "health", "business"]
+
+                hinglish_count = sum(1 for kw in hinglish_keywords if kw in line_lower)
+                english_count = sum(1 for kw in english_keywords if kw in line_lower)
+
+                if hinglish_count > english_count:
+                    context["language"] = "Hinglish"
+                elif english_count > hinglish_count:
+                    context["language"] = "English"
+
+                # Detect last topic discussed
+                topic_keywords = {
+                    "marriage": ["shaadi", "marriage", "vivah", "rishta"],
+                    "career": ["job", "career", "business", "kam", "naukri"],
+                    "health": ["health", "swasthya", "illness", "bemari", "rog"],
+                    "education": ["study", "padhai", "education", "exam"]
+                }
+
+                for topic, keywords in topic_keywords.items():
+                    if any(kw in line_lower for kw in keywords):
+                        context["last_topic"] = topic
+                        break
+
+                # Break if we found all we need
+                if context["name"] and context["last_topic"]:
+                    break
+
+            logger.info(f"[Proactive Nudge] Fetched context for {user_id}: {context}")
+        else:
+            logger.warning(f"[Proactive Nudge] Mem0 client failed for {user_id}: {result.stderr}")
+
+    except Exception as e:
+        logger.warning(f"[Proactive Nudge] Failed to get Mem0 context for {user_id}: {e}")
 
     return context
 
@@ -1064,6 +1125,7 @@ def _generate_nudge_message(user_id: str, context: dict, inactive_minutes: float
     """Generate personalized nudge message based on user context."""
     name = context.get("name")
     language = context.get("language", "Hinglish")
+    last_topic = context.get("last_topic")
 
     # Use "ji" if name known, otherwise use generic greeting
     if name:
@@ -1072,28 +1134,73 @@ def _generate_nudge_message(user_id: str, context: dict, inactive_minutes: float
         greeting = "Hello"
 
     inactive_hours = inactive_minutes / 60
+    inactive_days = inactive_hours / 24
 
-    # Hinglish templates
-    if language == "Hinglish":
-        if inactive_hours < 1:
-            templates = [
-                f"Arre {greeting}! Kya ho gaya?\n\nKafi ho gaya baat, kaise ho aaj?\n\nKoi sawaal ho toh zaroor batana.",
+    # Topic-based personalized messages
+    topic_messages = {
+        "marriage": {
+            "hinglish": [
+                f"Arre {greeting}! Kya ho gaya?\n\nPichli baat humne shaadi ki thi na, koi update hai?\n\nAchhi timing aa rahi hai aapke liye.",
+                f"{greeting} ji! Kya haal hai aajkal?\n\nShaadi ki baat ki thi, koi nayi progress hui?\n\nBas batana, main hoon na.",
+            ],
+            "english": [
+                f"Oh wow {greeting}! How have you been?\n\nWe were discussing your marriage last time. Any updates?\n\nThe timing looks favorable!",
+                f"{greeting} ji! Hope you're doing well.\n\nFollowing up on our marriage discussion - any news?\n\nLet me know how things are going.",
             ]
-        else:
-            templates = [
-                f"Arre {greeting}! Kya ho gaya?\n\nKafi din ho gaye, kaise ho aaj?\n\nKoi sawaal ho toh zaroor batana.",
+        },
+        "career": {
+            "hinglish": [
+                f"{greeting} ji! Kya haal hai aajkal?\n\nJob change ki baat hui thi, koi update hai job mein?\n\nNaye opportunities aa sakte hain ab.",
+                f"Arre {greeting}! Kaise ho aajkal?\n\nCareer ki baat karte the, kuch naya hua?\n\nBest time hai abhi opportunities ke liye.",
+            ],
+            "english": [
+                f"{greeting} ji! How's everything going?\n\nFollowing up on our career discussion - any updates on the job front?\n\nGood opportunities might be coming your way!",
+                f"Oh wow {greeting}! Hope you're doing well.\n\nHow's your job search going? Any new developments?\n\nJust checking in!",
             ]
+        },
+        "health": {
+            "hinglish": [
+                f"{greeting} ji! Kaise ho aaj?\n\nHealth ki baat hui thi, ab kaisa feel ho raha hai?\n\nUpay follow kar rahe ho na?",
+                f"Arre {greeting}! Kya haal hai?\n\nHealth ki chinta hai, sab theek thik ho raha hai na?\n\nBas bata, main hoon na.",
+            ],
+            "english": [
+                f"{greeting} ji! How are you doing today?\n\nFollowing up on our health discussion - how are you feeling now?\n\nHope the remedies are helping!",
+                f"Oh wow {greeting}! Hope you're doing well.\n\nHow's your health now? Any improvements?\n\nJust wanted to check in!",
+            ]
+        },
+        "education": {
+            "hinglish": [
+                f"{greeting} ji! Padhai kaise chal rahi hai?\n\nStudies ki baat hui thi, kaisa progress hai?\n\nBest of luck!",
+                f"Arre {greeting}! Exams ki taiyari kaise ho rahi hai?\n\nPadhai mein koi help chahiye toh batana.",
+            ],
+            "english": [
+                f"{greeting} ji! How are your studies going?\n\nFollowing up on your education discussion - any progress?\n\nHope everything's going well!",
+                f"Oh wow {greeting}! Hope studies are going well.\n\nAny updates on your education front?\n\nJust checking in!",
+            ]
+        }
+    }
 
-    # English templates
+    # Get messages for the last topic, or use general messages
+    if last_topic and last_topic in topic_messages:
+        messages = topic_messages[last_topic]
     else:
-        if inactive_hours < 1:
-            templates = [
-                f"Oh wow {greeting}! How have you been?\n\nIs there anything specific you want to know?\n\nFeel free to ask!",
+        # General messages when no specific topic
+        messages = {
+            "hinglish": [
+                f"Arre {greeting}! Kya ho gaya?\n\nKafi din ho gaye baat, kaise ho aaj?\n\nKoi sawaal ho toh zaroor batana.",
+                f"{greeting} ji! Kaise ho aajkal?\n\nKuch bhi chahte ho toh puch sakte ho, main hoon na.\n\nKoi bhi problem ho, share kar lijiye.",
+            ],
+            "english": [
+                f"Oh wow {greeting}! How have you been?\n\nIt's been a while. Anything specific you want to discuss?\n\nFeel free to ask!",
+                f"{greeting} ji! Long time no see!\n\nHow have you been? Any questions or concerns?\n\nI'm here to help!",
             ]
-        else:
-            templates = [
-                f"Oh wow {greeting}! Long time no see.\n\nHow have you been?\n\nIf you have any questions, feel free to ask.",
-            ]
+        }
 
-    # Return first template (can add more variety later)
-    return templates[0]
+    # Select appropriate language messages
+    if language == "Hinglish":
+        template_list = messages["hinglish"]
+    else:
+        template_list = messages["english"]
+
+    # Return first template (can add random selection later)
+    return template_list[0]
