@@ -1142,11 +1142,8 @@ def _generate_nudge_message(user_id: str, context: dict, inactive_minutes: float
     language = context.get("language", "Hinglish")
     last_topic = context.get("last_topic")
 
-    # Use "ji" if name known, otherwise use generic greeting
-    if name:
-        greeting = f"{name} ji"
-    else:
-        greeting = "Hello"
+    # Ensure natural naming (avoid forced "ji" in every single template)
+    n_only = name if name else "dost"
 
     inactive_hours = inactive_minutes / 60
     inactive_days = inactive_hours / 24
@@ -1156,51 +1153,51 @@ def _generate_nudge_message(user_id: str, context: dict, inactive_minutes: float
         "marriage": {
             "hinglish": [
                 [
-                    f"Arre {greeting}! Kya ho gaya?",
-                    "Pichli baat humne shaadi ki thi na, koi update hai?",
-                    "Achhi timing aa rahi hai aapke liye."
+                    f"Hello {n_only}! Kaise hain aajkal?",
+                    "Pichli baar humne aapki shaadi ke baare mein baat ki thi. Koi progress?",
+                    "Sitare abhi aapke haq mein hain, tension mat lijiye."
                 ],
                 [
-                    f"{greeting} ji! Kya haal hai aajkal?",
-                    "Shaadi ki baat ki thi, koi nayi progress hui?",
-                    "Bas batana, main hoon na."
+                    f"Hi {n_only}! Sab theek chal raha hai na?",
+                    "Shaadi ki planning kahan tak pohochi?",
+                    "Kuch bhi zarurat ho toh batana, main yahan hoon."
                 ]
             ],
             "english": [
                 [
-                    f"Oh wow {greeting}! How have you been?",
-                    "We were discussing your marriage last time. Any updates?",
-                    "The timing looks favorable!"
+                    f"Hello {n_only}! How have you been?",
+                    "We discussed your marriage plans last time. Any exciting updates?",
+                    "The stars are looking favorable for you!"
                 ],
                 [
-                    f"{greeting} ji! Hope you're doing well.",
-                    "Following up on our marriage discussion - any news?",
-                    "Let me know how things are going."
+                    f"Hi {n_only}! Hope you're doing well.",
+                    "Just checking in on the marriage plans we discussed earlier.",
+                    "Let me know if you need any guidance."
                 ]
             ]
         },
         "career": {
             "hinglish": [
                 [
-                    f"{greeting} ji! Kya haal hai aajkal?",
-                    "Job change ki baat hui thi, koi update hai job mein?",
-                    "Naye opportunities aa sakte hain ab."
+                    f"Hello {n_only}! Kaise hain aap?",
+                    "Aapke job aur career ki baat hui thi, koi naya update aaya usme?",
+                    "Naye opportunities aspas hi hain, lage rahiye."
                 ],
                 [
-                    f"Arre {greeting}! Kaise ho aajkal?",
-                    "Career ki baat karte the, kuch naya hua?",
-                    "Best time hai abhi opportunities ke liye."
+                    f"Hi {n_only}! Kya haal hain aajkal?",
+                    "Career ki planning kaisi chal rahi hai?",
+                    "Sahi time hai abhi opportunities ke liye."
                 ]
             ],
             "english": [
                 [
-                    f"{greeting} ji! How's everything going?",
-                    "Following up on our career discussion - any updates on the job front?",
+                    f"Hello {n_only}! How's everything going?",
+                    "Just following up on our career discussion. Are there any new updates on the job front?",
                     "Good opportunities might be coming your way!"
                 ],
                 [
-                    f"Oh wow {greeting}! Hope you're doing well.",
-                    "How's your job search going? Any new developments?",
+                    f"Hi {n_only}! Hope you're having a good week.",
+                    "How is your job search going? Any developments?",
                     "Just checking in!"
                 ]
             ]
@@ -1208,51 +1205,51 @@ def _generate_nudge_message(user_id: str, context: dict, inactive_minutes: float
         "health": {
             "hinglish": [
                 [
-                    f"{greeting} ji! Kaise ho aaj?",
-                    "Health ki baat hui thi, ab kaisa feel ho raha hai?",
-                    "Upay follow kar rahe ho na?"
+                    f"Hello {n_only}! Kaise hain aaj?",
+                    "Aapki health ki baat hui thi, ab aap kaisa feel kar rahe hain?",
+                    "Dhyan rakhiyega apna."
                 ],
                 [
-                    f"Arre {greeting}! Kya haal hai?",
-                    "Health ki chinta hai, sab theek thik ho raha hai na?",
-                    "Bas bata, main hoon na."
+                    f"Hi {n_only}! Sab theek hai na?",
+                    "Aapke health ki chinta thi, ummid hai ab thik hoga sab.",
+                    "Koi bhi tension ho toh bata dijiyega."
                 ]
             ],
             "english": [
                 [
-                    f"{greeting} ji! How are you doing today?",
-                    "Following up on our health discussion - how are you feeling now?",
-                    "Hope the remedies are helping!"
+                    f"Hello {n_only}! How are you doing today?",
+                    "Following up on our previous health discussion. How are you feeling now?",
+                    "I hope the remedies are helping!"
                 ],
                 [
-                    f"Oh wow {greeting}! Hope you're doing well.",
-                    "How's your health now? Any improvements?",
-                    "Just wanted to check in!"
+                    f"Hi {n_only}! Just checking in.",
+                    "How is your health now? Are you seeing any improvements?",
+                    "Please take care of yourself."
                 ]
             ]
         },
         "education": {
             "hinglish": [
                 [
-                    f"{greeting} ji! Padhai kaise chal rahi hai?",
-                    "Studies ki baat hui thi, kaisa progress hai?",
-                    "Best of luck!"
+                    f"Hello {n_only}! Padhai kaisi chal rahi hai?",
+                    "Studies ki baat hui thi pichli baar, kaisa progress hai?",
+                    "Best of luck aapki taiyari ke liye!"
                 ],
                 [
-                    f"Arre {greeting}! Exams ki taiyari kaise ho rahi hai?",
-                    "Padhai mein koi help chahiye toh batana."
+                    f"Hi {n_only}! Exams ki taiyari kaisi ho rahi hai?",
+                    "Padhai mein koi help chahiye toh zarur batana."
                 ]
             ],
             "english": [
                 [
-                    f"{greeting} ji! How are your studies going?",
-                    "Following up on your education discussion - any progress?",
+                    f"Hello {n_only}! How are your studies going?",
+                    "We talked about your education earlier, are you making good progress?",
                     "Hope everything's going well!"
                 ],
                 [
-                    f"Oh wow {greeting}! Hope studies are going well.",
-                    "Any updates on your education front?",
-                    "Just checking in!"
+                    f"Hi {n_only}! Hope your studies are going well.",
+                    "Any updates on your exams or education plans?",
+                    "Just wanted to check in!"
                 ]
             ]
         }
@@ -1266,25 +1263,25 @@ def _generate_nudge_message(user_id: str, context: dict, inactive_minutes: float
         messages = {
             "hinglish": [
                 [
-                    f"Arre {greeting}! Kya ho gaya?",
-                    "Kafi din ho gaye baat, kaise ho aaj?",
-                    "Koi sawaal ho toh zaroor batana."
+                    f"Hello {n_only}! Kaise hain aap aajkal?",
+                    "Socha ek baar check kar loon, sab theek chal raha hai na?",
+                    "Koi sawaal ho toh zarur puchiyega."
                 ],
                 [
-                    f"{greeting} ji! Kaise ho aajkal?",
-                    "Kuch bhi chahte ho toh puch sakte ho, main hoon na.",
-                    "Koi bhi problem ho, share kar lijiye."
+                    f"Hi {n_only}! Kafi din ho gaye baat kiye.",
+                    "Kuch bhi janna chahte ho toh puch sakte ho, main yahin hoon.",
+                    "Life mein koi problem ho, toh share kar lijiye."
                 ]
             ],
             "english": [
                 [
-                    f"Oh wow {greeting}! How have you been?",
-                    "It's been a while. Anything specific you want to discuss?",
-                    "Feel free to ask!"
+                    f"Hello {n_only}! How have you been lately?",
+                    "It's been a little while, just wanted to check in. Anything specific you want to discuss?",
+                    "Feel free to ask whenever you're ready!"
                 ],
                 [
-                    f"{greeting} ji! Long time no see!",
-                    "How have you been? Any questions or concerns?",
+                    f"Hi {n_only}! Long time no see.",
+                    "How are things with you? Do you have any questions or concerns right now?",
                     "I'm here to help!"
                 ]
             ]
