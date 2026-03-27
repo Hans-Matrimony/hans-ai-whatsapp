@@ -1344,33 +1344,63 @@ def _generate_nudge_message(user_id: str, context: dict, inactive_minutes: float
     if last_topic and last_topic in topic_messages:
         messages = topic_messages[last_topic]
     else:
-        # General messages when no specific topic
-        messages = {
-            "hinglish": [
-                [
-                    f"Hello {n_only}! Kaise hain aap aajkal?",
-                    "Socha ek baar check kar loon, sab theek chal raha hai na?",
-                    "Koi sawaal ho toh zarur puchiyega."
+        # General messages when no specific topic detected
+        if name:
+            # Personalized messages when we know the name
+            messages = {
+                "hinglish": [
+                    [
+                        f"Hello {name}! Kaise hain aap aajkal?",
+                        "Pichli baar aapse baat hui thi, kuch nayi baat karni hai kya?",
+                        "Main yahan hoon aapki madad ke liye."
+                    ],
+                    [
+                        f"Hi {name}! Kafi din ho gaye baat kiye.",
+                        "Kuch bhi janna chahte ho toh puch sakte ho!",
+                        "Kaisa bhi sawaal ho, zaroor batana."
+                    ]
                 ],
-                [
-                    f"Hi {n_only}! Kafi din ho gaye baat kiye.",
-                    "Kuch bhi janna chahte ho toh puch sakte ho, main yahin hoon.",
-                    "Life mein koi problem ho, toh share kar lijiye."
+                "english": [
+                    [
+                        f"Hello {name}! How have you been lately?",
+                        "Hope you're doing well! Any specific questions you want to discuss?",
+                        "I'm here to help!"
+                    ],
+                    [
+                        f"Hi {name}! Long time no see.",
+                        "How are things with you? Do you have any questions right now?",
+                        "Just wanted to check in!"
+                    ]
                 ]
-            ],
-            "english": [
-                [
-                    f"Hello {n_only}! How have you been lately?",
-                    "It's been a little while, just wanted to check in. Anything specific you want to discuss?",
-                    "Feel free to ask whenever you're ready!"
+            }
+        else:
+            # Generic messages when we don't know the name
+            messages = {
+                "hinglish": [
+                    [
+                        "Hello dost! Kaise hain aap aajkal?",
+                        "Koi sawaal ho toh zarur puchiyega.",
+                        "Main yahan hoon aapki madad ke liye."
+                    ],
+                    [
+                        "Hi dost! Kafi din ho gaye baat kiye.",
+                        "Koi bhi problem ho, toh share kar lijiye.",
+                        "Kaisa bhi sawaal ho, zaroor batana."
+                    ]
                 ],
-                [
-                    f"Hi {n_only}! Long time no see.",
-                    "How are things with you? Do you have any questions or concerns right now?",
-                    "I'm here to help!"
+                "english": [
+                    [
+                        "Hello! How have you been lately?",
+                        "Feel free to ask whenever you're ready!",
+                        "I'm here to help!"
+                    ],
+                    [
+                        "Hi there! Long time no see.",
+                        "Let me know if there's anything I can help with!",
+                        "Just wanted to check in!"
+                    ]
                 ]
-            ]
-        }
+            }
 
     # Select appropriate language messages
     if language == "Hinglish":
