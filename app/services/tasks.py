@@ -22,7 +22,7 @@ MONGO_LOGGER_URL = os.getenv("MONGO_LOGGER_URL")
 WHATSAPP_PHONE_ID = os.getenv("WHATSAPP_PHONE_ID")
 WHATSAPP_ACCESS_TOKEN = os.getenv("WHATSAPP_ACCESS_TOKEN")
 FB_API_URL = "https://graph.facebook.com/v18.0"
-MEM0_URL = os.getenv("MEM0_URL", "http://mem0:8002")
+MEM0_URL = os.getenv("MEM0_URL", "https://rg4g0gkk0wwkk4cc00g4sg0c.api.hansastro.com")
 
 # Testing mode: Only send proactive nudges to this number (None = send to all users)
 PROACTIVE_NUDGE_TEST_NUMBER = os.getenv("PROACTIVE_NUDGE_TEST_NUMBER", "+919760347653")
