@@ -22,7 +22,7 @@ MONGO_LOGGER_URL = os.getenv("MONGO_LOGGER_URL")
 WHATSAPP_PHONE_ID = os.getenv("WHATSAPP_PHONE_ID")
 WHATSAPP_ACCESS_TOKEN = os.getenv("WHATSAPP_ACCESS_TOKEN")
 FB_API_URL = "https://graph.facebook.com/v18.0"
-MEM0_URL = os.getenv("MEM0_URL", "http://hans-ai-mem0:8002")
+MEM0_URL = os.getenv("MEM0_URL", "http://mem0:8002")
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
