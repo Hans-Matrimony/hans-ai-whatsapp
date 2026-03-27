@@ -24,6 +24,9 @@ WHATSAPP_ACCESS_TOKEN = os.getenv("WHATSAPP_ACCESS_TOKEN")
 FB_API_URL = "https://graph.facebook.com/v18.0"
 MEM0_URL = os.getenv("MEM0_URL", "http://mem0:8002")
 
+# Testing mode: Only send proactive nudges to this number (None = send to all users)
+PROACTIVE_NUDGE_TEST_NUMBER = os.getenv("PROACTIVE_NUDGE_TEST_NUMBER", "+919760347653")
+
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
 def process_message_task(self, phone: str, message: str, message_id: str, message_type: str = "text", media_info: dict = None):
@@ -915,6 +918,12 @@ def proactive_nudge_task():
     try:
         logger.info("[Proactive Nudge] ===== TASK STARTED =====")
 
+        # Log testing mode status
+        if PROACTIVE_NUDGE_TEST_NUMBER:
+            logger.info(f"[Proactive Nudge] ⚠️  TESTING MODE: Only sending to {PROACTIVE_NUDGE_TEST_NUMBER}")
+        else:
+            logger.info("[Proactive Nudge] PRODUCTION MODE: Sending to all eligible users")
+
         # Check if within active hours (10 AM - 9 PM IST)
         from datetime import datetime
         import pytz
@@ -977,6 +986,13 @@ async def _check_inactive_users():
             user_id = user.get("userId", "")
             if not user_id or not user_id.startswith("+"):
                 continue
+
+            # TESTING MODE: Only send to test number
+            if PROACTIVE_NUDGE_TEST_NUMBER and user_id != PROACTIVE_NUDGE_TEST_NUMBER:
+                logger.debug(f"[Proactive Nudge] TESTING MODE: Skipping {user_id} (not test number)")
+                continue
+
+            logger.info(f"[Proactive Nudge] ✓ Processing {user_id} (matches test number)")
 
             for session in user.get("sessions", []):
                 channel = session.get("channel", "").lower()
