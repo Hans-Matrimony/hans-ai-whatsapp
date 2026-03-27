@@ -917,12 +917,7 @@ def proactive_nudge_task():
 
     try:
         logger.info("[Proactive Nudge] ===== TASK STARTED =====")
-
-        # Log testing mode status
-        if PROACTIVE_NUDGE_TEST_NUMBER:
-            logger.info(f"[Proactive Nudge] ⚠️  TESTING MODE: Only sending to {PROACTIVE_NUDGE_TEST_NUMBER}")
-        else:
-            logger.info("[Proactive Nudge] PRODUCTION MODE: Sending to all eligible users")
+        logger.info("[Proactive Nudge] PRODUCTION MODE: Sending to all eligible users")
 
         # Check if within active hours (10 AM - 9 PM IST)
         from datetime import datetime
@@ -1081,12 +1076,12 @@ async def _check_inactive_users():
             if not user_id or not user_id.startswith("+"):
                 continue
 
-            # TESTING MODE: Only send to test number
-            if PROACTIVE_NUDGE_TEST_NUMBER and user_id != PROACTIVE_NUDGE_TEST_NUMBER:
-                logger.debug(f"[Proactive Nudge] TESTING MODE: Skipping {user_id} (not test number)")
-                continue
+            # TESTING MODE: Only send to test number (DISABLED for production)
+            # if PROACTIVE_NUDGE_TEST_NUMBER and user_id != PROACTIVE_NUDGE_TEST_NUMBER:
+            #     logger.debug(f"[Proactive Nudge] TESTING MODE: Skipping {user_id} (not test number)")
+            #     continue
 
-            logger.info(f"[Proactive Nudge] ✓ Processing {user_id} (matches test number)")
+            # logger.info(f"[Proactive Nudge] ✓ Processing {user_id} (matches test number)")
 
             for session in user.get("sessions", []):
                 channel = session.get("channel", "").lower()
@@ -1111,7 +1106,7 @@ async def _check_inactive_users():
                     logger.debug(f"[Proactive Nudge] {user_id}: inactive for {inactive_minutes:.0f} mins")
 
                     # Skip if:
-                    # - Inactive for less than 5 minutes (TESTING - will revert to 8 hours later)
+                    # - Inactive for less than 5 minutes (TESTING - will change to 480 minutes for production)
                     # - Inactive for more than 24 hours (WhatsApp window)
                     if not (5 <= inactive_minutes <= 1440):
                         logger.debug(f"[Proactive Nudge] {user_id}: inactive for {inactive_minutes:.0f} mins (skipping - too recent)")
