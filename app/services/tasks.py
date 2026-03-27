@@ -22,6 +22,7 @@ MONGO_LOGGER_URL = os.getenv("MONGO_LOGGER_URL")
 WHATSAPP_PHONE_ID = os.getenv("WHATSAPP_PHONE_ID")
 WHATSAPP_ACCESS_TOKEN = os.getenv("WHATSAPP_ACCESS_TOKEN")
 FB_API_URL = "https://graph.facebook.com/v18.0"
+MEM0_URL = os.getenv("MEM0_URL", "http://hans-ai-mem0:8002")
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
@@ -1060,10 +1061,7 @@ async def _check_inactive_users():
 
 
 async def _get_user_context(user_id: str) -> dict:
-    """Get user context from Mem0 (name, language, last topic)."""
-    import subprocess
-    import json
-
+    """Get user context from Mem0 (name, language, last topic) using HTTP API."""
     context = {
         "name": None,
         "language": "Hinglish",  # Default for Indian users
@@ -1071,67 +1069,138 @@ async def _get_user_context(user_id: str) -> dict:
     }
 
     try:
-        # Call mem0_client.py script
-        mem0_client_path = "/app/openclawforaiastro/skills/mem0/mem0_client.py"
+        logger.info(f"[Proactive Nudge] Fetching context from Mem0 API for {user_id}")
 
-        # Run the mem0 client to list memories for this user
-        result = subprocess.run(
-            ["python3", mem0_client_path, "list", "--user-id", user_id, "--limit", "100"],
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
+        # Call Mem0 HTTP API
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                f"{MEM0_URL}/memory/{user_id}",
+                params={"limit": 100}
+            )
 
-        if result.returncode == 0:
-            memories = result.stdout.strip()
+            if response.status_code != 200:
+                logger.warning(f"[Proactive Nudge] Mem0 API returned {response.status_code}: {response.text[:200]}")
+                return context
 
-            # Parse memories to extract context
-            for line in memories.split("\n"):
-                # Extract name
+            data = response.json()
+
+            if not data.get("success"):
+                logger.warning(f"[Proactive Nudge] Mem0 API returned success=False for {user_id}")
+                return context
+
+            memories = data.get("memories", [])
+            logger.info(f"[Proactive Nudge] Found {len(memories)} memories for {user_id}")
+
+            # Separate metadata memories from conversation memories
+            conversation_memories = []
+            metadata_memories = []
+
+            metadata_indicators = ["name is", "date of birth is", "time of birth is", "place of birth is",
+                                   "gender is", "janam tithi", "samay", "janam sthaan", "user"]
+
+            for memory in memories:
+                # Handle both dict and object formats
+                if isinstance(memory, dict):
+                    mem_text = memory.get("memory", "")
+                else:
+                    mem_text = getattr(memory, "memory", "")
+
+                mem_lower = mem_text.lower()
+
+                # Check if this is metadata (looks like "User Name is X")
+                if any(indicator in mem_lower for indicator in metadata_indicators):
+                    metadata_memories.append(mem_text)
+                else:
+                    conversation_memories.append(mem_text)
+
+            logger.info(f"[Proactive Nudge] {len(metadata_memories)} metadata, {len(conversation_memories)} conversation memories")
+
+            # Extract name from metadata first
+            for mem_text in metadata_memories:
+                mem_lower = mem_text.lower()
                 if not context["name"]:
-                    if "name:" in line.lower() or "naam:" in line.lower():
-                        words = line.split()
+                    # Try "Name is X" pattern
+                    if "name is" in mem_lower:
+                        name_part = mem_text.split("name is")[-1].split(".")[0].strip()
+                        # Get first meaningful word
+                        words = name_part.replace(".", " ").split()
                         for word in words:
-                            if word[0].isupper() and len(word) > 2 and word not in ["Name:", "Naam:"]:
+                            if word and word[0].isupper() and len(word) > 2 and word.lower() not in ["user", "name"]:
                                 context["name"] = word
+                                logger.info(f"[Proactive Nudge] ✓ Extracted name: {context['name']}")
                                 break
 
-                # Detect language preference from previous messages
-                line_lower = line.lower()
-                hinglish_keywords = ["shaadi", "vivah", "kundli", "upay", "kundali", "man-", "mangal"]
-                english_keywords = ["marriage", "career", "job", "remedy", "health", "business"]
+                    # Try Hindi "Naam" pattern
+                    if not context["name"] and "naam" in mem_lower:
+                        # Find word after "naam"
+                        for word in mem_text.split():
+                            if word[0].isupper() and len(word) > 2 and word.lower() not in ["naam", "user", "kya", "hai"]:
+                                context["name"] = word
+                                logger.info(f"[Proactive Nudge] ✓ Extracted name from 'naam': {context['name']}")
+                                break
 
-                hinglish_count = sum(1 for kw in hinglish_keywords if kw in line_lower)
-                english_count = sum(1 for kw in english_keywords if kw in line_lower)
+            # Detect language and topic from conversation memories
+            topic_scores = {"marriage": 0, "career": 0, "health": 0, "education": 0}
+            hinglish_score = 0
+            english_score = 0
 
-                if hinglish_count > english_count:
-                    context["language"] = "Hinglish"
-                elif english_count > hinglish_count:
-                    context["language"] = "English"
+            for mem_text in conversation_memories:
+                mem_lower = mem_text.lower()
 
-                # Detect last topic discussed
+                # Language detection - expanded keywords
+                hinglish_keywords = ["shaadi", "vivah", "kundli", "upay", "kundali", "mangal",
+                                    "tabiyat", "bimari", "swasthya", "rog", "padhai", "naukri",
+                                    "kam", "rishta", "kaise", "kya", "hai", "lijiye", "jiye"]
+                english_keywords = ["marriage", "career", "job", "remedy", "health", "business",
+                                   "illness", "education", "study", "exam", "government", "plan"]
+
+                for kw in hinglish_keywords:
+                    if kw in mem_lower:
+                        hinglish_score += 1
+                for kw in english_keywords:
+                    if kw in mem_lower:
+                        english_score += 1
+
+                # Topic detection with comprehensive keywords
                 topic_keywords = {
-                    "marriage": ["shaadi", "marriage", "vivah", "rishta"],
-                    "career": ["job", "career", "business", "kam", "naukri"],
-                    "health": ["health", "swasthya", "illness", "bemari", "rog"],
-                    "education": ["study", "padhai", "education", "exam"]
+                    "marriage": ["shaadi", "marriage", "vivah", "rishta", "life partner", "spouse",
+                                "milna", "shadi", "lagna", "partner"],
+                    "career": ["job", "career", "business", "kam", "naukri", "government", "govt",
+                              "service", "employment", "work", "office", "company", "interview",
+                              "promotion", "salary", "earning"],
+                    "health": ["health", "swasthya", "illness", "bemari", "rog", "tabiyat", "bimari",
+                              "disease", "sick", "problem", "pain", "upay", "remedy", "medicine",
+                              "theek", "recovery", "treatment"],
+                    "education": ["study", "padhai", "education", "exam", "test", "school", "college",
+                                 "university", "degree", "course", "result", "marks", "grade"]
                 }
 
                 for topic, keywords in topic_keywords.items():
-                    if any(kw in line_lower for kw in keywords):
-                        context["last_topic"] = topic
-                        break
+                    for kw in keywords:
+                        if kw in mem_lower:
+                            topic_scores[topic] += 1
 
-                # Break if we found all we need
-                if context["name"] and context["last_topic"]:
-                    break
+            # Determine language from scores
+            if hinglish_score > english_score:
+                context["language"] = "Hinglish"
+            elif english_score > hinglish_score:
+                context["language"] = "English"
+            logger.info(f"[Proactive Nudge] Language scores - Hinglish: {hinglish_score}, English: {english_score}. Selected: {context['language']}")
 
-            logger.info(f"[Proactive Nudge] Fetched context for {user_id}: {context}")
-        else:
-            logger.warning(f"[Proactive Nudge] Mem0 client failed for {user_id}: {result.stderr}")
+            # Determine topic from highest score
+            max_topic_score = 0
+            for topic, score in topic_scores.items():
+                if score > max_topic_score:
+                    max_topic_score = score
+                    context["last_topic"] = topic
 
+            logger.info(f"[Proactive Nudge] Topic scores: {topic_scores}. Selected: {context['last_topic']}")
+            logger.info(f"[Proactive Nudge] ✓ Final context for {user_id}: name={context['name']}, language={context['language']}, topic={context['last_topic']}")
+
+    except httpx.TimeoutException:
+        logger.warning(f"[Proactive Nudge] Mem0 API timed out for {user_id}")
     except Exception as e:
-        logger.warning(f"[Proactive Nudge] Failed to get Mem0 context for {user_id}: {e}")
+        logger.warning(f"[Proactive Nudge] Failed to get Mem0 context for {user_id}: {e}", exc_info=True)
 
     return context
 
