@@ -987,39 +987,47 @@ async def _get_recent_conversation_from_mongo(user_id: str, session_data: dict =
             logger.info(f"[Proactive Nudge] No user questions found for {user_id}")
             return result
 
-        # Keep last 3 questions
-        result["last_questions"] = user_questions[-3:]
-        logger.info(f"[Proactive Nudge] Found {len(user_questions)} user questions, analyzing last 3")
+        # Analyze only last 5 questions (RECENT context matters most!)
+        recent_questions = user_questions[-5:]
+        result["last_questions"] = recent_questions
+        logger.info(f"[Proactive Nudge] Total questions: {len(user_questions)}, analyzing last 5 for recent context")
+        logger.debug(f"[Proactive Nudge] Recent questions: {[q[:50]+'...' for q in recent_questions]}")
 
         # Topic detection from user questions
         topic_keywords = {
             "marriage": ["shaadi", "marriage", "vivah", "rishta", "life partner", "spouse",
                         "milna", "shadi", "lagna", "partner", "engagement", "sagai",
                         "marry", "wedding", "shaadi kab", "engagement kab", "meri shaadi",
-                        "meri engagement", "vivah", "rishta"],
+                        "meri engagement", "vivah", "rishta", "divorce"],
             "career": ["job", "career", "business", "kam", "naukri", "government", "govt",
                       "service", "employment", "work", "office", "company", "interview",
                       "promotion", "salary", "earning", "new macbook", "purchase", "buy",
                       "macbook", "laptop"],
             "health": ["health", "swasthya", "illness", "bemari", "rog", "tabiyat", "bimari",
                       "disease", "sick", "problem", "pain", "upay", "remedy", "medicine",
-                      "theek", "recovery", "treatment", "kaise feel"],
+                      "theek", "recovery", "treatment", "kaise feel", "health issue",
+                      "kharab", "thek", "swasthya", "major health"],
             "education": ["study", "padhai", "education", "exam", "test", "school", "college",
                          "university", "degree", "course", "result", "marks", "grade"]
         }
 
         topic_scores = {"marriage": 0, "career": 0, "health": 0, "education": 0}
 
-        # Score each question against topics
-        for question in user_questions:
+        # Score each RECENT question against topics (prioritize recent context)
+        # Most recent question gets 2x weight, second most gets 1.5x, etc.
+        for idx, question in enumerate(recent_questions):
             question_lower = question.lower()
-            logger.debug(f"[Proactive Nudge] Analyzing question: {question_lower[:80]}...")
+
+            # Calculate weight: most recent = 2x, second = 1.5x, third = 1.2x, etc.
+            weight = 2.0 - (idx * 0.2)  # [2.0, 1.8, 1.6, 1.4, 1.2]
+
+            logger.debug(f"[Proactive Nudge] Analyzing recent question (weight={weight:.1f}): {question_lower[:60]}...")
 
             for topic, keywords in topic_keywords.items():
                 for kw in keywords:
                     if kw in question_lower:
-                        topic_scores[topic] += 1
-                        logger.debug(f"[Proactive Nudge] ✓ Topic '{topic}' matched on keyword '{kw}'")
+                        topic_scores[topic] += weight
+                        logger.debug(f"[Proactive Nudge] ✓ Topic '{topic}' +{weight:.1f} matched on '{kw}'")
 
         # Find highest scoring topic
         max_topic_score = 0
@@ -1028,7 +1036,7 @@ async def _get_recent_conversation_from_mongo(user_id: str, session_data: dict =
                 max_topic_score = score
                 result["detected_topic"] = topic
 
-        logger.info(f"[Proactive Nudge] Topic scores from MongoDB: {topic_scores}")
+        logger.info(f"[Proactive Nudge] Weighted topic scores (last 5 questions, recent=2x weight): {topic_scores}")
         logger.info(f"[Proactive Nudge] ✓ Detected topic: {result['detected_topic']}")
 
     except Exception as e:
