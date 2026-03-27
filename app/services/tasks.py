@@ -951,6 +951,94 @@ def proactive_nudge_task():
         return {"error": str(e)}
 
 
+async def _get_recent_conversation_from_mongo(user_id: str) -> dict:
+    """Fetch recent conversation from MongoDB and detect topics from USER questions."""
+    result = {
+        "detected_topic": None,
+        "last_questions": []
+    }
+
+    try:
+        session_id = f"whatsapp:{user_id}"
+        logger.info(f"[Proactive Nudge] Fetching conversation from MongoDB for {session_id}")
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            # Fetch last 20 messages for this user
+            response = await client.get(
+                f"{MONGO_LOGGER_URL}/messages/{session_id}",
+                params={"limit": 20}
+            )
+
+            if response.status_code != 200:
+                logger.warning(f"[Proactive Nudge] MongoDB returned {response.status_code} for {session_id}")
+                return result
+
+            data = response.json()
+            messages = data.get("messages", [])
+
+            # Extract user questions only
+            user_questions = []
+            for msg in messages:
+                if msg.get("role") == "user":
+                    text = msg.get("text", "")
+                    if text:
+                        user_questions.append(text)
+
+            if not user_questions:
+                logger.info(f"[Proactive Nudge] No user questions found for {session_id}")
+                return result
+
+            # Keep last 3 questions
+            result["last_questions"] = user_questions[-3:]
+            logger.info(f"[Proactive Nudge] Found {len(user_questions)} user questions, analyzing last 3")
+
+            # Topic detection from user questions
+            topic_keywords = {
+                "marriage": ["shaadi", "marriage", "vivah", "rishta", "life partner", "spouse",
+                            "milna", "shadi", "lagna", "partner", "engagement", "sagai",
+                            "marry", "wedding", "shaadi kab", "engagement kab", "meri shaadi",
+                            "meri engagement", "vivah", "rishta"],
+                "career": ["job", "career", "business", "kam", "naukri", "government", "govt",
+                          "service", "employment", "work", "office", "company", "interview",
+                          "promotion", "salary", "earning", "new macbook", "purchase", "buy",
+                          "macbook", "laptop", "career"],
+                "health": ["health", "swasthya", "illness", "bemari", "rog", "tabiyat", "bimari",
+                          "disease", "sick", "problem", "pain", "upay", "remedy", "medicine",
+                          "theek", "recovery", "treatment", "kaise feel", "swasthya"],
+                "education": ["study", "padhai", "education", "exam", "test", "school", "college",
+                             "university", "degree", "course", "result", "marks", "grade",
+                             "padhai"]
+            }
+
+            topic_scores = {"marriage": 0, "career": 0, "health": 0, "education": 0}
+
+            # Score each question against topics
+            for question in user_questions:
+                question_lower = question.lower()
+                logger.debug(f"[Proactive Nudge] Analyzing question: {question_lower[:80]}...")
+
+                for topic, keywords in topic_keywords.items():
+                    for kw in keywords:
+                        if kw in question_lower:
+                            topic_scores[topic] += 1
+                            logger.debug(f"[Proactive Nudge] ✓ Topic '{topic}' matched on keyword '{kw}'")
+
+            # Find highest scoring topic
+            max_topic_score = 0
+            for topic, score in topic_scores.items():
+                if score > max_topic_score:
+                    max_topic_score = score
+                    result["detected_topic"] = topic
+
+            logger.info(f"[Proactive Nudge] Topic scores from MongoDB: {topic_scores}")
+            logger.info(f"[Proactive Nudge] ✓ Detected topic: {result['detected_topic']}")
+
+    except Exception as e:
+        logger.warning(f"[Proactive Nudge] Failed to fetch conversation from MongoDB: {e}", exc_info=True)
+
+    return result
+
+
 async def _check_inactive_users():
     """Check for inactive users and send nudges."""
     if not MONGO_LOGGER_URL:
@@ -1026,8 +1114,18 @@ async def _check_inactive_users():
                     users_checked += 1
                     logger.info(f"[Proactive Nudge] ELIGIBLE: {user_id} inactive for {inactive_minutes:.0f} mins")
 
-                    # Get user context from Mem0
+                    # Get recent conversation from MongoDB (for topic detection)
+                    recent_conversation = await _get_recent_conversation_from_mongo(user_id)
+                    logger.info(f"[Proactive Nudge] Recent conversation topic: {recent_conversation.get('detected_topic')}")
+
+                    # Get user context from Mem0 (for name and language)
                     user_context = await _get_user_context(user_id)
+
+                    # Override topic with MongoDB-based detection (more accurate)
+                    if recent_conversation.get("detected_topic"):
+                        user_context["last_topic"] = recent_conversation["detected_topic"]
+                        user_context["last_questions"] = recent_conversation.get("last_questions", [])
+
                     logger.info(f"[Proactive Nudge] User context: {user_context}")
 
                     # Generate nudge message bubbles
