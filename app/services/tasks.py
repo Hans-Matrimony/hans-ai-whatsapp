@@ -448,6 +448,7 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
         headers = {
             "Content-Type": "application/json",
             "x-openclaw-session-key": f"agent:astrologer:whatsapp:direct:+{phone}",
+            "x-openclaw-scopes": "operator.admin",
         }
 
         if OPENCLAW_GATEWAY_TOKEN:
