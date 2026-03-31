@@ -1,0 +1,11 @@
+# Audio Processing Requirements
+# For audio-to-audio WhatsApp messaging
+
+# Groq for transcription (FREE)
+# No pip install needed - just API key
+
+# Google Cloud TTS
+google-cloud-texttospeech>=2.16.0
+
+# HTTP client (for Groq API)
+httpx>=0.24.0
