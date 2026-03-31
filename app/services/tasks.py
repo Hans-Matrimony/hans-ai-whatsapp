@@ -920,7 +920,7 @@ def proactive_nudge_task():
         logger.info("[Proactive Nudge] ===== TASK STARTED =====")
         logger.info("[Proactive Nudge] PRODUCTION MODE: Sending to all eligible users")
 
-        # Check if within active hours (10 AM - 9 PM IST)
+        # Check if within active hours (9 AM - 10 PM IST)
         from datetime import datetime
         import pytz
         ist = pytz.timezone('Asia/Kolkata')
@@ -929,7 +929,7 @@ def proactive_nudge_task():
 
         logger.info(f"[Proactive Nudge] Current time: {now_ist.strftime('%Y-%m-%d %H:%M:%S')} IST")
 
-        if not (10 <= current_hour < 21):
+        if not (9 <= current_hour < 22):
             logger.info(f"[Proactive Nudge] Outside active hours ({current_hour}:00 IST), skipping")
             return {"status": "outside_active_hours", "current_hour": current_hour}
 
@@ -1107,9 +1107,9 @@ async def _check_inactive_users():
                     logger.debug(f"[Proactive Nudge] {user_id}: inactive for {inactive_minutes:.0f} mins")
 
                     # Skip if:
-                    # - Inactive for less than 480 minutes (8 hours - production ready)
+                    # - Inactive for less than 360 minutes (6 hours)
                     # - Inactive for more than 24 hours (WhatsApp window)
-                    if not (480 <= inactive_minutes <= 1440):
+                    if not (360 <= inactive_minutes <= 1440):
                         logger.debug(f"[Proactive Nudge] {user_id}: inactive for {inactive_minutes:.0f} mins (skipping - too recent)")
                         continue
 
