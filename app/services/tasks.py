@@ -1152,7 +1152,7 @@ async def _check_inactive_users():
                     # Skip if:
                     # - Inactive for less than 360 minutes (6 hours)
                     # - Inactive for more than 24 hours (WhatsApp window)
-                    if not (360 <= inactive_minutes <= 1440):
+                    if not (480 <= inactive_minutes <= 1440):
                         logger.debug(f"[Proactive Nudge] {user_id}: inactive for {inactive_minutes:.0f} mins (skipping - too recent)")
                         continue
 
