@@ -451,7 +451,7 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
 
         try:
             # Import audio processor
-            from audio_processor.transcribe import transcribe_audio
+            from skills.audio_processor.transcribe import transcribe_audio
 
             # Transcribe audio to text using Groq (FREE)
             if media_info and media_info.get("base64_data"):
