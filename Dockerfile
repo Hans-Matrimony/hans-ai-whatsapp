@@ -26,6 +26,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY whatsapp_webhook.py /app/
 COPY app/ /app/app/
+COPY skills/ /app/skills/
 COPY entrypoint.sh /app/entrypoint.sh
 COPY healthcheck.sh /app/healthcheck.sh
 
