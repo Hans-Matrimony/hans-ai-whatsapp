@@ -3,6 +3,7 @@ Celery tasks for asynchronous message processing
 """
 import os
 import re
+import sys
 import logging
 import base64
 import tempfile
@@ -12,6 +13,11 @@ from pathlib import Path
 
 import httpx
 from app.services.celery_app import celery_app
+
+# Add skills directory to path for audio processor
+skills_path = os.path.join(os.path.dirname(__file__), '../../skills')
+if skills_path not in sys.path:
+    sys.path.insert(0, skills_path)
 
 logger = logging.getLogger(__name__)
 
@@ -436,6 +442,43 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
     if media_info:
         log_media_info = {k: v for k, v in media_info.items() if k != "base64_data"}
     await _log_to_mongo(session_id, user_id, "user", message, "whatsapp", message_type, log_media_info)
+
+    # ==================== AUDIO MESSAGE PROCESSING ====================
+
+    # Check if this is an audio message
+    if message_type in ["audio", "voice"]:
+        logger.info(f"[Audio] Received audio message from {phone}")
+
+        try:
+            # Import audio processor
+            from audio_processor.transcribe import transcribe_audio
+
+            # Transcribe audio to text using Groq (FREE)
+            if media_info and media_info.get("base64_data"):
+                transcribed_text = await transcribe_audio(
+                    media_info["base64_data"],
+                    media_info.get("mime_type", "audio/ogg")
+                )
+
+                if transcribed_text:
+                    logger.info(f"[Audio] Transcription successful: {transcribed_text[:100]}...")
+                    # Replace the message with transcription
+                    message = transcribed_text
+                    # Keep message_type as audio for logging, but treat as text
+                    logger.info("[Audio] Proceeding with transcribed text")
+                else:
+                    logger.warning("[Audio] Transcription failed, sending empty message")
+                    message = ""  # Send empty message
+            else:
+                logger.warning("[Audio] No audio data found")
+                message = ""
+
+        except Exception as e:
+            logger.error(f"[Audio] Error processing audio: {e}")
+            # Fallback: send empty message
+            message = ""
+
+    # ===================================================================
 
     if not OPENCLAW_URL:
         logger.warning("OPENCLAW_URL not set")
