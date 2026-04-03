@@ -484,7 +484,7 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
         logger.warning("OPENCLAW_URL not set")
         return {"error": "OpenClaw URL not configured"}
 
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    async with httpx.AsyncClient(timeout=300.0) as client:
         # Send typing indicator
         await _send_typing_indicator(client, message_id)
 
