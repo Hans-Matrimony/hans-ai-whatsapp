@@ -30,6 +30,10 @@ WHATSAPP_ACCESS_TOKEN = os.getenv("WHATSAPP_ACCESS_TOKEN")
 FB_API_URL = "https://graph.facebook.com/v18.0"
 MEM0_URL = os.getenv("MEM0_URL", "https://rg4g0gkk0wwkk4cc00g4sg0c.api.hansastro.com")
 
+# Subscription Service Configuration
+SUBSCRIPTIONS_URL = os.getenv("SUBSCRIPTIONS_URL")
+SUBSCRIPTION_TEST_NUMBER = os.getenv("SUBSCRIPTION_TEST_NUMBER", "9760347653")
+
 # Testing mode: Only send proactive nudges to this number (None = send to all users)
 PROACTIVE_NUDGE_TEST_NUMBER = os.getenv("PROACTIVE_NUDGE_TEST_NUMBER", "+919760347653")
 
@@ -88,6 +92,193 @@ async def _download_whatsapp_media(media_id: str) -> dict:
     except Exception as e:
         logger.error(f"Error downloading media: {e}")
         return None
+
+
+async def _get_plans_message() -> str:
+    """
+    Fetch active plans from subscriptions service and format for WhatsApp.
+    Returns formatted message with plan options.
+    """
+    if not SUBSCRIPTIONS_URL:
+        return "Subscription service not configured. Please contact support."
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                f"{SUBSCRIPTIONS_URL}/plans?active_only=true"
+            )
+            if response.status_code == 200:
+                data = response.json()
+                plans = data.get("plans", [])
+
+                if not plans:
+                    return "No plans available. Please contact support."
+
+                # Format plans for WhatsApp
+                message = "*💫 Choose Your Subscription Plan:*\n\n"
+
+                for idx, plan in enumerate(plans, 1):
+                    price_rupees = plan.get("price", 0) / 100  # Convert paise to rupees
+                    duration = plan.get("durationDays", 30)
+
+                    message += f"*{idx}. {plan.get('name', 'Plan')}*\n"
+                    message += f"💰 ₹{price_rupees}/{duration} days\n"
+
+                    # Add features if available
+                    features = plan.get("features", [])
+                    if features and isinstance(features, list):
+                        for feature in features[:3]:  # Max 3 features
+                            message += f"   ✓ {feature}\n"
+                    message += "\n"
+
+                message += "Reply with plan number (1, 2, 3...) to get payment link."
+                return message
+            else:
+                logger.error(f"Failed to fetch plans: {response.status_code}")
+                return "Unable to fetch plans. Please try again later."
+    except Exception as e:
+        logger.error(f"Error fetching plans: {e}")
+        return "Unable to fetch plans. Please contact support."
+
+
+async def _generate_payment_link(user_id: str, plan_number: int) -> str:
+    """
+    Generate Razorpay payment link for selected plan.
+    Calls subscriptions service which creates Razorpay Payment Link.
+    Returns direct Razorpay payment URL - no custom page needed!
+    """
+    if not SUBSCRIPTIONS_URL:
+        logger.error("SUBSCRIPTIONS_URL not configured")
+        return None
+
+    try:
+        # First, fetch all plans to find the selected one
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            plans_response = await client.get(
+                f"{SUBSCRIPTIONS_URL}/plans?active_only=true"
+            )
+            if plans_response.status_code != 200:
+                return None
+
+            plans_data = plans_response.json()
+            plans = plans_data.get("plans", [])
+
+            # Validate plan number
+            if plan_number < 1 or plan_number > len(plans):
+                return None
+
+            selected_plan = plans[plan_number - 1]
+            plan_id = selected_plan.get("planId")
+
+            # Call subscriptions service to create Razorpay Payment Link
+            # This endpoint will use Razorpay Payment Links API
+            payment_link_response = await client.post(
+                f"{SUBSCRIPTIONS_URL}/payments/create-payment-link",
+                json={
+                    "userId": user_id,
+                    "planId": plan_id,
+                    "currency": "INR"
+                },
+                timeout=30.0
+            )
+
+            if payment_link_response.status_code == 200:
+                link_data = payment_link_response.json()
+                razorpay_link = link_data.get("short_url") or link_data.get("payment_link")
+
+                if razorpay_link:
+                    logger.info(f"Generated Razorpay payment link for plan {plan_number}: {razorpay_link}")
+                    return razorpay_link
+                else:
+                    logger.error("No payment_link in response")
+                    return None
+            else:
+                logger.error(f"Failed to create payment link: {payment_link_response.status_code}")
+                return None
+
+    except Exception as e:
+        logger.error(f"Error generating payment link: {e}")
+        return None
+
+
+async def _generate_trial_activation_link(user_id: str) -> str:
+    """
+    Generate ₹1 trial activation payment link.
+    Creates a Razorpay Payment Link for the trial_activation plan.
+    Returns direct Razorpay payment URL.
+    """
+    if not SUBSCRIPTIONS_URL:
+        logger.error("SUBSCRIPTIONS_URL not configured")
+        return None
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # Call subscriptions service to create Razorpay Payment Link for trial activation
+            payment_link_response = await client.post(
+                f"{SUBSCRIPTIONS_URL}/payments/create-payment-link",
+                json={
+                    "userId": user_id,
+                    "planId": "trial_activation",
+                    "currency": "INR"
+                }
+            )
+
+            if payment_link_response.status_code == 200:
+                link_data = payment_link_response.json()
+                razorpay_link = link_data.get("short_url") or link_data.get("payment_link")
+
+                if razorpay_link:
+                    logger.info(f"Generated ₹1 trial activation link for {user_id}: {razorpay_link}")
+                    return razorpay_link
+                else:
+                    logger.error("No payment_link in trial activation response")
+                    return None
+            else:
+                logger.error(f"Failed to create trial activation link: {payment_link_response.status_code}")
+                return None
+
+    except Exception as e:
+        logger.error(f"Error generating trial activation link: {e}")
+        return None
+
+
+async def _check_subscription_access(phone: str) -> dict:
+    """
+    Check if user has valid subscription (trial or active).
+    Returns: dict with 'access' field (trial, active, trial_ending_soon, no_access)
+    Only enforces subscription for SUBSCRIPTION_TEST_NUMBER (testing mode).
+    """
+    # Skip subscription check if not configured
+    if not SUBSCRIPTIONS_URL:
+        logger.debug("[Subscription] SUBSCRIPTIONS_URL not configured, skipping check")
+        return {"access": "trial", "skip_reason": "no_url"}
+
+    # Skip subscription check if not the test number (testing mode)
+    clean_phone = phone.replace("+", "").replace(" ", "")
+    if clean_phone != SUBSCRIPTION_TEST_NUMBER:
+        logger.debug(f"[Subscription] Not test number ({clean_phone} != {SUBSCRIPTION_TEST_NUMBER}), skipping check")
+        return {"access": "trial", "skip_reason": "not_test_number"}
+
+    # Check subscription status
+    user_id = f"+{clean_phone}"
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                f"{SUBSCRIPTIONS_URL}/users/{user_id}/access-check"
+            )
+            if response.status_code == 200:
+                access_data = response.json()
+                logger.info(f"[Subscription] Access check for {user_id}: {access_data.get('access')}")
+                return access_data
+            else:
+                logger.warning(f"[Subscription] Access check failed: {response.status_code}")
+                # On API failure, allow access (fail-open)
+                return {"access": "trial", "skip_reason": "api_error"}
+    except Exception as e:
+        logger.error(f"[Subscription] Error checking access: {e}")
+        # On exception, allow access (fail-open)
+        return {"access": "trial", "skip_reason": "exception"}
 
 
 async def _download_whatsapp_media_file(media_id: str) -> dict:
@@ -477,6 +668,92 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
             logger.error(f"[Audio] Error processing audio: {e}")
             # Fallback: send empty message
             message = ""
+
+    # ===================================================================
+
+    # ==================== SUBSCRIPTION CHECK ====================
+
+    # Check if user has valid subscription (trial or active)
+    # Only enforced for SUBSCRIPTION_TEST_NUMBER in testing mode
+    access = await _check_subscription_access(phone)
+
+    if access.get("access") == "no_access":
+        # User's trial has expired and no active subscription
+        # OR New user who hasn't paid ₹1 yet
+        logger.info(f"[Subscription] Access denied for {phone}")
+
+        # Check if this is a new user who needs to pay ₹1 to activate trial
+        if access.get("require_payment"):
+            # New user - Needs to pay ₹1 to activate 7-day trial
+            logger.info(f"[Subscription] New user - requires ₹1 trial activation: {phone}")
+
+            # Generate ₹1 trial activation payment link
+            trial_activation_link = await _generate_trial_activation_link(user_id)
+
+            if trial_activation_link:
+                trial_message = (
+                    "👋 Welcome to Hans AI Astrology!\n\n"
+                    "To activate your **7-day FREE trial**, please pay ₹1 (verification fee).\n\n"
+                    f"Click here: {trial_activation_link}\n\n"
+                    "After payment, send me a message to start! 💫"
+                )
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    await _send_whatsapp_message(client, phone, trial_message)
+                await _log_to_mongo(session_id, user_id, "assistant", trial_message, "whatsapp", "text", None, nudge_level=1)
+                return {"status": "trial_activation_required", "trial_activation_link": trial_activation_link}
+
+        # User is requesting to see plans
+        if message.strip().upper() in ["PAY", "PAYMENT", "PLAN", "PLANS", "SUBSCRIBE"]:
+            # Fetch and send plan options
+            plans_message = await _get_plans_message()
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                await _send_whatsapp_message(client, phone, plans_message)
+            await _log_to_mongo(session_id, user_id, "assistant", plans_message, "whatsapp")
+            return {"status": "plans_sent", "access": access}
+
+        # Check if user is selecting a plan (replying with number 1, 2, 3, etc.)
+        if message.strip().isdigit():
+            plan_number = int(message.strip())
+            payment_link = await _generate_payment_link(user_id, plan_number)
+            if payment_link:
+                link_message = (
+                    f"Great! You selected Plan {plan_number}.\n\n"
+                    f"Click here to complete payment: {payment_link}\n\n"
+                    f"After payment, come back and send me a message! 💫"
+                )
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    await _send_whatsapp_message(client, phone, link_message)
+                await _log_to_mongo(session_id, user_id, "assistant", link_message, "whatsapp")
+                return {"status": "payment_link_sent", "payment_link": payment_link}
+
+        # Default payment nudge message (trial expired)
+        payment_message = (
+            "Your 7-day free trial has ended. To continue using Hans AI Astrology services, "
+            "please subscribe to a plan.\n\n"
+            "Reply *PAY* to see subscription options."
+        )
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            await _send_whatsapp_message(client, phone, payment_message)
+
+        # Log the payment nudge to MongoDB
+        await _log_to_mongo(
+            session_id,
+            user_id,
+            "assistant",
+            payment_message,
+            "whatsapp",
+            "text",
+            None,
+            nudge_level=1  # Track as payment nudge
+        )
+
+        return {"status": "payment_required", "access": access}
+
+    # Log subscription status for monitoring
+    access_type = access.get("access", "unknown")
+    if access_type != "trial" or access.get("skip_reason"):
+        logger.info(f"[Subscription] {phone} has access: {access_type} (reason: {access.get('skip_reason', 'valid_access')})")
 
     # ===================================================================
 

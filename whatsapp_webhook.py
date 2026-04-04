@@ -47,6 +47,8 @@ WHATSAPP_ACCESS_TOKEN = os.getenv("WHATSAPP_ACCESS_TOKEN")
 OPENCLAW_URL = os.getenv("OPENCLAW_URL")
 OPENCLAW_GATEWAY_TOKEN = os.getenv("OPENCLAW_GATEWAY_TOKEN")
 MONGO_LOGGER_URL = os.getenv("MONGO_LOGGER_URL")
+SUBSCRIPTIONS_URL = os.getenv("SUBSCRIPTIONS_URL")
+SUBSCRIPTION_TEST_NUMBER = os.getenv("SUBSCRIPTION_TEST_NUMBER", "9760347653")
 
 PORT = int(os.getenv("PORT", "8003"))
 
@@ -144,6 +146,8 @@ async def health():
         "whatsapp_configured": bool(WHATSAPP_PHONE_ID),
         "openclaw_configured": bool(OPENCLAW_URL),
         "mongo_logger_configured": bool(MONGO_LOGGER_URL),
+        "subscriptions_configured": bool(SUBSCRIPTIONS_URL),
+        "subscriptions_test_number": SUBSCRIPTION_TEST_NUMBER if SUBSCRIPTIONS_URL else None,
         "celery_status": celery_status
     }
 
