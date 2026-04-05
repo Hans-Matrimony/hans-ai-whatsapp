@@ -450,28 +450,6 @@ async def send_inactive_template(request: Request, api_key: str = Query(...)):
         logger.error(f"[Admin API] Error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
-                except Exception as e:
-                    error_msg = f"Error processing {user_id}: {str(e)}"
-                    logger.error(f"[Admin API] {error_msg}")
-                    errors.append(error_msg)
-                    continue
-
-        logger.info(f"[Admin API] Summary: Processed {users_processed} users, sent {templates_sent} templates")
-
-        return {
-            "status": "success",
-            "message": f"Processed {users_processed} users, sent {templates_sent} templates",
-            "users_processed": users_processed,
-            "templates_sent": templates_sent,
-            "errors": errors[:10]  # Return first 10 errors
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"[Admin API] Error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
 
 # =============================================================================
 # Root
