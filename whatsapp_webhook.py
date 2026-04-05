@@ -449,23 +449,6 @@ async def send_inactive_template(request: Request, api_key: str = Query(...)):
     except Exception as e:
         logger.error(f"[Admin API] Error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
-                        template_name=template_name,
-                        language_code="hi"  # Hindi template
-                    )
-
-                    if message_id:
-                        templates_sent += 1
-                        logger.info(f"[Admin API] ✓ Template sent to {user_id}")
-                    else:
-                        error_msg = f"Failed to send template to {user_id}"
-                        logger.error(f"[Admin API] ✗ {error_msg}")
-                        errors.append(error_msg)
-
-                    # Small delay to avoid rate limiting
-                    await asyncio.sleep(1)
-
-                    # Only send one template per user
-                    break
 
                 except Exception as e:
                     error_msg = f"Error processing {user_id}: {str(e)}"
