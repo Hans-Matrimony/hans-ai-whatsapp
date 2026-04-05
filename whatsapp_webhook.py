@@ -391,7 +391,10 @@ async def send_inactive_template(request: Request, api_key: str = Query(...)):
 
             # Import WhatsApp API
             from app.services.whatsapp_api import WhatsAppAPI
-            whatsapp_api = WhatsAppAPI()
+            whatsapp_api = WhatsAppAPI(
+                phone_id=WHATSAPP_PHONE_ID,
+                access_token=WHATSAPP_ACCESS_TOKEN
+            )
 
             templates_sent = 0
             users_processed = 0
