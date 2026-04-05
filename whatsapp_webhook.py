@@ -316,17 +316,10 @@ async def send_inactive_template(request: Request, api_key: str = Query(...)):
     logger.info(f"[Admin API] Send inactive template triggered")
 
     try:
-        import asyncio
         from datetime import datetime, timedelta, timezone
-        from pymongo import MongoClient
 
         if not MONGO_LOGGER_URL:
             raise HTTPException(status_code=500, detail="MongoDB Logger URL not configured")
-
-        # Connect to MongoDB Logger
-        client = MongoClient(MONGO_LOGGER_URL)
-        db = client.get_database()
-        users_collection = db.get_collection("users")
 
         # Calculate time threshold (12 hours ago)
         now = datetime.now(timezone.utc)
@@ -334,59 +327,82 @@ async def send_inactive_template(request: Request, api_key: str = Query(...)):
 
         logger.info(f"[Admin API] Finding users with lastMessageTime before {threshold.isoformat()}")
 
-        # Query for users inactive for 12+ hours
-        users = list(users_collection.find({
-            "sessions.lastMessageTime": {"$lt": threshold.isoformat()}
-        }).limit(100))  # Process max 100 users
+        # Query Mongo Logger HTTP API
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # Get all users from Mongo Logger API
+            response = await client.get(f"{MONGO_LOGGER_URL}/messages")
 
-        logger.info(f"[Admin API] Found {len(users)} users inactive for 12+ hours")
+            if response.status_code != 200:
+                raise HTTPException(status_code=500, detail=f"Mongo Logger API error: {response.status_code}")
 
-        if len(users) == 0:
-            return {
-                "status": "success",
-                "message": "No inactive users found",
-                "users_processed": 0,
-                "templates_sent": 0
-            }
+            data = response.json()
+            users = data.get("users", [])
 
-        # Import WhatsApp API
-        from app.services.whatsapp_api import WhatsAppAPI
-        whatsapp_api = WhatsAppAPI()
+            logger.info(f"[Admin API] Found {len(users)} total users in Mongo Logger")
 
-        templates_sent = 0
-        users_processed = 0
-        errors = []
-
-        for user in users:
-            user_id = user.get("userId", "")
-            if not user_id or not user_id.startswith("+"):
-                continue
-
-            for session in user.get("sessions", []):
-                channel = session.get("channel", "").lower()
-                if "whatsapp" not in channel:
+            # Filter users inactive for 12+ hours
+            inactive_users = []
+            for user in users:
+                user_id = user.get("userId", "")
+                if not user_id or not user_id.startswith("+"):
                     continue
 
-                # Get last message time
-                last_msg_str = session.get("lastMessageTime", "")
-                if not last_msg_str:
-                    continue
-
-                try:
-                    # Parse timestamp
-                    if last_msg_str.endswith('Z'):
-                        last_msg_time = datetime.fromisoformat(last_msg_str.replace('Z', '+00:00'))
-                    else:
-                        last_msg_time = datetime.fromisoformat(last_msg_str)
-
-                    # Calculate inactive hours
-                    inactive_hours = (now - last_msg_time).total_seconds() / 3600
-
-                    # Only send if inactive for 12+ hours
-                    if inactive_hours < 12:
-                        logger.debug(f"[Admin API] {user_id}: inactive for {inactive_hours:.1f} hours (skipping)")
+                for session in user.get("sessions", []):
+                    channel = session.get("channel", "").lower()
+                    if "whatsapp" not in channel:
                         continue
 
+                    # Get last message time
+                    last_msg_str = session.get("lastMessageTime", "")
+                    if not last_msg_str:
+                        continue
+
+                    try:
+                        # Parse timestamp
+                        if last_msg_str.endswith('Z'):
+                            last_msg_time = datetime.fromisoformat(last_msg_str.replace('Z', '+00:00'))
+                        else:
+                            last_msg_time = datetime.fromisoformat(last_msg_str)
+
+                        # Calculate inactive hours
+                        inactive_hours = (now - last_msg_time).total_seconds() / 3600
+
+                        # Only include if inactive for 12+ hours
+                        if inactive_hours >= 12:
+                            inactive_users.append({
+                                "user_id": user_id,
+                                "inactive_hours": inactive_hours
+                            })
+                            break  # Only count once per user
+
+                    except Exception as e:
+                        logger.debug(f"[Admin API] Error parsing time for {user_id}: {e}")
+                        continue
+
+            logger.info(f"[Admin API] Found {len(inactive_users)} users inactive for 12+ hours")
+
+            if len(inactive_users) == 0:
+                return {
+                    "status": "success",
+                    "message": "No inactive users found",
+                    "users_processed": 0,
+                    "templates_sent": 0
+                }
+
+            # Import WhatsApp API
+            from app.services.whatsapp_api import WhatsAppAPI
+            whatsapp_api = WhatsAppAPI()
+
+            templates_sent = 0
+            users_processed = 0
+            errors = []
+
+            # Process max 100 users to avoid timeout
+            for user_data in inactive_users[:100]:
+                user_id = user_data["user_id"]
+                inactive_hours = user_data["inactive_hours"]
+
+                try:
                     users_processed += 1
                     logger.info(f"[Admin API] ELIGIBLE: {user_id} inactive for {inactive_hours:.1f} hours")
 
@@ -397,6 +413,42 @@ async def send_inactive_template(request: Request, api_key: str = Query(...)):
                     # Send template message
                     message_id = await whatsapp_api.send_template(
                         to=phone,
+                        template_name=template_name,
+                        language_code="hi"  # Hindi template
+                    )
+
+                    if message_id:
+                        templates_sent += 1
+                        logger.info(f"[Admin API] ✓ Template sent to {user_id}")
+                    else:
+                        error_msg = f"Failed to send template to {user_id}"
+                        logger.error(f"[Admin API] ✗ {error_msg}")
+                        errors.append(error_msg)
+
+                    # Small delay to avoid rate limiting
+                    await asyncio.sleep(1)
+
+                except Exception as e:
+                    error_msg = f"Error processing {user_id}: {str(e)}"
+                    logger.error(f"[Admin API] {error_msg}")
+                    errors.append(error_msg)
+                    continue
+
+        logger.info(f"[Admin API] Summary: Processed {users_processed} users, sent {templates_sent} templates")
+
+        return {
+            "status": "success",
+            "message": f"Processed {users_processed} users, sent {templates_sent} templates",
+            "users_processed": users_processed,
+            "templates_sent": templates_sent,
+            "errors": errors[:10]  # Return first 10 errors
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[Admin API] Error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
                         template_name=template_name,
                         language_code="hi"  # Hindi template
                     )

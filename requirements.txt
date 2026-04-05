@@ -22,6 +22,3 @@ flower==2.0.1
 
 # Logging
 python-json-logger==2.0.7
-
-# MongoDB
-pymongo==4.6.1
