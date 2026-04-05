@@ -343,38 +343,51 @@ async def send_inactive_template(
         if test_number:
             logger.info(f"[Admin API] TEST MODE: Sending template to {test_number}")
 
-            # Import WhatsApp API
-            from app.services.whatsapp_api import WhatsAppAPI
-            whatsapp_api = WhatsAppAPI(
-                phone_id=WHATSAPP_PHONE_ID,
-                access_token=WHATSAPP_ACCESS_TOKEN
-            )
-
             try:
-                # Send template to test number
-                template_name = "chat_with_astrofriend"
-                message_id = await whatsapp_api.send_template(
-                    to=test_number,
-                    template_name=template_name,
-                    language_code="hi"  # Hindi template
-                )
-
-                if message_id:
-                    logger.info(f"[Admin API] ✓ Test template sent to {test_number}")
-                    return {
-                        "status": "success",
-                        "message": f"Test template sent to {test_number}",
-                        "test_mode": True,
-                        "template_sent": True
+                # Send template directly to WhatsApp API
+                url = f"{FB_API_URL}/{WHATSAPP_PHONE_ID}/messages"
+                headers = {
+                    "Authorization": f"Bearer {WHATSAPP_ACCESS_TOKEN}",
+                    "Content-Type": "application/json"
+                }
+                payload = {
+                    "messaging_product": "whatsapp",
+                    "to": test_number,
+                    "type": "template",
+                    "template": {
+                        "name": "chat_with_astrofriend",
+                        "language": {"code": "hi"}
                     }
-                else:
-                    error_msg = f"Failed to send test template to {test_number}"
-                    logger.error(f"[Admin API] ✗ {error_msg}")
-                    raise HTTPException(status_code=500, detail=error_msg)
+                }
 
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.post(url, headers=headers, json=payload)
+                    logger.info(f"[Admin API] WhatsApp API response: {response.status_code}")
+                    logger.info(f"[Admin API] Response body: {response.text}")
+
+                    if response.status_code in [200, 201]:
+                        data = response.json()
+                        logger.info(f"[Admin API] ✓ Test template sent to {test_number}")
+                        return {
+                            "status": "success",
+                            "message": f"Test template sent to {test_number}",
+                            "test_mode": True,
+                            "template_sent": True,
+                            "response": data
+                        }
+                    else:
+                        error_detail = response.text
+                        logger.error(f"[Admin API] ✗ Template send failed: {error_detail}")
+                        raise HTTPException(
+                            status_code=500,
+                            detail=f"Template send failed ({response.status_code}): {error_detail}"
+                        )
+
+            except HTTPException:
+                raise
             except Exception as e:
                 error_msg = f"Error sending test template: {str(e)}"
-                logger.error(f"[Admin API] {error_msg}")
+                logger.error(f"[Admin API] {error_msg}", exc_info=True)
                 raise HTTPException(status_code=500, detail=error_msg)
 
         # NORMAL MODE: Find inactive users and send to all
