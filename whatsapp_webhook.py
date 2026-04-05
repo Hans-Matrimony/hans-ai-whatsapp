@@ -301,12 +301,21 @@ ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "astro_admin_2026")
 
 
 @app.post("/admin/send-inactive-template")
-async def send_inactive_template(request: Request, api_key: str = Query(...)):
+async def send_inactive_template(
+    request: Request,
+    api_key: str = Query(...),
+    test_number: Optional[str] = Query(None)
+):
     """
     Send approved WhatsApp template to users inactive for 12+ hours.
     Requires API key authentication.
 
-    Usage: POST /admin/send-inactive-template?api_key=astro_admin_2026
+    Usage:
+    - POST /admin/send-inactive-template?api_key=astro_admin_2026 (send to all inactive users)
+    - POST /admin/send-inactive-template?api_key=astro_admin_2026&test_number=91987654321 (test only)
+
+    Args:
+        test_number: Optional phone number to send test template (without +)
     """
     # Verify API key
     if api_key != ADMIN_API_KEY:
@@ -314,6 +323,8 @@ async def send_inactive_template(request: Request, api_key: str = Query(...)):
         raise HTTPException(status_code=401, detail="Invalid API key")
 
     logger.info(f"[Admin API] Send inactive template triggered")
+    if test_number:
+        logger.info(f"[Admin API] TEST MODE: Sending only to {test_number}")
 
     try:
         import asyncio
@@ -328,7 +339,45 @@ async def send_inactive_template(request: Request, api_key: str = Query(...)):
 
         logger.info(f"[Admin API] Finding users with lastMessageTime before {threshold.isoformat()}")
 
-        # Query Mongo Logger HTTP API
+        # TEST MODE: Send to single number only
+        if test_number:
+            logger.info(f"[Admin API] TEST MODE: Sending template to {test_number}")
+
+            # Import WhatsApp API
+            from app.services.whatsapp_api import WhatsAppAPI
+            whatsapp_api = WhatsAppAPI(
+                phone_id=WHATSAPP_PHONE_ID,
+                access_token=WHATSAPP_ACCESS_TOKEN
+            )
+
+            try:
+                # Send template to test number
+                template_name = "chat_with_astrofriend"
+                message_id = await whatsapp_api.send_template(
+                    to=test_number,
+                    template_name=template_name,
+                    language_code="hi"  # Hindi template
+                )
+
+                if message_id:
+                    logger.info(f"[Admin API] ✓ Test template sent to {test_number}")
+                    return {
+                        "status": "success",
+                        "message": f"Test template sent to {test_number}",
+                        "test_mode": True,
+                        "template_sent": True
+                    }
+                else:
+                    error_msg = f"Failed to send test template to {test_number}"
+                    logger.error(f"[Admin API] ✗ {error_msg}")
+                    raise HTTPException(status_code=500, detail=error_msg)
+
+            except Exception as e:
+                error_msg = f"Error sending test template: {str(e)}"
+                logger.error(f"[Admin API] {error_msg}")
+                raise HTTPException(status_code=500, detail=error_msg)
+
+        # NORMAL MODE: Find inactive users and send to all
         async with httpx.AsyncClient(timeout=30.0) as client:
             # Get all users from Mongo Logger API
             response = await client.get(f"{MONGO_LOGGER_URL}/messages")
@@ -412,7 +461,7 @@ async def send_inactive_template(request: Request, api_key: str = Query(...)):
 
                     # Send approved template
                     phone = user_id.replace("+", "")
-                    template_name = "startchat_with_astrofriend"
+                    template_name = "chat_with_astrofriend"
 
                     # Send template message
                     message_id = await whatsapp_api.send_template(
