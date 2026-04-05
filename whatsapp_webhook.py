@@ -316,6 +316,7 @@ async def send_inactive_template(request: Request, api_key: str = Query(...)):
     logger.info(f"[Admin API] Send inactive template triggered")
 
     try:
+        import asyncio
         from datetime import datetime, timedelta, timezone
 
         if not MONGO_LOGGER_URL:
