@@ -692,7 +692,7 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
 
             if trial_activation_link:
                 trial_message = (
-                    "👋 Welcome to Hans AI Astrology!\n\n"
+                    "👋 Welcome to Astrofriend!\n\n"
                     "To activate your **7-day FREE trial**, please pay ₹1 (verification fee).\n\n"
                     f"Click here: {trial_activation_link}\n\n"
                     "After payment, send me a message to start! 💫"
@@ -728,7 +728,7 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
 
         # Default payment nudge message (trial expired)
         payment_message = (
-            "Your 7-day free trial has ended. To continue using Hans AI Astrology services, "
+            "Your 7-day free trial has ended. To continue using Astrofriend services, "
             "please subscribe to a plan.\n\n"
             "Reply *PAY* to see subscription options."
         )
