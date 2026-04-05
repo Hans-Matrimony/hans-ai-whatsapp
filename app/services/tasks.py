@@ -1228,3 +1228,333 @@ def health_check_task():
     """Periodic health check task."""
     logger.info("[Celery] Health check - worker is running")
     return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
+
+
+@celery_app.task
+def proactive_nudge_task():
+    """
+    Send proactive nudges to inactive WhatsApp users.
+    Runs every 5 minutes to check for users inactive for 8+ hours.
+    Only sends messages between 9 AM - 10 PM IST.
+    """
+    import asyncio
+    from datetime import timedelta, timezone
+
+    try:
+        logger.info("[Proactive Nudge] ===== TASK STARTED =====")
+
+        # Check if within active hours (9 AM - 10 PM IST)
+        from datetime import datetime
+        import pytz
+        ist = pytz.timezone('Asia/Kolkata')
+        now_ist = datetime.now(ist)
+        current_hour = now_ist.hour
+
+        logger.info(f"[Proactive Nudge] Current time: {now_ist.strftime('%Y-%m-%d %H:%M:%S')} IST")
+
+        if not (9 <= current_hour < 22):
+            logger.info(f"[Proactive Nudge] Outside active hours ({current_hour}:00 IST), skipping")
+            return {"status": "outside_active_hours", "current_hour": current_hour}
+
+        # Query MongoDB Logger for inactive users
+        logger.info(f"[Proactive Nudge] Checking for inactive users...")
+        result = asyncio.run(_check_inactive_users())
+
+        logger.info(f"[Proactive Nudge] ===== TASK COMPLETED =====")
+        logger.info(f"[Proactive Nudge] Result: {result}")
+        return result
+
+    except Exception as e:
+        logger.error(f"[Proactive Nudge] ===== TASK FAILED =====", exc_info=True)
+        logger.error(f"[Proactive Nudge] Error: {e}")
+        return {"error": str(e)}
+
+
+async def _check_inactive_users():
+    """
+    Check for inactive users and send nudges.
+    Only processes users inactive for 8-24 hours.
+    """
+    if not MONGO_LOGGER_URL:
+        logger.error("[Proactive Nudge] MONGO_LOGGER_URL not configured!")
+        return {"error": "MongoDB URL not configured"}
+
+    logger.info(f"[Proactive Nudge] Fetching users from {MONGO_LOGGER_URL}/messages")
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        # Get all users from MongoDB Logger
+        try:
+            response = await client.get(f"{MONGO_LOGGER_URL}/messages")
+            logger.info(f"[Proactive Nudge] MongoDB response status: {response.status_code}")
+
+            if response.status_code != 200:
+                logger.error(f"[Proactive Nudge] Failed to fetch users: {response.status_code} - {response.text}")
+                return {"error": f"Failed to fetch users: {response.status_code}"}
+
+            data = response.json()
+            users = data.get("users", [])
+            logger.info(f"[Proactive Nudge] Total users found: {len(users)}")
+
+        except Exception as e:
+            logger.error(f"[Proactive Nudge] Exception fetching users: {e}", exc_info=True)
+            return {"error": f"Exception fetching users: {e}"}
+
+        # Process users in a try-except block
+        try:
+            from datetime import timezone
+            now = datetime.now(timezone.utc)
+            nudges_sent = 0
+            users_checked = 0
+
+            for user in users:
+                user_id = user.get("userId", "")
+                if not user_id or not user_id.startswith("+"):
+                    continue
+
+                # TESTING MODE: Only send to test number if configured
+                if PROACTIVE_NUDGE_TEST_NUMBER:
+                    if user_id != PROACTIVE_NUDGE_TEST_NUMBER:
+                        logger.debug(f"[Proactive Nudge] TESTING MODE: Skipping {user_id} (not test number)")
+                        continue
+                    logger.info(f"[Proactive Nudge] ✓ Processing {user_id} (matches test number)")
+
+                for session in user.get("sessions", []):
+                    channel = session.get("channel", "").lower()
+                    if "whatsapp" not in channel:
+                        continue
+
+                    # Get last message time
+                    last_msg_str = session.get("lastMessageTime", "")
+                    if not last_msg_str:
+                        continue
+
+                    try:
+                        # Parse timestamp
+                        if last_msg_str.endswith('Z'):
+                            last_msg_time = datetime.fromisoformat(last_msg_str.replace('Z', '+00:00'))
+                        else:
+                            last_msg_time = datetime.fromisoformat(last_msg_str)
+
+                        # Calculate inactive minutes
+                        inactive_minutes = (now - last_msg_time).total_seconds() / 60
+
+                        # TESTING: Send nudge if inactive for at least 5 minutes
+                        # (Production will be 8-24 hours)
+                        if inactive_minutes < 5:
+                            logger.debug(f"[Proactive Nudge] {user_id}: inactive for {inactive_minutes:.0f} mins (skipping - waiting for 5 min threshold)")
+                            continue
+
+                        users_checked += 1
+                        logger.info(f"[Proactive Nudge] ELIGIBLE: {user_id} inactive for {inactive_minutes:.1f} minutes")
+
+                        # Get recent conversation for topic detection
+                        recent_conversation = await _get_recent_conversation_from_mongo(user_id, session)
+                        detected_topic = recent_conversation.get("detected_topic")
+
+                        # Generate and send nudge message based on topic (using minutes instead of hours for testing)
+                        nudge_message = _generate_nudge_message(user_id, detected_topic, inactive_minutes)
+
+                        # Send nudge via WhatsApp
+                        phone = user_id.replace("+", "")
+                        await _send_whatsapp_message(client, phone, nudge_message)
+                        nudges_sent += 1
+
+                        logger.info(f"[Proactive Nudge] ✓ Nudge sent to {user_id} (topic: {detected_topic})")
+
+                        # Small delay to avoid rate limiting
+                        await asyncio.sleep(2)
+
+                    except Exception as e:
+                        logger.error(f"[Proactive Nudge] Error processing {user_id}: {e}")
+                        continue
+
+            logger.info(f"[Proactive Nudge] Summary: Checked {users_checked} users, sent {nudges_sent} nudges")
+            return {
+                "status": "completed",
+                "users_checked": users_checked,
+                "nudges_sent": nudges_sent
+            }
+
+        except Exception as e:
+            logger.error(f"[Proactive Nudge] Exception in _check_inactive_users: {e}", exc_info=True)
+            return {"error": str(e)}
+
+
+def _generate_nudge_message(user_id: str, detected_topic: str, minutes_inactive: float) -> str:
+    """
+    Generate personalized nudge message based on detected topic.
+    Stage 1: Topic-based messages (Stage 2 will be more personalized with Mem0)
+    """
+
+    # Format time display (minutes if < 60, hours if >= 60)
+    if minutes_inactive < 60:
+        time_str = f"{minutes_inactive:.0f} minutes"
+    else:
+        hours = minutes_inactive / 60
+        time_str = f"{hours:.0f} hours"
+
+    # Topic-based message templates
+    topic_messages = {
+        "marriage": [
+            f"Hi! 👋 It's been {time_str} since we last spoke about your shaadi.\n\n"
+            f"Stars have some updates for your kundli! Want to know what's in store for your vivah? 💫\n\n"
+            f"Type *KUNDLI* to get your updated predictions!",
+
+            f"Namaste! 🙏\n\n"
+            f"It's been a while! Your 7th house (relationships) might have some movement.\n\n"
+            f"Shall we check what the planets say about your marriage timing? 💑\n\n"
+            f"Reply *YES* for detailed analysis!",
+        ],
+        "career": [
+            f"Hello! 👋\n\n"
+            f"It's been {time_str} since you asked about your career.\n\n"
+            f"Good news! Your 10th house (profession) planets are shifting.\n\n"
+            f"Want to know about your next job opportunity? 💼\n\n"
+            f"Type *CAREER* to get your predictions!",
+
+            f"Hi there! 👋\n\n"
+            f"Hope your work is going well! 🌟\n\n"
+            f"The planetary positions suggest some changes in your career path soon.\n\n"
+            f"Shall we analyze what's coming next? 💼\n\n"
+            f"Reply *YES* to know more!",
+        ],
+        "health": [
+            f"Namaste! 🙏\n\n"
+            f"It's been {time_str} since we discussed your health.\n\n"
+            f"How are you feeling now? Hope you're better! 🌟\n\n"
+            f"Some remedies might help you recover faster. Want to know?\n\n"
+            f"Type *HEALTH* for personalized remedies!",
+
+            f"Hello! 👋\n\n"
+            f"Checking in on your health journey! 🌿\n\n"
+            f"The stars suggest this is a good time for healing and recovery.\n\n"
+            f"Shall we explore what remedies work best for you? 💊\n\n"
+            f"Reply *YES* to continue!",
+        ],
+        "education": [
+            f"Hi! 👋\n\n"
+            f"It's been {time_str} since your studies conversation.\n\n"
+            f"How are your exams/ preparations going? 📚\n\n"
+            f"Your 5th house (education) planets are favoring students right now!\n\n"
+            f"Want tips for better concentration? 📖\n\n"
+            f"Type *STUDY* to know more!",
+
+            f"Hello! 👋\n\n"
+            f"Hope your studies are going well! 🌟\n\n"
+            f"The current planetary position suggests good results ahead for students.\n\n"
+            f"Shall we check what the stars say about your exam results? 📝\n\n"
+            f"Reply *YES* to know more!",
+        ]
+    }
+
+    # Default messages when no topic detected
+    default_messages = [
+        f"Hi! 👋\n\n"
+        f"It's been {time_str} since we last spoke!\n\n"
+        f"I've got some exciting updates for you. Want to know what the stars say? ✨\n\n"
+        f"Type *HELLO* to continue your journey!",
+
+        f"Namaste! 🙏\n\n"
+        f"It's been a while! Your stars have moved since we last spoke.\n\n"
+        f"Shall we see what the universe has in store for you? 💫\n\n"
+        f"Reply *YES* to get your personalized predictions!"
+    ]
+
+    # Select message based on detected topic
+    if detected_topic and detected_topic in topic_messages:
+        import random
+        messages = topic_messages[detected_topic]
+        return random.choice(messages)
+    else:
+        import random
+        return random.choice(default_messages)
+
+
+async def _get_recent_conversation_from_mongo(user_id: str, session_data: dict = None) -> dict:
+    """
+    Extract recent conversation from MongoDB session data and detect topics from USER questions.
+    Stage 1: Topic-based message generation (Stage 2 will add Mem0 personalization)
+    """
+    result = {
+        "detected_topic": None,
+        "last_questions": []
+    }
+
+    try:
+        logger.info(f"[Proactive Nudge] Extracting conversation from session data for {user_id}")
+
+        # Extract messages from session_data if provided
+        if not session_data:
+            logger.warning(f"[Proactive Nudge] No session data provided for {user_id}")
+            return result
+
+        # Debug: Log what keys are available in session_data
+        logger.debug(f"[Proactive Nudge] Session data keys: {list(session_data.keys())}")
+
+        messages = session_data.get("messages", [])
+        if not messages:
+            logger.warning(f"[Proactive Nudge] No 'messages' key in session data for {user_id}")
+            logger.debug(f"[Proactive Nudge] Session data sample: {str(session_data)[:500]}")
+            return result
+
+        # Extract user questions only
+        user_questions = []
+        for msg in messages:
+            if msg.get("role") == "user":
+                text = msg.get("text", "")
+                if text:
+                    user_questions.append(text)
+
+        if not user_questions:
+            logger.info(f"[Proactive Nudge] No user questions found for {user_id}")
+            return result
+
+        # Analyze only last 5 questions (RECENT context matters most!)
+        recent_questions = user_questions[-5:]
+        result["last_questions"] = recent_questions
+        logger.info(f"[Proactive Nudge] Total questions: {len(user_questions)}, analyzing last 5 for recent context")
+        logger.debug(f"[Proactive Nudge] Recent questions: {[q[:50]+'...' if len(q)>50 else q for q in recent_questions]}")
+
+        # Topic detection from user questions
+        topic_keywords = {
+            "marriage": ["shaadi", "marriage", "vivah", "rishta", "life partner", "spouse",
+                        "milna", "shadi", "lagna", "partner", "engagement", "sagai",
+                        "marry", "wedding", "shaadi kab", "engagement kab", "meri shaadi",
+                        "meri engagement", "vivah", "rishta", "divorce"],
+            "career": ["job", "career", "business", "kam", "naukri", "government", "govt",
+                      "service", "employment", "work", "office", "company", "interview",
+                      "promotion", "salary", "earning", "new macbook", "purchase", "buy",
+                      "macbook", "laptop"],
+            "health": ["health", "swasthya", "illness", "bemari", "rog", "tabiyat", "bimari",
+                      "disease", "sick", "problem", "pain", "upay", "remedy", "medicine",
+                      "theek", "recovery", "treatment", "kaise feel", "health issue",
+                      "kharab", "thek", "swasthya", "major health"],
+            "education": ["study", "padhai", "education", "exam", "test", "school", "college",
+                         "university", "degree", "course", "result", "marks", "grade"]
+        }
+
+        topic_scores = {"marriage": 0, "career": 0, "health": 0, "education": 0}
+
+        # Score each topic based on keyword matches
+        for question in recent_questions:
+            question_lower = question.lower()
+            for topic, keywords in topic_keywords.items():
+                for keyword in keywords:
+                    if keyword in question_lower:
+                        topic_scores[topic] += 1
+
+        # Find topic with highest score
+        max_score = max(topic_scores.values())
+        if max_score > 0:
+            # Get topic with highest score
+            detected_topic = max(topic_scores, key=topic_scores.get)
+            result["detected_topic"] = detected_topic
+            logger.info(f"[Proactive Nudge] Topic detected: {detected_topic} (score: {max_score})")
+        else:
+            logger.info(f"[Proactive Nudge] No specific topic detected (scores: {topic_scores})")
+
+        return result
+
+    except Exception as e:
+        logger.error(f"[Proactive Nudge] Error extracting conversation: {e}", exc_info=True)
+        return result
