@@ -1338,21 +1338,22 @@ async def _check_inactive_users():
                         # Calculate inactive minutes
                         inactive_minutes = (now - last_msg_time).total_seconds() / 60
 
-                        # TESTING: Send nudge if inactive for at least 5 minutes
-                        # (Production will be 8-24 hours)
-                        if inactive_minutes < 5:
-                            logger.debug(f"[Proactive Nudge] {user_id}: inactive for {inactive_minutes:.0f} mins (skipping - waiting for 5 min threshold)")
+                        # Send nudge if inactive for at least 8 hours (480 minutes)
+                        # Only sent between 9 AM - 10 PM IST
+                        if inactive_minutes < 480:
+                            logger.debug(f"[Proactive Nudge] {user_id}: inactive for {inactive_minutes:.0f} mins (skipping - waiting for 8 hour threshold)")
                             continue
 
                         users_checked += 1
-                        logger.info(f"[Proactive Nudge] ELIGIBLE: {user_id} inactive for {inactive_minutes:.1f} minutes")
+                        hours_inactive = inactive_minutes / 60
+                        logger.info(f"[Proactive Nudge] ELIGIBLE: {user_id} inactive for {hours_inactive:.1f} hours")
 
                         # Get recent conversation for topic detection
                         recent_conversation = await _get_recent_conversation_from_mongo(user_id, session)
                         detected_topic = recent_conversation.get("detected_topic")
 
-                        # Generate and send nudge message based on topic (using minutes instead of hours for testing)
-                        nudge_message = _generate_nudge_message(user_id, detected_topic, inactive_minutes)
+                        # Generate and send nudge message based on topic
+                        nudge_message = _generate_nudge_message(user_id, detected_topic, hours_inactive)
 
                         # Send nudge via WhatsApp
                         phone = user_id.replace("+", "")
