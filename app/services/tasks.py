@@ -1386,88 +1386,59 @@ def _generate_nudge_message(user_id: str, detected_topic: str, minutes_inactive:
     Stage 1: Topic-based messages (Stage 2 will be more personalized with Mem0)
     """
 
-    # Format time display (minutes if < 60, hours if >= 60)
-    if minutes_inactive < 60:
-        time_str = f"{minutes_inactive:.0f} minutes"
-    else:
-        hours = minutes_inactive / 60
-        time_str = f"{hours:.0f} hours"
-
-    # Topic-based message templates
+    # Natural, conversational message templates based on detected topic
     topic_messages = {
         "marriage": [
-            f"Hi! 👋 It's been {time_str} since we last spoke about your shaadi.\n\n"
-            f"Stars have some updates for your kundli! Want to know what's in store for your vivah? 💫\n\n"
-            f"Type *KUNDLI* to get your updated predictions!",
+            "Hey! Was thinking about our shaadi discussion... Your 7th house lord is actually quite strong right now. Should we check what the planets say about your marriage timing?",
 
-            f"Namaste! 🙏\n\n"
-            f"It's been a while! Your 7th house (relationships) might have some movement.\n\n"
-            f"Shall we check what the planets say about your marriage timing? 💑\n\n"
-            f"Reply *YES* for detailed analysis!",
+            "Namaste! You know, we were talking about your vivah earlier - Jupiter's current position might bring some good news for your relationships. Want me to analyze your kundli for this?",
+
+            "Hi! Remember we discussed your shaadi? The transit of Venus is favorable right now. Shall I check your birth chart for the best period?",
         ],
         "career": [
-            f"Hello! 👋\n\n"
-            f"It's been {time_str} since you asked about your career.\n\n"
-            f"Good news! Your 10th house (profession) planets are shifting.\n\n"
-            f"Want to know about your next job opportunity? 💼\n\n"
-            f"Type *CAREER* to get your predictions!",
+            "Hey! Was thinking about your career discussion... Your 10th house has some interesting planetary movements happening. Want me to check what this means for your job prospects?",
 
-            f"Hi there! 👋\n\n"
-            f"Hope your work is going well! 🌟\n\n"
-            f"The planetary positions suggest some changes in your career path soon.\n\n"
-            f"Shall we analyze what's coming next? 💼\n\n"
-            f"Reply *YES* to know more!",
+            "Hi! Remember you asked about your career? Saturn's position suggests good things coming professionally. Should I analyze your kundli for the timing?",
+
+            "Namaste! Your career discussion has been on my mind... Mercury is favoring your profession house right now. Want to know what opportunities are coming?",
         ],
         "health": [
-            f"Namaste! 🙏\n\n"
-            f"It's been {time_str} since we discussed your health.\n\n"
-            f"How are you feeling now? Hope you're better! 🌟\n\n"
-            f"Some remedies might help you recover faster. Want to know?\n\n"
-            f"Type *HEALTH* for personalized remedies!",
+            "Hey! How are you feeling now? We talked about your health earlier... There are some simple remedies that might really help based on your current planetary position. Want me to check?",
 
-            f"Hello! 👋\n\n"
-            f"Checking in on your health journey! 🌿\n\n"
-            f"The stars suggest this is a good time for healing and recovery.\n\n"
-            f"Shall we explore what remedies work best for you? 💊\n\n"
-            f"Reply *YES* to continue!",
+            "Hi! Was thinking about your health... The 6th house lord is well-placed in your chart right now, which is good for recovery. Should I suggest some personalized remedies?",
+
+            "Namaste! Hope you're feeling better... Your health houses look stronger in your recent kundli analysis. Want me to suggest some astrological remedies?",
         ],
         "education": [
-            f"Hi! 👋\n\n"
-            f"It's been {time_str} since your studies conversation.\n\n"
-            f"How are your exams/ preparations going? 📚\n\n"
-            f"Your 5th house (education) planets are favoring students right now!\n\n"
-            f"Want tips for better concentration? 📖\n\n"
-            f"Type *STUDY* to know more!",
+            "Hey! How are your studies going? We talked about your exams... Your 5th house is very strong right now - great time for students! Should I check what the stars say about your results?",
 
-            f"Hello! 👋\n\n"
-            f"Hope your studies are going well! 🌟\n\n"
-            f"The current planetary position suggests good results ahead for students.\n\n"
-            f"Shall we check what the stars say about your exam results? 📝\n\n"
-            f"Reply *YES* to know more!",
+            "Hi! Remember your education discussion? Jupiter is blessing your learning house this month. Want me to analyze your chart for exam success?",
+
+            "Namaste! Was thinking about your studies... Mercury's position is excellent for concentration right now. Should I check your kundli for favorable periods?",
         ]
     }
 
-    # Default messages when no topic detected
-    default_messages = [
-        f"Hi! 👋\n\n"
-        f"It's been {time_str} since we last spoke!\n\n"
-        f"I've got some exciting updates for you. Want to know what the stars say? ✨\n\n"
-        f"Type *HELLO* to continue your journey!",
+    # Kundli-based messages when no topic detected (more personalized fallback)
+    kundli_messages = [
+        "Hey! It's been a while... Your kundli shows some interesting planetary movements this week. Should we check what the stars have in store for you?",
 
-        f"Namaste! 🙏\n\n"
-        f"It's been a while! Your stars have moved since we last spoke.\n\n"
-        f"Shall we see what the universe has in store for you? 💫\n\n"
-        f"Reply *YES* to get your personalized predictions!"
+        "Namaste! Your birth chart indicates this is a good time for new beginnings. The planets are aligned in your favor - want me to analyze what this means for you?",
+
+        "Hi! Your current dasha period looks quite favorable according to your kundli. The coming weeks might bring some important changes. Shall we check your predictions?",
+
+        "Hey! Your Moon sign's position suggests this is a good time to revisit your goals. Your kundli has some insights about your near future. Want to take a look?",
+
+        "Namaste! Was looking at your birth chart... Your ascendant lord is strong right now, which is excellent for overall growth. Should we explore what this means for you?",
     ]
 
-    # Select message based on detected topic
+    # Select message based on detected topic, otherwise use kundli-based messages
     if detected_topic and detected_topic in topic_messages:
         import random
         messages = topic_messages[detected_topic]
         return random.choice(messages)
     else:
         import random
-        return random.choice(default_messages)
+        return random.choice(kundli_messages)
 
 
 async def _get_recent_conversation_from_mongo(user_id: str, session_data: dict = None) -> dict:
