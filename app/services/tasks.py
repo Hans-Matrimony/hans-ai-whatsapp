@@ -1342,52 +1342,30 @@ def generate_kundli_pdf_task(self, phone: str, user_id: str, dob: str, tob: str,
 
 async def _calculate_kundli_swiss_ephemeris(dob: str, tob: str, place: str) -> dict:
     """
-    Calculate kundli using Swiss Ephemeris (same as kundli chart feature)
+    Calculate kundli using local calculator (jyotishganit)
     """
-    import subprocess
-    import json
-    import os
-
     try:
-        # Path to kundli calculation script
-        calculate_script = "~/.openclaw/skills/kundli/calculate.py"
-        calculate_script = os.path.expanduser(calculate_script)
+        from app.services.kundli.calculator import calculate_kundli
 
-        if not os.path.exists(calculate_script):
-            logger.error(f"[PDF] Kundli calculation script not found: {calculate_script}")
-            return {"error": "Kundli calculation script not found"}
+        logger.info(f"[PDF] Calculating kundli with local calculator for {dob} {tob} {place}")
 
-        # Build command
-        cmd = [
-            "python3",
-            calculate_script,
-            "--dob", dob,
-            "--tob", tob,
-            "--place", place
-        ]
+        # Call the calculator
+        kundli_data = calculate_kundli(dob, tob, place)
 
-        logger.info(f"[PDF] Running kundli calculation: {' '.join(cmd)}")
+        if "error" in kundli_data and "fallback_data" in kundli_data:
+            logger.warning(f"[PDF] Using fallback data: {kundli_data['error']}")
+            return kundli_data["fallback_data"]
 
-        # Run calculation
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
+        if "error" in kundli_data:
+            logger.error(f"[PDF] Kundli calculation failed: {kundli_data['error']}")
+            return {"error": kundli_data['error']}
 
-        stdout, stderr = await process.communicate()
-
-        if process.returncode != 0:
-            logger.error(f"[PDF] Kundli calculation failed: {stderr.decode()}")
-            return {"error": "Kundli calculation failed"}
-
-        # Parse JSON output
-        output = stdout.decode().strip()
-        kundli_data = json.loads(output)
-
-        logger.info(f"[PDF] Kundli calculated successfully")
+        logger.info(f"[PDF] Kundli calculated successfully: Lagna={kundli_data.get('lagna')}, Rashi={kundli_data.get('moon_sign')}")
         return kundli_data
 
+    except ImportError as ie:
+        logger.error(f"[PDF] Failed to import kundli calculator: {ie}")
+        return {"error": "Kundli calculator not available"}
     except Exception as e:
         logger.error(f"[PDF] Kundli calculation error: {e}", exc_info=True)
         return {"error": str(e)}
