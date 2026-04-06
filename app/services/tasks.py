@@ -1306,13 +1306,6 @@ async def _check_inactive_users():
             nudges_sent = 0
             users_checked = 0
 
-            # Simple duplicate prevention: Track last nudge times in memory
-            # (Persists for worker lifetime, resets on worker restart)
-            if not hasattr(_check_inactive_users, 'last_nudge_times'):
-                _check_inactive_users.last_nudge_times = {}
-
-            logger.info(f"[Proactive Nudge] Nudge tracker has {len(_check_inactive_users.last_nudge_times)} entries")
-
             for user in users:
                 user_id = user.get("userId", "")
                 if not user_id or not user_id.startswith("+"):
@@ -1355,14 +1348,15 @@ async def _check_inactive_users():
                         hours_inactive = inactive_minutes / 60
                         logger.info(f"[Proactive Nudge] ELIGIBLE: {user_id} inactive for {hours_inactive:.1f} hours")
 
-                        # DUPLICATE PREVENTION: Check if we sent a nudge in the last 8 hours
-                        last_nudge_time = _check_inactive_users.last_nudge_times.get(user_id)
-                        if last_nudge_time:
-                            hours_since_last_nudge = (now - last_nudge_time).total_seconds() / 3600
-                            if hours_since_last_nudge < 8:
-                                logger.info(f"[Proactive Nudge] {user_id}: Already sent nudge {hours_since_last_nudge:.1f} hours ago (skipping - need 8h gap)")
+                        # DUPLICATE PREVENTION: Check if last message was from bot (proactive nudge)
+                        messages = session.get("messages", [])
+                        if messages:
+                            last_message = messages[-1]
+                            last_message_role = last_message.get("role", "")
+                            if last_message_role == "assistant":
+                                logger.info(f"[Proactive Nudge] {user_id}: Last message was from bot (skipping - user hasn't replied)")
                                 continue
-                            logger.info(f"[Proactive Nudge] {user_id}: Last nudge was {hours_since_last_nudge:.1f} hours ago (eligible for new nudge)")
+                        
 
                         # Get recent conversation for topic and language detection
                         recent_conversation = await _get_recent_conversation_from_mongo(user_id, session)
@@ -1379,8 +1373,6 @@ async def _check_inactive_users():
                         await _send_whatsapp_message(client, phone, nudge_message)
                         nudges_sent += 1
 
-                        # Track nudge timestamp to prevent duplicates within 8 hours
-                        _check_inactive_users.last_nudge_times[user_id] = now
 
                         logger.info(f"[Proactive Nudge] ✓ Nudge sent to {user_id} (topic: {detected_topic}, language: {detected_language})")
 
