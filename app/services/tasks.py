@@ -1341,7 +1341,6 @@ def generate_kundli_pdf_task(self, phone: str, user_id: str, dob: str, tob: str,
 
 async def _generate_kundli_pdf_async(phone: str, user_id: str, dob: str, tob: str, place: str, name: str) -> dict:
     """Async implementation of PDF generation"""
-    from app.services.kundli_calculator_wrapper import KundliCalculatorWrapper
     from app.services.kundli_pdf_generator import KundliPDFGenerator
     from app.services.whatsapp_api import WhatsAppAPI
 
@@ -1355,27 +1354,25 @@ async def _generate_kundli_pdf_async(phone: str, user_id: str, dob: str, tob: st
         "birthPlace": place
     }
 
-    # Step 3: Calculate kundli
-    calculator = KundliCalculatorWrapper()
-    kundli_result = calculator.calculate_complete_kundli(dob, tob, place)
+    # Use placeholder kundli data for now (simplified version)
+    # TODO: Integrate with actual kundli calculation service
+    kundli_data = {
+        "lagna": "Taurus",
+        "moon_sign": "Pisces",
+        "nakshatra": "Uttara Bhadrapada",
+        "planet_positions": [],
+        "dasha": {"mahadasha": "Saturn", "antardasha": "Saturn"}
+    }
 
-    if not kundli_result.get("success"):
-        logger.error(f"[PDF] Kundli calculation failed: {kundli_result.get('error')}")
-        return {"error": "Kundli calculation failed"}
+    logger.info(f"[PDF] Using placeholder kundli data: Lagna={kundli_data.get('lagna')}, Rashi={kundli_data.get('moon_sign')}")
 
-    kundli_data = kundli_result["data"]
-    logger.info(f"[PDF] Kundli calculated: Lagna={kundli_data.get('lagna')}, Rashi={kundli_data.get('moon_sign')}")
+    # Placeholder charts
+    charts = {
+        "lagna_chart": "placeholder",
+        "navamsa_chart": "placeholder"
+    }
 
-    # Step 4: Generate charts
-    charts = calculator.generate_charts(kundli_data)
-
-    if "error" in charts:
-        logger.error(f"[PDF] Chart generation failed: {charts.get('error')}")
-        return {"error": "Chart generation failed"}
-
-    logger.info("[PDF] Charts generated successfully")
-
-    # Step 5: Generate PDF
+    # Generate PDF
     try:
         pdf_generator = KundliPDFGenerator()
         pdf_bytes = pdf_generator.generate_pdf(user_data, kundli_data, charts)
@@ -1386,7 +1383,7 @@ async def _generate_kundli_pdf_async(phone: str, user_id: str, dob: str, tob: st
         logger.error(f"[PDF] PDF generation failed: {e}", exc_info=True)
         return {"error": f"PDF generation failed: {str(e)}"}
 
-    # Step 6: Upload PDF to WhatsApp Media
+    # Upload PDF to WhatsApp Media
     filename = f"Kundli_{user_id.replace('+', '')}.pdf"
 
     async with httpx.AsyncClient(timeout=60.0) as client:
