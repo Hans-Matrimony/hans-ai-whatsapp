@@ -1373,45 +1373,11 @@ async def _calculate_kundli_swiss_ephemeris(dob: str, tob: str, place: str) -> d
 
 def _format_planet_positions_for_pdf(kundli_calculated: dict) -> dict:
     """
-    Format planet positions from calculate.py output to PDF format
+    Format planet positions from calculator output to PDF format
     """
-    planet_positions = {}
-
     try:
-        ai_summary = kundli_calculated.get("ai_summary", {})
-        planet_list = ai_summary.get("planet_positions", [])
-
-        # Parse planet positions from "Sun is in House 5 (Leo/Tau)" format
-        for planet_str in planet_list:
-            if "is in House" in planet_str:
-                parts = planet_str.split()
-                planet_name = parts[0]
-
-                # Find house number
-                house = None
-                for i, part in enumerate(parts):
-                    if part == "House" and i + 1 < len(parts):
-                        try:
-                            house = int(parts[i + 1])
-                        except ValueError:
-                            pass
-                        break
-
-                # Find sign
-                sign = None
-                for part in parts:
-                    if part in ["Aries", "Taurus", "Gemini", "Cancer", "Leo", "Virgo",
-                                "Libra", "Scorpio", "Sagittarius", "Capricorn", "Aquarius", "Pisces"]:
-                        sign = part
-                        break
-
-                if house and sign:
-                    planet_positions[planet_name.lower()] = {
-                        "planet": planet_name,
-                        "sign": sign,
-                        "house": house,
-                        "degree": 0.0  # Degree not available in summary
-                    }
+        # The calculator already provides planet_positions in the correct format
+        planet_positions = kundli_calculated.get("planet_positions", {})
 
         logger.info(f"[PDF] Formatted {len(planet_positions)} planet positions")
         return planet_positions
@@ -1423,27 +1389,15 @@ def _format_planet_positions_for_pdf(kundli_calculated: dict) -> dict:
 
 def _extract_dasha_info(kundli_calculated: dict) -> dict:
     """
-    Extract dasha information from calculate.py output
+    Extract dasha information from calculator output
     """
     try:
-        summary = kundli_calculated.get("summary", {})
-        dasha_str = summary.get("current_dasha", "")
-
-        # Parse dasha string like "Current Mahadasha: Saturn (Ends 2028). Current Antardasha: Saturn (Ends 2025)."
-        mahadasha = "Unknown"
-        antardasha = "Unknown"
-
-        if "Mahadasha:" in dasha_str:
-            parts = dasha_str.split("Mahadasha:")[1].split("(")[0].strip()
-            mahadasha = parts
-
-        if "Antardasha:" in dasha_str:
-            parts = dasha_str.split("Antardasha:")[1].split("(")[0].strip()
-            antardasha = parts
+        # The calculator already provides dasha in the correct format
+        dasha = kundli_calculated.get("dasha", {})
 
         return {
-            "mahadasha": mahadasha,
-            "antardasha": antardasha
+            "mahadasha": dasha.get("mahadasha", "Unknown"),
+            "antardasha": dasha.get("antardasha", "Unknown")
         }
 
     except Exception as e:
