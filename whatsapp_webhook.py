@@ -356,7 +356,7 @@ async def send_inactive_template(
                     "type": "template",
                     "template": {
                         "name": "chat_with_astrofriend",
-                        "language": {"code": "hi"}
+                        "language": {"code": "en_IN"}
                     }
                 }
 
@@ -480,7 +480,7 @@ async def send_inactive_template(
                     message_id = await whatsapp_api.send_template(
                         to=phone,
                         template_name=template_name,
-                        language_code="hi"  # Hindi template
+                        language_code="en_IN"  # English (IND) template
                     )
 
                     if message_id:
