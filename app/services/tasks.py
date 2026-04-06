@@ -37,11 +37,6 @@ SUBSCRIPTION_TEST_NUMBER = os.getenv("SUBSCRIPTION_TEST_NUMBER", "9760347653")
 # Testing mode: Only send proactive nudges to this number (None = send to all users)
 PROACTIVE_NUDGE_TEST_NUMBER = os.getenv("PROACTIVE_NUDGE_TEST_NUMBER", "+919760347653")
 
-# Onboarding Configuration
-ONBOARDING_ENABLED = os.getenv("ONBOARDING_ENABLED", "true").lower() == "true"
-DAILY_FREE_MESSAGES = int(os.getenv("DAILY_FREE_MESSAGES", "5"))
-FREEMIUM_MESSAGE_LIMIT = int(os.getenv("FREEMIUM_MESSAGE_LIMIT", "40"))
-
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
 def process_message_task(self, phone: str, message: str, message_id: str, message_type: str = "text", media_info: dict = None):
@@ -817,56 +812,60 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
     if any(keyword in message_upper for keyword in pdf_keywords):
         logger.info(f"[PDF Request] User {user_id} requested Kundli PDF")
 
-        # Check if user has completed onboarding (has birth details)
-        if ONBOARDING_ENABLED:
-            profile_service = UserProfileService()
-            profile = await profile_service.get_user_profile(user_id)
+        # Check if user has birth details in profile
+        profile_service = UserProfileService()
+        profile = await profile_service.get_user_profile(user_id)
 
-            if not profile or profile.get("onboardingStage", 0) < 4:
-                # User hasn't completed onboarding - ask for birth details
-                missing_info = []
-                if not profile or not profile.get("dateOfBirth"):
-                    missing_info.append("birth date")
-                if not profile or not profile.get("timeOfBirth"):
-                    missing_info.append("birth time")
-                if not profile or not profile.get("birthPlace"):
-                    missing_info.append("birth place")
+        # Check if user has birth details
+        has_dob = bool(profile and profile.get("dateOfBirth"))
+        has_tob = bool(profile and profile.get("timeOfBirth"))
+        has_place = bool(profile and profile.get("birthPlace"))
 
-                onboarding_message = (
-                    f"To generate your Kundli PDF, I need your birth details first.\n\n"
-                    f"Missing: {', '.join(missing_info)}\n\n"
-                    f"Please provide your birth details in this format:\n"
-                    f"• Date of Birth: 15 January 1990\n"
-                    f"• Time of Birth: 10:30 AM\n"
-                    f"• Place of Birth: Mumbai\n\n"
-                    f"After providing these details, you can request the PDF again!"
-                )
+        if not (has_dob and has_tob and has_place):
+            # User missing birth details - ask for them
+            missing_info = []
+            if not has_dob:
+                missing_info.append("birth date")
+            if not has_tob:
+                missing_info.append("birth time")
+            if not has_place:
+                missing_info.append("birth place")
 
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    await _send_whatsapp_message(client, phone, onboarding_message)
-                await _log_to_mongo(session_id, user_id, "assistant", onboarding_message, "whatsapp", "text", None)
-
-                return {"status": "onboarding_required", "missing_info": missing_info}
-
-            # User has birth details - trigger PDF generation
-            logger.info(f"[PDF] User {user_id} has birth details - generating PDF")
-
-            # Trigger PDF generation in background
-            generate_kundli_pdf_task.delay(phone, user_id)
-
-            # Send confirmation message
-            confirmation_message = (
-                f"Great! I'm generating your detailed Janam Kundli PDF. ✨\n\n"
-                f"This will include:\n"
-                f"• Birth Charts (Lagna + Navamsa)\n"
-                f"• Planetary Positions\n"
-                f"• Life Predictions (Career, Marriage, Health, Wealth)\n"
-                f"• Astrological Remedies\n\n"
-                f"Please wait 2-3 minutes... I'll send it to your WhatsApp shortly! 📄"
+            onboarding_message = (
+                f"To generate your Kundli PDF, I need your birth details first.\n\n"
+                f"Missing: {', '.join(missing_info)}\n\n"
+                f"Please provide your birth details in this format:\n"
+                f"• Date of Birth: 15 January 1990\n"
+                f"• Time of Birth: 10:30 AM\n"
+                f"• Place of Birth: Mumbai\n\n"
+                f"After providing these details, you can request the PDF again!"
             )
 
             async with httpx.AsyncClient(timeout=30.0) as client:
-                await _send_whatsapp_message(client, phone, confirmation_message)
+                await _send_whatsapp_message(client, phone, onboarding_message)
+            await _log_to_mongo(session_id, user_id, "assistant", onboarding_message, "whatsapp", "text", None)
+
+            return {"status": "birth_details_required", "missing_info": missing_info}
+
+        # User has birth details - trigger PDF generation
+        logger.info(f"[PDF] User {user_id} has birth details - generating PDF")
+
+        # Trigger PDF generation in background
+        generate_kundli_pdf_task.delay(phone, user_id)
+
+        # Send confirmation message
+        confirmation_message = (
+            f"Great! I'm generating your detailed Janam Kundli PDF. ✨\n\n"
+            f"This will include:\n"
+            f"• Birth Charts (Lagna + Navamsa)\n"
+            f"• Planetary Positions\n"
+            f"• Life Predictions (Career, Marriage, Health, Wealth)\n"
+            f"• Astrological Remedies\n\n"
+            f"Please wait 2-3 minutes... I'll send it to your WhatsApp shortly! 📄"
+        )
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            await _send_whatsapp_message(client, phone, confirmation_message)
             await _log_to_mongo(session_id, user_id, "assistant", confirmation_message, "whatsapp", "text", None)
 
             return {"status": "pdf_generating"}
