@@ -421,9 +421,13 @@ class KundliPDFGenerator:
         if remedies.get("general"):
             content.append(Paragraph("<b>General Remedies:</b>", self.styles['SubsectionHeader']))
 
-            # Format as bullet points
-            general_text = remedies["general"].replace("•", "<bullet>")
-            content.append(Paragraph(general_text, self.styles['BodyText']))
+            # Split into separate lines and create individual paragraphs
+            # ReportLab only allows ONE <bullet> tag per paragraph
+            general_lines = remedies["general"].split("•")
+            for line in general_lines:
+                line = line.strip()
+                if line:
+                    content.append(Paragraph(f"<bullet> {line}", self.styles['BodyText']))
 
         return content
 
