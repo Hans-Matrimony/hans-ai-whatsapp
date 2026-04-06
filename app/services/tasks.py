@@ -7,6 +7,7 @@ import sys
 import logging
 import base64
 import tempfile
+import asyncio
 from datetime import datetime
 from typing import Optional, Tuple, List
 from pathlib import Path
@@ -1339,6 +1340,139 @@ def generate_kundli_pdf_task(self, phone: str, user_id: str, dob: str, tob: str,
         raise self.retry(exc=e, countdown=2 ** self.request.retries)
 
 
+async def _calculate_kundli_swiss_ephemeris(dob: str, tob: str, place: str) -> dict:
+    """
+    Calculate kundli using Swiss Ephemeris (same as kundli chart feature)
+    """
+    import subprocess
+    import json
+    import os
+
+    try:
+        # Path to kundli calculation script
+        calculate_script = "~/.openclaw/skills/kundli/calculate.py"
+        calculate_script = os.path.expanduser(calculate_script)
+
+        if not os.path.exists(calculate_script):
+            logger.error(f"[PDF] Kundli calculation script not found: {calculate_script}")
+            return {"error": "Kundli calculation script not found"}
+
+        # Build command
+        cmd = [
+            "python3",
+            calculate_script,
+            "--dob", dob,
+            "--tob", tob,
+            "--place", place
+        ]
+
+        logger.info(f"[PDF] Running kundli calculation: {' '.join(cmd)}")
+
+        # Run calculation
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+
+        stdout, stderr = await process.communicate()
+
+        if process.returncode != 0:
+            logger.error(f"[PDF] Kundli calculation failed: {stderr.decode()}")
+            return {"error": "Kundli calculation failed"}
+
+        # Parse JSON output
+        output = stdout.decode().strip()
+        kundli_data = json.loads(output)
+
+        logger.info(f"[PDF] Kundli calculated successfully")
+        return kundli_data
+
+    except Exception as e:
+        logger.error(f"[PDF] Kundli calculation error: {e}", exc_info=True)
+        return {"error": str(e)}
+
+
+def _format_planet_positions_for_pdf(kundli_calculated: dict) -> dict:
+    """
+    Format planet positions from calculate.py output to PDF format
+    """
+    planet_positions = {}
+
+    try:
+        ai_summary = kundli_calculated.get("ai_summary", {})
+        planet_list = ai_summary.get("planet_positions", [])
+
+        # Parse planet positions from "Sun is in House 5 (Leo/Tau)" format
+        for planet_str in planet_list:
+            if "is in House" in planet_str:
+                parts = planet_str.split()
+                planet_name = parts[0]
+
+                # Find house number
+                house = None
+                for i, part in enumerate(parts):
+                    if part == "House" and i + 1 < len(parts):
+                        try:
+                            house = int(parts[i + 1])
+                        except ValueError:
+                            pass
+                        break
+
+                # Find sign
+                sign = None
+                for part in parts:
+                    if part in ["Aries", "Taurus", "Gemini", "Cancer", "Leo", "Virgo",
+                                "Libra", "Scorpio", "Sagittarius", "Capricorn", "Aquarius", "Pisces"]:
+                        sign = part
+                        break
+
+                if house and sign:
+                    planet_positions[planet_name.lower()] = {
+                        "planet": planet_name,
+                        "sign": sign,
+                        "house": house,
+                        "degree": 0.0  # Degree not available in summary
+                    }
+
+        logger.info(f"[PDF] Formatted {len(planet_positions)} planet positions")
+        return planet_positions
+
+    except Exception as e:
+        logger.error(f"[PDF] Error formatting planet positions: {e}")
+        return {}
+
+
+def _extract_dasha_info(kundli_calculated: dict) -> dict:
+    """
+    Extract dasha information from calculate.py output
+    """
+    try:
+        summary = kundli_calculated.get("summary", {})
+        dasha_str = summary.get("current_dasha", "")
+
+        # Parse dasha string like "Current Mahadasha: Saturn (Ends 2028). Current Antardasha: Saturn (Ends 2025)."
+        mahadasha = "Unknown"
+        antardasha = "Unknown"
+
+        if "Mahadasha:" in dasha_str:
+            parts = dasha_str.split("Mahadasha:")[1].split("(")[0].strip()
+            mahadasha = parts
+
+        if "Antardasha:" in dasha_str:
+            parts = dasha_str.split("Antardasha:")[1].split("(")[0].strip()
+            antardasha = parts
+
+        return {
+            "mahadasha": mahadasha,
+            "antardasha": antardasha
+        }
+
+    except Exception as e:
+        logger.error(f"[PDF] Error extracting dasha: {e}")
+        return {"mahadasha": "Unknown", "antardasha": "Unknown"}
+
+
 async def _generate_chart_images(kundli_data: dict) -> dict:
     """
     Generate Kundli chart images as base64
@@ -1555,27 +1689,28 @@ async def _generate_kundli_pdf_async(phone: str, user_id: str, dob: str, tob: st
         "birthPlace": place
     }
 
-    # Use placeholder kundli data for now (simplified version)
-    # TODO: Integrate with actual kundli calculation service
+    # Calculate kundli using Swiss Ephemeris (same as kundli chart feature)
+    logger.info(f"[PDF] Calculating kundli with Swiss Ephemeris for {dob} {tob} {place}")
+
+    kundli_calculated = await _calculate_kundli_swiss_ephemeris(dob, tob, place)
+
+    if not kundli_calculated or "error" in kundli_calculated:
+        logger.error(f"[PDF] Kundli calculation failed: {kundli_calculated}")
+        return {"error": "Kundli calculation failed"}
+
+    # Extract and format kundli data for PDF
+    summary = kundli_calculated.get("summary", {})
+    ai_summary = kundli_calculated.get("ai_summary", {})
+
     kundli_data = {
-        "lagna": "Taurus",
-        "moon_sign": "Pisces",
-        "nakshatra": "Uttara Bhadrapada",
-        "planet_positions": {
-            "sun": {"planet": "Sun", "sign": "Leo", "house": 5, "degree": 15.5},
-            "moon": {"planet": "Moon", "sign": "Cancer", "house": 4, "degree": 10.2},
-            "mars": {"planet": "Mars", "sign": "Aries", "house": 1, "degree": 5.0},
-            "mercury": {"planet": "Mercury", "sign": "Gemini", "house": 3, "degree": 20.1},
-            "jupiter": {"planet": "Jupiter", "sign": "Sagittarius", "house": 8, "degree": 18.3},
-            "venus": {"planet": "Venus", "sign": "Taurus", "house": 2, "degree": 12.7},
-            "saturn": {"planet": "Saturn", "sign": "Aquarius", "house": 10, "degree": 8.9},
-            "rahu": {"planet": "Rahu", "sign": "Gemini", "house": 3, "degree": 15.0},
-            "ketu": {"planet": "Ketu", "sign": "Sagittarius", "house": 9, "degree": 15.0}
-        },
-        "dasha": {"mahadasha": "Saturn", "antardasha": "Saturn"}
+        "lagna": summary.get("lagna", "Unknown"),
+        "moon_sign": summary.get("moon_sign", "Unknown"),
+        "nakshatra": summary.get("nakshatra", "Unknown"),
+        "planet_positions": _format_planet_positions_for_pdf(kundli_calculated),
+        "dasha": _extract_dasha_info(kundli_calculated)
     }
 
-    logger.info(f"[PDF] Using placeholder kundli data: Lagna={kundli_data.get('lagna')}, Rashi={kundli_data.get('moon_sign')}")
+    logger.info(f"[PDF] Calculated kundli: Lagna={kundli_data.get('lagna')}, Rashi={kundli_data.get('moon_sign')}, Nakshatra={kundli_data.get('nakshatra')}")
 
     # Generate chart images
     charts = await _generate_chart_images(kundli_data)
