@@ -202,6 +202,19 @@ async def receive_webhook(request: Request):
 
                 if message_type == "text":
                     text_content = msg.get("text", {}).get("body", "")
+                elif message_type == "button":
+                    # Template Quick Reply Button
+                    text_content = msg.get("button", {}).get("text", "")
+                    payload = msg.get("button", {}).get("payload", "")
+                    logger.info(f"Button click: {text_content} (payload: {payload})")
+                elif message_type == "interactive":
+                    # Interactive Button or List Reply
+                    interactive = msg.get("interactive", {})
+                    if "button_reply" in interactive:
+                        text_content = interactive["button_reply"].get("title", "")
+                    elif "list_reply" in interactive:
+                        text_content = interactive["list_reply"].get("title", "")
+                    logger.info(f"Interactive click: {text_content}")
                 elif message_type == "image":
                     media_id = msg.get("image", {}).get("id")
                     caption = msg.get("image", {}).get("caption", "")
