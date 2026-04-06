@@ -1339,6 +1339,147 @@ def generate_kundli_pdf_task(self, phone: str, user_id: str, dob: str, tob: str,
         raise self.retry(exc=e, countdown=2 ** self.request.retries)
 
 
+async def _generate_chart_images(kundli_data: dict) -> dict:
+    """
+    Generate Kundli chart images as base64
+
+    Creates simple North Indian style chart images using PIL
+    """
+    from io import BytesIO
+    from PIL import Image, ImageDraw, ImageFont
+    import base64
+
+    charts = {}
+
+    # Planet symbols for charts
+    planet_symbols = {
+        "Sun": "Su", "Moon": "Mo", "Mars": "Ma", "Mercury": "Me",
+        "Jupiter": "Ju", "Venus": "Ve", "Saturn": "Sa", "Rahu": "Ra", "Ketu": "Ke"
+    }
+
+    # Zodiac signs in order (starting from Aries)
+    zodiac_order = ["Aries", "Taurus", "Gemini", "Cancer", "Leo", "Virgo",
+                    "Libra", "Scorpio", "Sagittarius", "Capricorn", "Aquarius", "Pisces"]
+
+    # North Indian chart layout (12 houses in diamond pattern)
+    # House positions for North Indian chart:
+    # 12 1 2
+    # 11   3
+    # 10   4
+    # 9   5
+    # 8 7 6
+
+    def create_kundli_chart(title: str, chart_type: str = "lagna") -> str:
+        """Create a Kundli chart image and return as base64"""
+        img_size = 400
+        img = Image.new('RGB', (img_size, img_size), color='white')
+        draw = ImageDraw.Draw(img)
+
+        # Chart dimensions
+        margin = 40
+        chart_size = img_size - 2 * margin
+        square_size = chart_size // 3
+
+        # Draw outer box
+        draw.rectangle([margin, margin, margin + chart_size, margin + chart_size], outline='black', width=2)
+
+        # Draw inner grid (3x3)
+        for i in range(1, 3):
+            # Vertical lines
+            draw.line([margin + i * square_size, margin, margin + i * square_size, margin + chart_size], fill='black', width=1)
+            # Horizontal lines
+            draw.line([margin, margin + i * square_size, margin + chart_size, margin + i * square_size], fill='black', width=1)
+
+        # Draw diagonal lines (North Indian style)
+        draw.line([margin, margin, margin + chart_size, margin + chart_size], fill='black', width=1)
+        draw.line([margin + chart_size, margin, margin, margin + chart_size], fill='black', width=1)
+
+        # Add title
+        try:
+            title_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 16)
+        except:
+            title_font = ImageFont.load_default()
+
+        title_bbox = draw.textbbox((0, 0), title, font=title_font)
+        title_width = title_bbox[2] - title_bbox[0]
+        draw.text(((img_size - title_width) // 2, 10), title, fill='black', font=title_font)
+
+        # Place planets in houses based on kundli data
+        planet_positions = kundli_data.get("planet_positions", {})
+
+        # Map planets to houses
+        house_planets = {i: [] for i in range(1, 13)}  # 1-12 houses
+
+        for planet_key, planet_data in planet_positions.items():
+            if isinstance(planet_data, dict) and "house" in planet_data:
+                house = planet_data["house"]
+                planet_name = planet_data.get("planet", planet_key)
+                symbol = planet_symbols.get(planet_name, planet_name[:2])
+
+                if 1 <= house <= 12:
+                    house_planets[house].append(symbol)
+
+        # House positions for North Indian chart (x, y coordinates)
+        house_positions = {
+            1: (2, 0), 2: (2, 1), 3: (2, 2),
+            4: (1, 2), 5: (0, 2),
+            6: (0, 1), 7: (0, 0),
+            8: (1, 0), 9: (1, 1),
+            10: (2, 1), 11: (2, 0), 12: (2, 2)
+        }
+
+        # Draw house numbers and planets
+        try:
+            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 10)
+        except:
+            font = ImageFont.load_default()
+
+        for house in range(1, 13):
+            # Get position for this house in North Indian layout
+            if house <= 3:
+                row, col = 0, house - 1
+            elif house <= 5:
+                row, col = house - 3, 2
+            elif house == 6:
+                row, col = 2, 1
+            elif house == 7:
+                row, col = 2, 0
+            elif house == 8:
+                row, col = 1, 0
+            elif house == 9:
+                row, col = 1, 1
+            elif house <= 12:
+                row, col = 3 - (house - 9), 2
+
+            x = margin + col * square_size + 5
+            y = margin + row * square_size + 5
+
+            # Draw house number
+            draw.text((x, y), str(house), fill='gray', font=font)
+
+            # Draw planets
+            if house_planets[house]:
+                planet_text = " ".join(house_planets[house])
+                draw.text((x + 15, y), planet_text, fill='black', font=font)
+
+        # Convert to base64
+        buffer = BytesIO()
+        img.save(buffer, format='PNG')
+        img_str = base64.b64encode(buffer.getvalue()).decode()
+        return f"data:image/png;base64,{img_str}"
+
+    # Generate Lagna Kundli (Birth Chart)
+    charts["birth_chart"] = create_kundli_chart("Lagna Kundli (D1)", "lagna")
+
+    # Generate Navamsa Chart (D9)
+    # For navamsa, we'd calculate differently, but for now use same layout with different title
+    charts["navamsa_chart"] = create_kundli_chart("Navamsa Chart (D9)", "navamsa")
+
+    logger.info(f"[PDF] Generated {len(charts)} chart images")
+
+    return charts
+
+
 async def _generate_kundli_pdf_async(phone: str, user_id: str, dob: str, tob: str, place: str, name: str) -> dict:
     """Async implementation of PDF generation"""
     from app.services.kundli_pdf_generator import KundliPDFGenerator
@@ -1376,11 +1517,8 @@ async def _generate_kundli_pdf_async(phone: str, user_id: str, dob: str, tob: st
 
     logger.info(f"[PDF] Using placeholder kundli data: Lagna={kundli_data.get('lagna')}, Rashi={kundli_data.get('moon_sign')}")
 
-    # Placeholder charts
-    charts = {
-        "lagna_chart": "placeholder",
-        "navamsa_chart": "placeholder"
-    }
+    # Generate chart images
+    charts = await _generate_chart_images(kundli_data)
 
     # Generate PDF
     try:
