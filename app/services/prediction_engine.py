@@ -25,12 +25,89 @@ class PredictionEngine:
         "ketu": "Ketu (South Node)"
     }
 
-    # House rulerships (Vedic astrology)
-    HOUSE_RULERS = {
-        1: "Mars", 2: "Venus", 3: "Mercury", 4: "Moon",
-        5: "Sun", 6: "Mercury", 7: "Venus", 8: "Mars",
-        9: "Jupiter", 10: "Saturn", 11: "Saturn", 12: "Jupiter"
+    # Sign rulerships (Natural rulerships of signs)
+    SIGN_RULERS = {
+        "Aries": "Mars",
+        "Taurus": "Venus",
+        "Gemini": "Mercury",
+        "Cancer": "Moon",
+        "Leo": "Sun",
+        "Virgo": "Mercury",
+        "Libra": "Venus",
+        "Scorpio": "Mars",
+        "Sagittarius": "Jupiter",
+        "Capricorn": "Saturn",
+        "Aquarius": "Saturn",
+        "Pisces": "Jupiter"
     }
+
+    # Signs in order
+    SIGNS = [
+        'Aries', 'Taurus', 'Gemini', 'Cancer', 'Leo', 'Virgo',
+        'Libra', 'Scorpio', 'Sagittarius', 'Capricorn', 'Aquarius', 'Pisces'
+    ]
+
+    def _get_house_ruler(self, house_number: int, lagna: str) -> str:
+        """
+        Calculate the ruler of a house based on Lagna sign
+
+        Uses Whole Sign House system - each house is one complete sign
+        """
+        try:
+            lagna_idx = self.SIGNS.index(lagna)
+            house_idx = (lagna_idx + house_number - 1) % 12
+            house_sign = self.SIGNS[house_idx]
+            ruler = self.SIGN_RULERS.get(house_sign, "Unknown")
+            return ruler
+        except ValueError:
+            # If lagna not found, default to Mars
+            return "Mars"
+
+    def _get_functional_benefics(self, lagna: str) -> list:
+        """
+        Get functional benefic planets based on Lagna
+
+        Functional benefics vary by Lagna. This is a simplified version.
+        """
+        # Trikone lords (1, 5, 9) are always benefic
+        # For simplicity, using basic rules
+        benefic_map = {
+            "Aries": ["Sun", "Jupiter", "Mars"],  # 5th (Sun), 9th (Jupiter), Lagna lord (Mars)
+            "Taurus": ["Saturn", "Mercury", "Venus"],
+            "Gemini": ["Venus", "Saturn", "Mercury"],
+            "Cancer": ["Mars", "Jupiter", "Moon"],
+            "Leo": ["Jupiter", "Mars", "Sun"],
+            "Virgo": ["Saturn", "Mercury", "Venus"],
+            "Libra": ["Saturn", "Venus", "Mercury"],  # Saturn is Yogakaraka for Libra!
+            "Scorpio": ["Moon", "Jupiter", "Mars"],
+            "Sagittarius": ["Mars", "Sun", "Jupiter"],
+            "Capricorn": ["Venus", "Mercury", "Saturn"],
+            "Aquarius": ["Venus", "Saturn", "Mercury"],
+            "Pisces": ["Jupiter", "Mars", "Moon"]
+        }
+        return benefic_map.get(lagna, ["Jupiter", "Venus", "Mercury"])
+
+    def _get_functional_malefics(self, lagna: str) -> list:
+        """
+        Get functional malefic planets based on Lagna
+
+        Functional malefics are lords of dusthana houses (6, 8, 12)
+        """
+        malefic_map = {
+            "Aries": ["Mercury"],  # 6th and 8th lord
+            "Taurus": ["Mars", "Jupiter"],
+            "Gemini": ["Jupiter"],
+            "Cancer": ["Venus", "Saturn"],
+            "Leo": ["Mercury", "Venus"],
+            "Virgo": ["Mars", "Jupiter"],
+            "Libra": ["Sun", "Jupiter"],  # Sun rules 11th, Jupiter rules 6th
+            "Scorpio": ["Mercury", "Venus"],
+            "Sagittarius": ["Mercury", "Venus"],
+            "Capricorn": ["Moon", "Jupiter"],
+            "Aquarius": ["Moon", "Mars"],
+            "Pisces": ["Saturn", "Venus"]
+        }
+        return malefic_map.get(lagna, ["Saturn", "Rahu", "Ketu"])
 
     def generate_all_predictions(self, kundli_data: dict) -> dict:
         """
@@ -60,8 +137,8 @@ class PredictionEngine:
 
         predictions = []
 
-        # Get 10th house ruler
-        tenth_ruler = self.HOUSE_RULERS.get(10, "Saturn")
+        # Get 10th house ruler dynamically based on Lagna
+        tenth_ruler = self._get_house_ruler(10, lagna)
         career_field = self._get_career_field(tenth_ruler)
         predictions.append(f"Your 10th house is ruled by {tenth_ruler}, indicating strong potential in {career_field}.")
 
@@ -103,8 +180,8 @@ class PredictionEngine:
 
         predictions = []
 
-        # Get 7th house ruler
-        seventh_ruler = self.HOUSE_RULERS.get(7, "Venus")
+        # Get 7th house ruler dynamically based on Lagna
+        seventh_ruler = self._get_house_ruler(7, lagna)
         marriage_style = self._get_marriage_style(seventh_ruler)
         predictions.append(f"Your 7th house is ruled by {seventh_ruler}, suggesting {marriage_style}.")
 
@@ -143,8 +220,8 @@ class PredictionEngine:
 
         predictions = []
 
-        # Get 6th house ruler
-        sixth_ruler = self.HOUSE_RULERS.get(6, "Mercury")
+        # Get 6th house ruler dynamically based on Lagna
+        sixth_ruler = self._get_house_ruler(6, lagna)
 
         if sixth_ruler == "Mars":
             predictions.append("Mars ruling your 6th house indicates you need to be careful about injuries, inflammation, and accidents. Avoid rash actions and drive safely.")
@@ -182,13 +259,13 @@ class PredictionEngine:
 
         predictions = []
 
-        # Get 2nd house ruler (accumulated wealth)
-        second_ruler = self.HOUSE_RULERS.get(2, "Venus")
+        # Get 2nd house ruler (accumulated wealth) - dynamically based on Lagna
+        second_ruler = self._get_house_ruler(2, lagna)
         wealth_source = self._get_wealth_source(second_ruler)
         predictions.append(f"Your 2nd house is ruled by {second_ruler}, indicating wealth from {wealth_source}.")
 
-        # Get 11th house ruler (gains and income)
-        eleventh_ruler = self.HOUSE_RULERS.get(11, "Saturn")
+        # Get 11th house ruler (gains and income) - dynamically based on Lagna
+        eleventh_ruler = self._get_house_ruler(11, lagna)
         gain_source = self._get_gain_source(eleventh_ruler)
         predictions.append(f"Your 11th house is ruled by {eleventh_ruler}, suggesting gains from {gain_source}.")
 
@@ -229,7 +306,7 @@ class PredictionEngine:
 
     def generate_remedies(self, kundli_data: dict) -> dict:
         """
-        Generate astrological remedies
+        Generate astrological remedies based on functional nature of planets
 
         Args:
             kundli_data: Calculated kundli data
@@ -238,12 +315,21 @@ class PredictionEngine:
             Dict with gemstones, mantras, and general remedies
         """
         planets = kundli_data.get("planet_positions", {})
+        lagna = kundli_data.get("lagna", "Unknown")
+
+        # Determine functional nature of planets based on Lagna
+        # For each Lagna, certain planets are benefic or malefic
+        functional_benefics = self._get_functional_benefics(lagna)
+        functional_malefics = self._get_functional_malefics(lagna)
 
         # Check for malefic planets in dusthana houses (6, 8, 12)
         malefic_planets = []
         for planet_name, planet_data in planets.items():
             house = planet_data.get("house")
-            if house in [6, 8, 12]:
+            planet_ruler = planet_data.get("planet")
+
+            # Check if planet is functionally malefic or in dusthana
+            if house in [6, 8, 12] or planet_ruler in functional_malefics:
                 malefic_planets.append(planet_name)
 
         remedies = {
