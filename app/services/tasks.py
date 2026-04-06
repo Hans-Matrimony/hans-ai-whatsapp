@@ -1524,6 +1524,7 @@ async def _get_recent_conversation_from_mongo(user_id: str, session_data: dict =
     """
     result = {
         "detected_topic": None,
+        "detected_language": "en",  # Default to English
         "last_questions": []
     }
 
