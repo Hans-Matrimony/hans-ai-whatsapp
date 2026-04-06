@@ -307,6 +307,51 @@ async def send_whatsapp_message(phone: str, message: str):
 
 
 # =============================================================================
+# Trigger Kundli PDF Generation
+# =============================================================================
+
+@app.post("/generate-kundli-pdf")
+async def trigger_kundli_pdf(request: Request):
+    """
+    Trigger Kundli PDF generation for a user.
+    Called by openclawforaiastro kundli_pdf skill.
+    """
+    try:
+        data = await request.json()
+
+        phone = data.get("phone")  # User's phone number (without +)
+        user_id = data.get("user_id")  # User's ID (with +)
+        dob = data.get("dob")  # Date of birth
+        tob = data.get("tob")  # Time of birth
+        place = data.get("place")  # Place of birth
+        name = data.get("name", "User")  # User's name
+
+        if not all([phone, user_id, dob, tob, place]):
+            raise HTTPException(
+                status_code=400,
+                detail="Missing required fields: phone, user_id, dob, tob, place"
+            )
+
+        logger.info(f"[PDF API] Triggering PDF generation for {user_id}: DOB={dob}, TOB={tob}, Place={place}")
+
+        # Trigger Celery task
+        from app.services.tasks import generate_kundli_pdf_task
+        task = generate_kundli_pdf_task.delay(phone, user_id, dob, tob, place, name)
+
+        return {
+            "status": "triggered",
+            "task_id": task.id,
+            "message": "PDF generation started"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[PDF API] Error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
 # Admin API - Send Inactive Template
 # =============================================================================
 

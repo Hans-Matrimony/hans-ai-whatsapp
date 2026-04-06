@@ -801,76 +801,6 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
     if access_type != "trial" or access.get("skip_reason"):
         logger.info(f"[Subscription] {phone} has access: {access_type} (reason: {access.get('skip_reason', 'valid_access')})")
 
-    # ===================================================================
-
-    # ==================== KUNDLI PDF REQUEST DETECTION ====================
-
-    # Check if user is requesting Kundli PDF
-    pdf_keywords = ["KUNDLI PDF", "MY KUNDLI", "PDF REPORT", "DETAILED REPORT", "GET PDF", "DOWNLOAD PDF"]
-    message_upper = message.strip().upper()
-
-    if any(keyword in message_upper for keyword in pdf_keywords):
-        logger.info(f"[PDF Request] User {user_id} requested Kundli PDF")
-
-        # Check if user has birth details from Mem0
-        user_data = await _get_user_birth_details_from_mem0(user_id)
-
-        # Check if user has birth details
-        has_dob = bool(user_data and user_data.get("dateOfBirth"))
-        has_tob = bool(user_data and user_data.get("timeOfBirth"))
-        has_place = bool(user_data and user_data.get("birthPlace"))
-
-        if not (has_dob and has_tob and has_place):
-            # User missing birth details - ask for them
-            missing_info = []
-            if not has_dob:
-                missing_info.append("birth date")
-            if not has_tob:
-                missing_info.append("birth time")
-            if not has_place:
-                missing_info.append("birth place")
-
-            onboarding_message = (
-                f"To generate your Kundli PDF, I need your birth details first.\n\n"
-                f"Missing: {', '.join(missing_info)}\n\n"
-                f"Please provide your birth details in this format:\n"
-                f"• Date of Birth: 15 January 1990\n"
-                f"• Time of Birth: 10:30 AM\n"
-                f"• Place of Birth: Mumbai\n\n"
-                f"After providing these details, you can request the PDF again!"
-            )
-
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                await _send_whatsapp_message(client, phone, onboarding_message)
-            await _log_to_mongo(session_id, user_id, "assistant", onboarding_message, "whatsapp", "text", None)
-
-            return {"status": "birth_details_required", "missing_info": missing_info}
-
-        # User has birth details - trigger PDF generation
-        logger.info(f"[PDF] User {user_id} has birth details - generating PDF")
-
-        # Trigger PDF generation in background
-        generate_kundli_pdf_task.delay(phone, user_id)
-
-        # Send confirmation message
-        confirmation_message = (
-            f"Great! I'm generating your detailed Janam Kundli PDF. ✨\n\n"
-            f"This will include:\n"
-            f"• Birth Charts (Lagna + Navamsa)\n"
-            f"• Planetary Positions\n"
-            f"• Life Predictions (Career, Marriage, Health, Wealth)\n"
-            f"• Astrological Remedies\n\n"
-            f"Please wait 2-3 minutes... I'll send it to your WhatsApp shortly! 📄"
-        )
-
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            await _send_whatsapp_message(client, phone, confirmation_message)
-            await _log_to_mongo(session_id, user_id, "assistant", confirmation_message, "whatsapp", "text", None)
-
-            return {"status": "pdf_generating"}
-
-    # ===================================================================
-
     if not OPENCLAW_URL:
         logger.warning("OPENCLAW_URL not set")
         return {"error": "OpenClaw URL not configured"}
@@ -1344,104 +1274,25 @@ def health_check_task():
     return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
 
 
-async def _get_user_birth_details_from_mem0(user_id: str) -> Optional[dict]:
-    """
-    Retrieve user birth details from Mem0 memory system.
-
-    Args:
-        user_id: User's WhatsApp number (with or without +)
-
-    Returns:
-        Dict with dateOfBirth, timeOfBirth, birthPlace, and name if found, None otherwise
-    """
-    if not MEM0_URL:
-        logger.warning("[PDF] MEM0_URL not set - cannot retrieve user birth details")
-        return None
-
-    # Clean user_id (remove + if present)
-    clean_user_id = user_id.lstrip("+")
-
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            # Query Mem0 API for user memories
-            url = f"{MEM0_URL}/v1/memories"
-
-            params = {
-                "user_id": clean_user_id,
-                "limit": 100  # Get recent memories
-            }
-
-            response = await client.get(url, params=params)
-
-            if response.status_code != 200:
-                logger.warning(f"[PDF] Failed to fetch memories for {user_id}: {response.status_code}")
-                return None
-
-            data = response.json()
-            memories = data if isinstance(data, list) else data.get("memories", [])
-
-            # Search for birth details in memories
-            user_data = {}
-
-            # Patterns to extract birth details
-            patterns = {
-                "dateOfBirth": r"(?:date\s*of\s*birth|dob|birth\s*date)[:\s]*([0-9]{1,2}[-/\s][A-Za-z]+[-/\s][0-9]{4}|[0-9]{4}[-/][0-9]{2}[-/][0-9]{2})",
-                "timeOfBirth": r"(?:time\s*of\s*birth|tob|birth\s*time)[:\s]*([0-9]{1,2}[:][0-9]{2}(?:\s*[AP]M)?)",
-                "birthPlace": r"(?:place\s*of\s*birth|birth\s*place|birthplace|born\s*in)[:\s]*([A-Za-z][A-Za-z\s]+)",
-            }
-
-            for memory in memories:
-                # Get memory text/content
-                memory_text = memory.get("memory", "") or memory.get("content", "") or ""
-
-                # Extract birth details using patterns
-                for field, pattern in patterns.items():
-                    if field not in user_data:
-                        match = re.search(pattern, memory_text, re.IGNORECASE)
-                        if match:
-                            user_data[field] = match.group(1).strip()
-                            logger.info(f"[PDF] Found {field} in memory: {user_data[field]}")
-
-                # Extract name if mentioned
-                if "name" not in user_data:
-                    name_match = re.search(r"(?:my\s*name\s*is|i\s*am|name\s*is)[:\s]+([A-Z][a-z]+)", memory_text, re.IGNORECASE)
-                    if name_match:
-                        user_data["name"] = name_match.group(1).strip()
-                        logger.info(f"[PDF] Found name in memory: {user_data['name']}")
-
-                # Break if we have all required fields
-                if all(k in user_data for k in ["dateOfBirth", "timeOfBirth", "birthPlace"]):
-                    logger.info(f"[PDF] Found all birth details for {user_id}")
-                    break
-
-            # Return user_data if we have at least some information
-            if user_data:
-                logger.info(f"[PDF] Retrieved birth details for {user_id}: {list(user_data.keys())}")
-                return user_data
-            else:
-                logger.warning(f"[PDF] No birth details found in memories for {user_id}")
-                return None
-
-    except Exception as e:
-        logger.error(f"[PDF] Error retrieving birth details from Mem0 for {user_id}: {e}")
-        return None
-
-
 @celery_app.task(bind=True, max_retries=2, default_retry_delay=60)
-def generate_kundli_pdf_task(self, phone: str, user_id: str):
+def generate_kundli_pdf_task(self, phone: str, user_id: str, dob: str, tob: str, place: str, name: str = "User"):
     """
     Generate and send Kundli PDF to user
 
     Args:
         phone: User's phone number (without +)
         user_id: User's ID (with +)
+        dob: Date of birth
+        tob: Time of birth
+        place: Place of birth
+        name: User's name
     """
     try:
-        logger.info(f"[PDF Task] Starting for {user_id}")
+        logger.info(f"[PDF Task] Starting for {user_id}: DOB={dob}, TOB={tob}, Place={place}")
 
         # Run async code in sync context
         import asyncio
-        result = asyncio.run(_generate_kundli_pdf_async(phone, user_id))
+        result = asyncio.run(_generate_kundli_pdf_async(phone, user_id, dob, tob, place, name))
 
         logger.info(f"[PDF Task] Completed for {user_id}: {result}")
         return result
@@ -1452,7 +1303,7 @@ def generate_kundli_pdf_task(self, phone: str, user_id: str):
         raise self.retry(exc=e, countdown=2 ** self.request.retries)
 
 
-async def _generate_kundli_pdf_async(phone: str, user_id: str) -> dict:
+async def _generate_kundli_pdf_async(phone: str, user_id: str, dob: str, tob: str, place: str, name: str) -> dict:
     """Async implementation of PDF generation"""
     from app.services.kundli_calculator_wrapper import KundliCalculatorWrapper
     from app.services.kundli_pdf_generator import KundliPDFGenerator
@@ -1460,25 +1311,13 @@ async def _generate_kundli_pdf_async(phone: str, user_id: str) -> dict:
 
     session_id = f"whatsapp:+{phone}"
 
-    # Step 1: Get user birth details from Mem0
-    user_data = await _get_user_birth_details_from_mem0(user_id)
-
-    if not user_data:
-        logger.error(f"[PDF] User data not found for {user_id}")
-        return {"error": "User data not found"}
-
-    logger.info(f"[PDF] User data found: {user_data.get('name', 'Unknown')}")
-
-    # Step 2: Check if user has birth details
-    dob = user_data.get("dateOfBirth")
-    tob = user_data.get("timeOfBirth")
-    place = user_data.get("birthPlace")
-
-    if not all([dob, tob, place]):
-        logger.error(f"[PDF] Missing birth details for {user_id}: DOB={dob}, TOB={tob}, Place={place}")
-        return {"error": "Birth details incomplete"}
-
-    logger.info(f"[PDF] Birth details: DOB={dob}, TOB={tob}, Place={place}")
+    # Prepare user data
+    user_data = {
+        "name": name,
+        "dateOfBirth": dob,
+        "timeOfBirth": tob,
+        "birthPlace": place
+    }
 
     # Step 3: Calculate kundli
     calculator = KundliCalculatorWrapper()
