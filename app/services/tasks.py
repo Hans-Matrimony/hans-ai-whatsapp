@@ -13,6 +13,7 @@ from pathlib import Path
 
 import httpx
 from app.services.celery_app import celery_app
+from app.services.profile_service import UserProfileService
 
 # Add skills directory to path for audio processor
 skills_path = os.path.join(os.path.dirname(__file__), '../../skills')
