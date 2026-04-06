@@ -127,8 +127,8 @@ class PredictionEngine:
 
         return {
             "career": self._predict_career(planet_positions, lagna),
-            "marriage": self._predict_marriage(planet_positions, moon_sign),
-            "health": self._predict_health(planet_positions),
+            "marriage": self._predict_marriage(planet_positions, moon_sign, lagna),
+            "health": self._predict_health(planet_positions, lagna),
             "wealth": self._predict_wealth(planet_positions, lagna)
         }
 
@@ -175,7 +175,7 @@ class PredictionEngine:
 
         return " ".join(predictions) if predictions else "Your career looks stable and promising. Focus on your skills and keep working hard towards your goals. Success will come through dedication."
 
-    def _predict_marriage(self, planets: dict, moon_sign: str) -> str:
+    def _predict_marriage(self, planets: dict, moon_sign: str, lagna: str = "Unknown") -> str:
         """Generate marriage predictions based on 7th house and Venus"""
 
         predictions = []
@@ -215,7 +215,7 @@ class PredictionEngine:
 
         return " ".join(predictions) if predictions else "Your marriage will be harmonious and blessed. Trust in divine timing and maintain faith in your future partner."
 
-    def _predict_health(self, planets: dict) -> str:
+    def _predict_health(self, planets: dict, lagna: str = "Unknown") -> str:
         """Generate health predictions based on 6th house and Saturn"""
 
         predictions = []
