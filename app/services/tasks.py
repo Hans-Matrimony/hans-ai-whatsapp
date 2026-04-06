@@ -13,7 +13,6 @@ from pathlib import Path
 
 import httpx
 from app.services.celery_app import celery_app
-from app.services.profile_service import UserProfileService
 
 # Add skills directory to path for audio processor
 skills_path = os.path.join(os.path.dirname(__file__), '../../skills')
@@ -813,14 +812,13 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
     if any(keyword in message_upper for keyword in pdf_keywords):
         logger.info(f"[PDF Request] User {user_id} requested Kundli PDF")
 
-        # Check if user has birth details in profile
-        profile_service = UserProfileService()
-        profile = await profile_service.get_user_profile(user_id)
+        # Check if user has birth details from MongoDB Logger
+        user_data = await _get_user_birth_details_from_conversation(user_id, session_id)
 
         # Check if user has birth details
-        has_dob = bool(profile and profile.get("dateOfBirth"))
-        has_tob = bool(profile and profile.get("timeOfBirth"))
-        has_place = bool(profile and profile.get("birthPlace"))
+        has_dob = bool(user_data and user_data.get("dateOfBirth"))
+        has_tob = bool(user_data and user_data.get("timeOfBirth"))
+        has_place = bool(user_data and user_data.get("birthPlace"))
 
         if not (has_dob and has_tob and has_place):
             # User missing birth details - ask for them
@@ -1346,6 +1344,78 @@ def health_check_task():
     return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
 
 
+async def _get_user_birth_details_from_conversation(user_id: str, session_id: str) -> Optional[dict]:
+    """
+    Retrieve user birth details from MongoDB Logger conversation history.
+
+    Args:
+        user_id: User's WhatsApp number
+        session_id: Session ID for conversation
+
+    Returns:
+        Dict with dateOfBirth, timeOfBirth, birthPlace, and name if found, None otherwise
+    """
+    if not MONGO_LOGGER_URL:
+        logger.warning("[PDF] MONGO_LOGGER_URL not set - cannot retrieve user birth details")
+        return None
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            # Query conversation history from MongoDB Logger
+            # Using the conversations API endpoint
+            url = f"{MONGO_LOGGER_URL}/api/conversations/{user_id}"
+
+            response = await client.get(url)
+            if response.status_code != 200:
+                logger.warning(f"[PDF] Failed to fetch conversation for {user_id}: {response.status_code}")
+                return None
+
+            data = response.json()
+            messages = data.get("messages", [])
+
+            # Search for birth details in conversation
+            user_data = {}
+
+            # Patterns to extract birth details
+            patterns = {
+                "dateOfBirth": r"(?:date\s*of\s*birth|dob|birth\s*date)[:\s]*([0-9]{1,2}[-/\s][A-Za-z]+[-/\s][0-9]{4}|[0-9]{4}[-/][0-9]{2}[-/][0-9]{2})",
+                "timeOfBirth": r"(?:time\s*of\s*birth|tob|birth\s*time)[:\s]*([0-9]{1,2}[:][0-9]{2}(?:\s*[AP]M)?)",
+                "birthPlace": r"(?:place\s*of\s*birth|birth\s*place|birthplace|born\s*in)[:\s]*([A-Za-z][A-Za-z\s]+)",
+            }
+
+            for msg in messages:
+                text = msg.get("text", "")
+
+                # Extract birth details using patterns
+                for field, pattern in patterns.items():
+                    if field not in user_data:
+                        match = re.search(pattern, text, re.IGNORECASE)
+                        if match:
+                            user_data[field] = match.group(1).strip()
+
+                # Extract name if mentioned
+                if "name" not in user_data:
+                    name_match = re.search(r"(?:my\s*name\s*is|i\s*am)\s+([A-Z][a-z]+)", text, re.IGNORECASE)
+                    if name_match:
+                        user_data["name"] = name_match.group(1).strip()
+
+                # Break if we have all required fields
+                if all(k in user_data for k in ["dateOfBirth", "timeOfBirth", "birthPlace"]):
+                    break
+
+            # Return user_data if we have at least some information
+            if user_data:
+                logger.info(f"[PDF] Retrieved birth details for {user_id}: {list(user_data.keys())}")
+                return user_data
+            else:
+                logger.warning(f"[PDF] No birth details found in conversation for {user_id}")
+                return None
+
+    except Exception as e:
+        logger.error(f"[PDF] Error retrieving birth details for {user_id}: {e}")
+        return None
+
+
 @celery_app.task(bind=True, max_retries=2, default_retry_delay=60)
 def generate_kundli_pdf_task(self, phone: str, user_id: str):
     """
@@ -1373,27 +1443,25 @@ def generate_kundli_pdf_task(self, phone: str, user_id: str):
 
 async def _generate_kundli_pdf_async(phone: str, user_id: str) -> dict:
     """Async implementation of PDF generation"""
-    from app.services.profile_service import UserProfileService
     from app.services.kundli_calculator_wrapper import KundliCalculatorWrapper
     from app.services.kundli_pdf_generator import KundliPDFGenerator
     from app.services.whatsapp_api import WhatsAppAPI
 
     session_id = f"whatsapp:+{phone}"
 
-    # Step 1: Get user profile
-    profile_service = UserProfileService()
-    profile = await profile_service.get_user_profile(user_id)
+    # Step 1: Get user birth details from MongoDB Logger
+    user_data = await _get_user_birth_details_from_conversation(user_id, session_id)
 
-    if not profile:
-        logger.error(f"[PDF] User profile not found for {user_id}")
-        return {"error": "User profile not found"}
+    if not user_data:
+        logger.error(f"[PDF] User data not found for {user_id}")
+        return {"error": "User data not found"}
 
-    logger.info(f"[PDF] User profile found: {profile.get('name')}")
+    logger.info(f"[PDF] User data found: {user_data.get('name', 'Unknown')}")
 
     # Step 2: Check if user has birth details
-    dob = profile.get("dateOfBirth")
-    tob = profile.get("timeOfBirth")
-    place = profile.get("birthPlace")
+    dob = user_data.get("dateOfBirth")
+    tob = user_data.get("timeOfBirth")
+    place = user_data.get("birthPlace")
 
     if not all([dob, tob, place]):
         logger.error(f"[PDF] Missing birth details for {user_id}: DOB={dob}, TOB={tob}, Place={place}")
@@ -1424,7 +1492,7 @@ async def _generate_kundli_pdf_async(phone: str, user_id: str) -> dict:
     # Step 5: Generate PDF
     try:
         pdf_generator = KundliPDFGenerator()
-        pdf_bytes = pdf_generator.generate_pdf(profile, kundli_data, charts)
+        pdf_bytes = pdf_generator.generate_pdf(user_data, kundli_data, charts)
 
         logger.info(f"[PDF] PDF generated: {len(pdf_bytes)} bytes")
 
@@ -1454,7 +1522,7 @@ async def _generate_kundli_pdf_async(phone: str, user_id: str) -> dict:
             access_token=WHATSAPP_ACCESS_TOKEN
         )
 
-        caption = f"Namaste {profile.get('name', 'User')}! 🙏 Here's your detailed Janam Kundli PDF."
+        caption = f"Namaste {user_data.get('name', 'User')}! 🙏 Here's your detailed Janam Kundli PDF."
 
         message_id = await whatsapp_api.send_document(
             to=phone,
