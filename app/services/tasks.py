@@ -1360,7 +1360,17 @@ async def _generate_kundli_pdf_async(phone: str, user_id: str, dob: str, tob: st
         "lagna": "Taurus",
         "moon_sign": "Pisces",
         "nakshatra": "Uttara Bhadrapada",
-        "planet_positions": [],
+        "planet_positions": {
+            "sun": {"planet": "Sun", "sign": "Leo", "house": 5, "degree": 15.5},
+            "moon": {"planet": "Moon", "sign": "Cancer", "house": 4, "degree": 10.2},
+            "mars": {"planet": "Mars", "sign": "Aries", "house": 1, "degree": 5.0},
+            "mercury": {"planet": "Mercury", "sign": "Gemini", "house": 3, "degree": 20.1},
+            "jupiter": {"planet": "Jupiter", "sign": "Sagittarius", "house": 8, "degree": 18.3},
+            "venus": {"planet": "Venus", "sign": "Taurus", "house": 2, "degree": 12.7},
+            "saturn": {"planet": "Saturn", "sign": "Aquarius", "house": 10, "degree": 8.9},
+            "rahu": {"planet": "Rahu", "sign": "Gemini", "house": 3, "degree": 15.0},
+            "ketu": {"planet": "Ketu", "sign": "Sagittarius", "house": 9, "degree": 15.0}
+        },
         "dasha": {"mahadasha": "Saturn", "antardasha": "Saturn"}
     }
 
