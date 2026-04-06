@@ -801,61 +801,6 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
     if access_type != "trial" or access.get("skip_reason"):
         logger.info(f"[Subscription] {phone} has access: {access_type} (reason: {access.get('skip_reason', 'valid_access')})")
 
-    # ===================================================================
-    # DETECT PDF REQUESTS FROM AGENT RESPONSE
-    # ===================================================================
-
-    # Check if AI agent is responding with a PDF request
-    # Agent should include: "PDF_REQUEST: dob=YYYY-MM-DD, tob=HH:MM, place=CITY, name=NAME"
-    if "PDF_REQUEST:" in message:
-        logger.info(f"[PDF] Agent triggered PDF generation for {user_id}")
-
-        try:
-            # Parse the PDF request parameters
-            import re
-            params = {}
-            for param in ["dob", "tob", "place", "name"]:
-                match = re.search(rf"{param}=([^,\n]+)", message)
-                if match:
-                    params[param] = match.group(1).strip()
-
-            # Set default name if not provided
-            if "name" not in params:
-                params["name"] = "User"
-
-            # Validate required parameters
-            if not all(k in params for k in ["dob", "tob", "place"]):
-                logger.error(f"[PDF] Missing required parameters: {params}")
-                return {"error": "Missing birth details"}
-
-            logger.info(f"[PDF] Triggering PDF generation with params: {params}")
-
-            # Trigger PDF generation in background
-            generate_kundli_pdf_task.delay(phone, user_id, params["dob"], params["tob"], params["place"], params["name"])
-
-            # Send confirmation message
-            confirmation_message = (
-                f"Generating your detailed Janam Kundli PDF! ✨\n\n"
-                f"Birth Details:\n"
-                f"• DOB: {params['dob']}\n"
-                f"• TOB: {params['tob']}\n"
-                f"• Place: {params['place']}\n\n"
-                f"Please wait 2-3 minutes... Sending to your WhatsApp! 📄"
-            )
-
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                await _send_whatsapp_message(client, phone, confirmation_message)
-
-            await _log_to_mongo(session_id, user_id, "assistant", confirmation_message, "whatsapp", "text", None)
-
-            return {"status": "pdf_generating", "params": params}
-
-        except Exception as e:
-            logger.error(f"[PDF] Error processing PDF request: {e}", exc_info=True)
-            return {"error": f"PDF request failed: {str(e)}"}
-
-    # ===================================================================
-
     if not OPENCLAW_URL:
         logger.warning("OPENCLAW_URL not set")
         return {"error": "OpenClaw URL not configured"}
@@ -1009,6 +954,42 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
         logger.info(f"[DEBUG] Raw reply from agent (first 500 chars): {reply[:500]}...")
         clean_reply, media_items = _extract_media_from_reply(reply)
         logger.info(f"[DEBUG] Extracted {len(media_items)} media items, clean_reply length: {len(clean_reply)}")
+
+        # ===================================================================
+        # DETECT PDF REQUESTS FROM AI AGENT RESPONSE
+        # ===================================================================
+
+        # Check if AI agent's response contains a PDF request
+        # Agent should include: "PDF_REQUEST: dob=YYYY-MM-DD, tob=HH:MM, place=CITY, name=NAME"
+        if "PDF_REQUEST:" in clean_reply:
+            logger.info(f"[PDF] Agent triggered PDF generation for {user_id}")
+
+            try:
+                # Parse the PDF request parameters from AI's response
+                import re
+                params = {}
+                for param in ["dob", "tob", "place", "name"]:
+                    match = re.search(rf"{param}=([^,\n]+)", clean_reply)
+                    if match:
+                        params[param] = match.group(1).strip()
+
+                # Set default name if not provided
+                if "name" not in params:
+                    params["name"] = "User"
+
+                # Validate required parameters
+                if not all(k in params for k in ["dob", "tob", "place"]):
+                    logger.error(f"[PDF] Missing required parameters: {params}")
+                else:
+                    logger.info(f"[PDF] Triggering PDF generation with params: {params}")
+
+                    # Trigger PDF generation in background
+                    generate_kundli_pdf_task.delay(phone, user_id, params["dob"], params["tob"], params["place"], params["name"])
+
+                    logger.info(f"[PDF] PDF generation task triggered successfully")
+
+            except Exception as e:
+                logger.error(f"[PDF] Error processing PDF request: {e}", exc_info=True)
 
         # Send text reply (split on double-newline for separate bubbles)
         if clean_reply:
