@@ -37,6 +37,11 @@ SUBSCRIPTION_TEST_NUMBER = os.getenv("SUBSCRIPTION_TEST_NUMBER", "9760347653")
 # Testing mode: Only send proactive nudges to this number (None = send to all users)
 PROACTIVE_NUDGE_TEST_NUMBER = os.getenv("PROACTIVE_NUDGE_TEST_NUMBER", "+919760347653")
 
+# Onboarding Configuration
+ONBOARDING_ENABLED = os.getenv("ONBOARDING_ENABLED", "true").lower() == "true"
+DAILY_FREE_MESSAGES = int(os.getenv("DAILY_FREE_MESSAGES", "5"))
+FREEMIUM_MESSAGE_LIMIT = int(os.getenv("FREEMIUM_MESSAGE_LIMIT", "40"))
+
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
 def process_message_task(self, phone: str, message: str, message_id: str, message_type: str = "text", media_info: dict = None):
