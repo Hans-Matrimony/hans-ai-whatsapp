@@ -1343,124 +1343,184 @@ async def _generate_chart_images(kundli_data: dict) -> dict:
     """
     Generate Kundli chart images as base64
 
-    Creates simple North Indian style chart images using PIL
+    Creates traditional North Indian Kundli charts with Hindi characters
     """
     from io import BytesIO
     from PIL import Image, ImageDraw, ImageFont
     import base64
+    import os
+    import urllib.request
 
     charts = {}
 
-    # Planet symbols for charts
-    planet_symbols = {
-        "Sun": "Su", "Moon": "Mo", "Mars": "Ma", "Mercury": "Me",
-        "Jupiter": "Ju", "Venus": "Ve", "Saturn": "Sa", "Rahu": "Ra", "Ketu": "Ke"
+    # Colors matching the traditional Kundli style
+    BG_COLOR = '#2A1A08'  # Dark brown background
+    LINE_COLOR = '#8C7861'  # Brownish lines
+    TEXT_COLOR = '#D1B054'  # Gold text
+
+    # Hindi character mapping for planets
+    HINDI_MAP = {
+        'Sun': 'सु', 'Moon': 'च', 'Mars': 'कु', 'Mercury': 'बु',
+        'Jupiter': 'गु', 'Venus': 'शु', 'Saturn': 'श',
+        'Rahu': 'रा', 'Ketu': 'के', 'Lagna': 'ल'
     }
 
-    # Zodiac signs in order (starting from Aries)
-    zodiac_order = ["Aries", "Taurus", "Gemini", "Cancer", "Leo", "Virgo",
-                    "Libra", "Scorpio", "Sagittarius", "Capricorn", "Aquarius", "Pisces"]
+    SIGN_NAMES = [
+        'Aries', 'Taurus', 'Gemini', 'Cancer', 'Leo', 'Virgo',
+        'Libra', 'Scorpio', 'Sagittarius', 'Capricorn', 'Aquarius', 'Pisces'
+    ]
 
-    # North Indian chart layout (12 houses in diamond pattern)
-    # House positions for North Indian chart:
-    # 12 1 2
-    # 11   3
-    # 10   4
-    # 9   5
-    # 8 7 6
+    SIGN_ABBR = ["Ari", "Tau", "Gem", "Can", "Leo", "Vir", "Lib", "Sco", "Sag", "Cap", "Aqu", "Pis"]
 
-    def create_kundli_chart(title: str, chart_type: str = "lagna") -> str:
-        """Create a Kundli chart image and return as base64"""
-        img_size = 400
-        img = Image.new('RGB', (img_size, img_size), color='white')
-        draw = ImageDraw.Draw(img)
+    def get_devanagari_font():
+        """Get Devanagari font for Hindi characters"""
+        local_font = "NotoSansDevanagari-Regular.ttf"
+        if os.path.exists(local_font):
+            return local_font
 
-        # Chart dimensions
-        margin = 40
-        chart_size = img_size - 2 * margin
-        square_size = chart_size // 3
+        # Try Windows fonts
+        win_fonts = ["C:\\Windows\\Fonts\\nirmala.ttf", "C:\\Windows\\Fonts\\mangal.ttf"]
+        for wf in win_fonts:
+            if os.path.exists(wf):
+                return wf
 
-        # Draw outer box
-        draw.rectangle([margin, margin, margin + chart_size, margin + chart_size], outline='black', width=2)
+        # Try Linux fonts
+        linux_fonts = ["/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf"]
+        for lf in linux_fonts:
+            if os.path.exists(lf):
+                return lf
 
-        # Draw inner grid (3x3)
-        for i in range(1, 3):
-            # Vertical lines
-            draw.line([margin + i * square_size, margin, margin + i * square_size, margin + chart_size], fill='black', width=1)
-            # Horizontal lines
-            draw.line([margin, margin + i * square_size, margin + chart_size, margin + i * square_size], fill='black', width=1)
-
-        # Draw diagonal lines (North Indian style)
-        draw.line([margin, margin, margin + chart_size, margin + chart_size], fill='black', width=1)
-        draw.line([margin + chart_size, margin, margin, margin + chart_size], fill='black', width=1)
-
-        # Add title
+        # Download from GitHub
         try:
-            title_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 16)
+            url = "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSansDevanagari/NotoSansDevanagari-Regular.ttf"
+            urllib.request.urlretrieve(url, local_font)
+            return local_font
         except:
-            title_font = ImageFont.load_default()
+            return None
 
-        title_bbox = draw.textbbox((0, 0), title, font=title_font)
-        title_width = title_bbox[2] - title_bbox[0]
-        draw.text(((img_size - title_width) // 2, 10), title, fill='black', font=title_font)
-
-        # Place planets in houses based on kundli data
-        planet_positions = kundli_data.get("planet_positions", {})
-
-        # Map planets to houses
-        house_planets = {i: [] for i in range(1, 13)}  # 1-12 houses
-
-        for planet_key, planet_data in planet_positions.items():
-            if isinstance(planet_data, dict) and "house" in planet_data:
-                house = planet_data["house"]
-                planet_name = planet_data.get("planet", planet_key)
-                symbol = planet_symbols.get(planet_name, planet_name[:2])
-
-                if 1 <= house <= 12:
-                    house_planets[house].append(symbol)
-
-        # House positions for North Indian chart (x, y coordinates)
-        house_positions = {
-            1: (2, 0), 2: (2, 1), 3: (2, 2),
-            4: (1, 2), 5: (0, 2),
-            6: (0, 1), 7: (0, 0),
-            8: (1, 0), 9: (1, 1),
-            10: (2, 1), 11: (2, 0), 12: (2, 2)
+    def get_house_from_sign(planet_sign, lagna_sign):
+        """Calculate house number from sign using Vedic Whole Sign system"""
+        sign_to_index = {
+            "Aries": 0, "Taurus": 1, "Gemini": 2, "Cancer": 3, "Leo": 4, "Virgo": 5,
+            "Libra": 6, "Scorpio": 7, "Sagittarius": 8, "Capricorn": 9, "Aquarius": 10, "Pisces": 11
         }
 
-        # Draw house numbers and planets
+        p_idx = sign_to_index.get(planet_sign, 0)
+        l_idx = sign_to_index.get(lagna_sign, 0)
+
+        house = ((p_idx - l_idx) % 12) + 1
+        return house
+
+    def create_traditional_kundli(chart_type: str = "lagna") -> str:
+        """Create traditional North Indian Kundli chart"""
+        img_size = 400
+        PAD = 20
+
+        img = Image.new('RGB', (img_size, img_size), BG_COLOR)
+        draw = ImageDraw.Draw(img)
+
+        # Get fonts
+        font_path_hindi = get_devanagari_font()
+
+        if font_path_hindi:
+            try:
+                font_p = ImageFont.truetype(font_path_hindi, 16)
+            except:
+                font_p = ImageFont.load_default()
+        else:
+            font_p = ImageFont.load_default()
+
         try:
-            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 10)
+            font_s = ImageFont.truetype("arial.ttf", 11)
         except:
-            font = ImageFont.load_default()
+            try:
+                font_s = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 11)
+            except:
+                font_s = ImageFont.load_default()
 
-        for house in range(1, 13):
-            # Get position for this house in North Indian layout
-            if house <= 3:
-                row, col = 0, house - 1
-            elif house <= 5:
-                row, col = house - 3, 2
-            elif house == 6:
-                row, col = 2, 1
-            elif house == 7:
-                row, col = 2, 0
-            elif house == 8:
-                row, col = 1, 0
-            elif house == 9:
-                row, col = 1, 1
-            elif house <= 12:
-                row, col = 3 - (house - 9), 2
+        # Draw grid (North Indian style)
+        L, T, R, B = PAD, PAD, img_size - PAD, img_size - PAD
+        MX, MY = img_size // 2, img_size // 2
 
-            x = margin + col * square_size + 5
-            y = margin + row * square_size + 5
+        draw.rectangle([L, T, R, B], outline=LINE_COLOR)
+        draw.line([L, T, R, B], fill=LINE_COLOR)
+        draw.line([R, T, L, B], fill=LINE_COLOR)
+        draw.line([MX, T, R, MY], fill=LINE_COLOR)
+        draw.line([R, MY, MX, B], fill=LINE_COLOR)
+        draw.line([MX, B, L, MY], fill=LINE_COLOR)
+        draw.line([L, MY, MX, T], fill=LINE_COLOR)
 
-            # Draw house number
-            draw.text((x, y), str(house), fill='gray', font=font)
+        # Get kundli details
+        lagna = kundli_data.get("lagna", "Aries")
+        moon_sign = kundli_data.get("moon_sign", "Pisces")
+        nakshatra = kundli_data.get("nakshatra", "Unknown")
+
+        lagna_idx = SIGN_NAMES.index(lagna) if lagna in SIGN_NAMES else 0
+
+        # Parse planet positions
+        planet_positions = kundli_data.get("planet_positions", {})
+        house_planets = {}
+
+        for planet_key, planet_data in planet_positions.items():
+            if isinstance(planet_data, dict):
+                house = planet_data.get("house", 1)
+                planet_name = planet_data.get("planet", planet_key)
+                hindi_char = HINDI_MAP.get(planet_name, planet_name[:2])
+
+                if 1 <= house <= 12:
+                    house_planets.setdefault(house, []).append(hindi_char)
+
+        # Ensure Lagna is in House 1
+        house_planets.setdefault(1, [])
+        if 'ल' not in house_planets[1]:
+            house_planets[1].insert(0, 'ल')
+
+        # House positions (matching traditional layout)
+        HOUSE_POS = {
+            1: (200, 110), 2: (110, 65),  3: (65, 110),  4: (110, 200),
+            5: (65, 290),  6: (110, 335), 7: (200, 290), 8: (290, 335),
+            9: (335, 290), 10: (290, 200), 11: (335, 110), 12: (290, 65),
+        }
+
+        # Draw houses
+        for i in range(12):
+            h = i + 1
+            s_idx = (lagna_idx + i) % 12
+            s_text = f"{s_idx + 1} {SIGN_ABBR[s_idx]}"
+
+            cx, cy = HOUSE_POS[h]
+
+            # Draw sign text
+            draw.text(
+                (cx, cy - 18),
+                s_text,
+                fill=LINE_COLOR,
+                font=font_s,
+                anchor='mm'
+            )
 
             # Draw planets
-            if house_planets[house]:
-                planet_text = " ".join(house_planets[house])
-                draw.text((x + 15, y), planet_text, fill='black', font=font)
+            planets = house_planets.get(h, [])
+            if planets:
+                planet_text = " ".join(planets)
+                offset = 14 if len(planets) <= 2 else 18
+
+                draw.text(
+                    (cx, cy + offset),
+                    planet_text,
+                    fill=TEXT_COLOR,
+                    font=font_p,
+                    anchor='mm'
+                )
+
+        # Draw bottom info
+        draw.text(
+            (MX, img_size - 10),
+            f"{nakshatra} | Moon: {moon_sign}",
+            fill=TEXT_COLOR,
+            font=font_s,
+            anchor='mm'
+        )
 
         # Convert to base64
         buffer = BytesIO()
@@ -1469,13 +1529,13 @@ async def _generate_chart_images(kundli_data: dict) -> dict:
         return f"data:image/png;base64,{img_str}"
 
     # Generate Lagna Kundli (Birth Chart)
-    charts["birth_chart"] = create_kundli_chart("Lagna Kundli (D1)", "lagna")
+    charts["birth_chart"] = create_traditional_kundli("lagna")
 
     # Generate Navamsa Chart (D9)
-    # For navamsa, we'd calculate differently, but for now use same layout with different title
-    charts["navamsa_chart"] = create_kundli_chart("Navamsa Chart (D9)", "navamsa")
+    # For navamsa, we'll use the same layout (can be enhanced later)
+    charts["navamsa_chart"] = create_traditional_kundli("navamsa")
 
-    logger.info(f"[PDF] Generated {len(charts)} chart images")
+    logger.info(f"[PDF] Generated {len(charts)} traditional Kundli chart images")
 
     return charts
 
