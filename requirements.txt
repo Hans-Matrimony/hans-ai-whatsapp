@@ -28,7 +28,7 @@ reportlab==4.0.7
 Pillow==10.1.0
 fpdf2==2.7.5
 
-# Kundli Calculation
-jyotishganit==1.1.0
+# Kundli Calculation (Swiss Ephemeris)
+pyswisseph>=2.0.0
 geopy==2.4.1
 
