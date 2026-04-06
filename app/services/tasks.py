@@ -1306,6 +1306,13 @@ async def _check_inactive_users():
             nudges_sent = 0
             users_checked = 0
 
+            # Simple duplicate prevention: Track last nudge times in memory
+            # (Persists for worker lifetime, resets on worker restart)
+            if not hasattr(_check_inactive_users, 'last_nudge_times'):
+                _check_inactive_users.last_nudge_times = {}
+
+            logger.info(f"[Proactive Nudge] Nudge tracker has {len(_check_inactive_users.last_nudge_times)} entries")
+
             for user in users:
                 user_id = user.get("userId", "")
                 if not user_id or not user_id.startswith("+"):
@@ -1348,19 +1355,34 @@ async def _check_inactive_users():
                         hours_inactive = inactive_minutes / 60
                         logger.info(f"[Proactive Nudge] ELIGIBLE: {user_id} inactive for {hours_inactive:.1f} hours")
 
-                        # Get recent conversation for topic detection
+                        # DUPLICATE PREVENTION: Check if we sent a nudge in the last 8 hours
+                        last_nudge_time = _check_inactive_users.last_nudge_times.get(user_id)
+                        if last_nudge_time:
+                            hours_since_last_nudge = (now - last_nudge_time).total_seconds() / 3600
+                            if hours_since_last_nudge < 8:
+                                logger.info(f"[Proactive Nudge] {user_id}: Already sent nudge {hours_since_last_nudge:.1f} hours ago (skipping - need 8h gap)")
+                                continue
+                            logger.info(f"[Proactive Nudge] {user_id}: Last nudge was {hours_since_last_nudge:.1f} hours ago (eligible for new nudge)")
+
+                        # Get recent conversation for topic and language detection
                         recent_conversation = await _get_recent_conversation_from_mongo(user_id, session)
                         detected_topic = recent_conversation.get("detected_topic")
+                        detected_language = recent_conversation.get("detected_language", "en")
 
-                        # Generate and send nudge message based on topic
-                        nudge_message = _generate_nudge_message(user_id, detected_topic, hours_inactive)
+                        logger.info(f"[Proactive Nudge] {user_id}: topic={detected_topic}, language={detected_language}")
+
+                        # Generate and send nudge message based on topic and language
+                        nudge_message = _generate_nudge_message(user_id, detected_topic, hours_inactive, detected_language)
 
                         # Send nudge via WhatsApp
                         phone = user_id.replace("+", "")
                         await _send_whatsapp_message(client, phone, nudge_message)
                         nudges_sent += 1
 
-                        logger.info(f"[Proactive Nudge] ✓ Nudge sent to {user_id} (topic: {detected_topic})")
+                        # Track nudge timestamp to prevent duplicates within 8 hours
+                        _check_inactive_users.last_nudge_times[user_id] = now
+
+                        logger.info(f"[Proactive Nudge] ✓ Nudge sent to {user_id} (topic: {detected_topic}, language: {detected_language})")
 
                         # Small delay to avoid rate limiting
                         await asyncio.sleep(2)
@@ -1381,14 +1403,20 @@ async def _check_inactive_users():
             return {"error": str(e)}
 
 
-def _generate_nudge_message(user_id: str, detected_topic: str, minutes_inactive: float) -> str:
+def _generate_nudge_message(user_id: str, detected_topic: str, hours_inactive: float, user_language: str = "en") -> str:
     """
-    Generate personalized nudge message based on detected topic.
+    Generate personalized nudge message based on detected topic and user language.
     Stage 1: Topic-based messages (Stage 2 will be more personalized with Mem0)
+
+    Args:
+        user_id: User phone number
+        detected_topic: Topic detected from conversation (marriage, career, health, education)
+        hours_inactive: Hours since last message
+        user_language: User's language preference ("en" or "hi")
     """
 
-    # Natural, conversational message templates based on detected topic
-    topic_messages = {
+    # English message templates based on topic
+    topic_messages_en = {
         "marriage": [
             "Hey! Was thinking about our shaadi discussion... Your 7th house lord is actually quite strong right now. Should we check what the planets say about your marriage timing?",
 
@@ -1419,8 +1447,40 @@ def _generate_nudge_message(user_id: str, detected_topic: str, minutes_inactive:
         ]
     }
 
-    # Kundli-based messages when no topic detected (more personalized fallback)
-    kundli_messages = [
+    # Hindi message templates based on topic
+    topic_messages_hi = {
+        "marriage": [
+            "नमस्ते! आपकी शादी की बात सोच रहा था... आपकी सातवीं भाव का शास्त्री अभी काफी मजबूत है। क्या हम ग्रहों को देखें कि आपकी शादी का समय क्या है?",
+
+            "हाय! हमने आपकी विवाह की बात की थी ना... बृहस्पति की वर्तमान स्थिति आपके रिश्तों के लिए अच्छी खबर ला सकती है। क्या मैं आपकी कुंडली का विश्लेषण करूं?",
+
+            "नमस्ते! याद है न हमने आपकी शादी पर बात की थी? शुक्र का गोचर अनुकूल है। क्या हम आपकी जन्म कुंडली को देखें?",
+        ],
+        "career": [
+            "हाय! आपकी करियर की बात सोच रहा था... आपकी दसवीं भाव में कुछ दिलचस्प ग्रह गतिविधि हो रही है। क्या मैं देखूं कि इसका क्या मतलब है?",
+
+            "नमस्ते! याद है न आपने अपनी नौकरी के बारे में पूछा था? शनि की स्थिति व्यावसायिक रूप से अच्छी चीजें ला रही है। क्या मैं समय जानूं?",
+
+            "हाय! आपकी नौकरी की चर्चा मेरे दिमाग में है... बुध आपकी व्यावसायिक भाव का अनुकूलन कर रहा है। क्या आपको पता है क्या अवसर आ रहे हैं?",
+        ],
+        "health": [
+            "नमस्ते! आप अभी कैसे महसूस कर रहे हो? हमने आपकी सेहत की बात की थी... कुछ सरल उपचार मदद कर सकते हैं। क्या मैं बताऊं?",
+
+            "हाय! आपकी सेहत की बात सोच रहा था... छठा भाव का स्वामी अच्छी तरह से स्थित है, जो ठीक है। क्या मैं कुछ व्यक्तिगत उपचार सुझाऊं?",
+
+            "नमस्ते! आशा है आप ठीक महसूस कर रहे हों... आपकी सेहत की भावें कुंडली विश्लेषण में मजबूत दिख रही हैं। क्या मैं ज्योतिषीय उपचार सुझाऊं?",
+        ],
+        "education": [
+            "हाय! आपकी पढ़ाई कैसी चल रही है? हमने आपकी परीक्षा की बात की थी... आपकी पांचवीं भाव बहुत मजबूत है! क्या मैं देखूं कि तारे क्या कहते हैं?",
+
+            "नमस्ते! याद है न आपकी शिक्षा की चर्चा? बृहस्पति इस महीने आपकी शिक्षा भाव को आशीर्वाद दे रहा है। क्या मैं आपकी कुंडली का विश्लेषण करूं?",
+
+            "हाय! आपकी पढ़ाई की बात सोच रहा था... बुध की स्थिति एकाग्रता के लिए उत्कृष्ट है। क्या मैं अनुकूल समय के लिए जांच करूं?",
+        ]
+    }
+
+    # Kundli-based messages when no topic detected
+    kundli_messages_en = [
         "Hey! It's been a while... Your kundli shows some interesting planetary movements this week. Should we check what the stars have in store for you?",
 
         "Namaste! Your birth chart indicates this is a good time for new beginnings. The planets are aligned in your favor - want me to analyze what this means for you?",
@@ -1432,14 +1492,37 @@ def _generate_nudge_message(user_id: str, detected_topic: str, minutes_inactive:
         "Namaste! Was looking at your birth chart... Your ascendant lord is strong right now, which is excellent for overall growth. Should we explore what this means for you?",
     ]
 
-    # Select message based on detected topic, otherwise use kundli-based messages
-    if detected_topic and detected_topic in topic_messages:
-        import random
-        messages = topic_messages[detected_topic]
-        return random.choice(messages)
+    kundli_messages_hi = [
+        "नमस्ते! काफी दिन हो गए... आपकी कुंडली कुछ दिलचस्प ग्रह गतिविधि दिखा रही है। क्या हम देखें कि तारे क्या कहते हैं?",
+
+        "हाय! आपकी जन्म कुंडली बताती है कि यह नई शुरुआत के लिए अच्छा समय है। ग्रह आपके पक्ष में हैं - क्या मैं विश्लेषण करूं?",
+
+        "नमस्ते! आपकी वर्तमान दशा आपकी कुंडली के अनुसार काफी अनुकूल दिख रही है। आने वाले हफ्तों में कुछ महत्वपूर्ण बदलाव आ सकते हैं। क्या हम जांचें?",
+
+        "हाय! आपकी चंद्र राशि की स्थिति बताती है कि यह अपने लक्ष्यों को दोबारा देखने का अच्छा समय है। आपकी कुंडली में आपके नज़दीक भविष्य के बारे में कुछ जानकारी है। क्या देखना चाहते हैं?",
+
+        "नमस्ते! आपकी जन्म कुंडली देख रहा था... आपका लग्न भाव का स्वामी अभी मजबूत है, जो समग्र विकास के लिए उत्कृष्ट है। क्या हम इसका अर्थ समझें?",
+    ]
+
+    # Select message based on language and topic
+    if user_language == "hi":
+        # Hindi messages
+        if detected_topic and detected_topic in topic_messages_hi:
+            import random
+            messages = topic_messages_hi[detected_topic]
+            return random.choice(messages)
+        else:
+            import random
+            return random.choice(kundli_messages_hi)
     else:
-        import random
-        return random.choice(kundli_messages)
+        # English messages (default)
+        if detected_topic and detected_topic in topic_messages_en:
+            import random
+            messages = topic_messages_en[detected_topic]
+            return random.choice(messages)
+        else:
+            import random
+            return random.choice(kundli_messages_en)
 
 
 async def _get_recent_conversation_from_mongo(user_id: str, session_data: dict = None) -> dict:
@@ -1486,6 +1569,47 @@ async def _get_recent_conversation_from_mongo(user_id: str, session_data: dict =
         result["last_questions"] = recent_questions
         logger.info(f"[Proactive Nudge] Total questions: {len(user_questions)}, analyzing last 5 for recent context")
         logger.debug(f"[Proactive Nudge] Recent questions: {[q[:50]+'...' if len(q)>50 else q for q in recent_questions]}")
+
+        # Language detection: Hindi vs English
+        # Detect Hindi by checking for Devanagari characters or common Hindi words
+        def detect_language(texts):
+            hindi_indicators = [
+                # Common Hindi words
+                "है", "हूं", "क्या", "कैसे", "कहां", "कब", "किस", "कितना",
+                "मेरा", "मेरी", "आपकी", "आप", "हम", "मुझे", "मुझे",
+                "चाहिए", "सकता", "सकती", "होगा", "होगी", "होती",
+                "जाना", "आना", "बताओ", "बताएं", "करूं", "करें",
+                # Hinglish words
+                "kya", "kaise", "kab", "kidhar", "kiska", "kitna",
+                "mera", "meri", "apka", "apki", "hum", "mujhe",
+                "chahiye", "sakta", "sakti", "hoga", "hogi",
+                "jana", "aana", "batao", "batayen", "karo", "kar"
+            ]
+
+            hindi_score = 0
+            total_chars = 0
+
+            for text in texts:
+                total_chars += len(text)
+                text_lower = text.lower()
+
+                # Check for Devanagari characters (Unicode range)
+                if any('\u0900' <= char <= '\u097F' for char in text):
+                    hindi_score += len(text)
+
+                # Check for Hindi words
+                for word in hindi_indicators:
+                    if word in text_lower:
+                        hindi_score += 5  # Weight more for words
+
+            # If more than 20% Hindi content, classify as Hindi
+            if total_chars > 0 and (hindi_score / total_chars) > 0.2:
+                return "hi"
+            return "en"
+
+        detected_language = detect_language(recent_questions)
+        result["detected_language"] = detected_language
+        logger.info(f"[Proactive Nudge] Language detected: {detected_language}")
 
         # Topic detection from user questions
         topic_keywords = {
