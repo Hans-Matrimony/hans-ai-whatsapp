@@ -22,3 +22,8 @@ flower==2.0.1
 
 # Logging
 python-json-logger==2.0.7
+
+# PDF Generation
+reportlab==4.0.7
+Pillow==10.1.0
+fpdf2==2.7.5

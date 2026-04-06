@@ -178,3 +178,51 @@ class WhatsAppAPI:
         except Exception as e:
             logger.error(f"Error getting business profile: {e}")
             return None
+
+    async def send_document(
+        self,
+        to: str,
+        document_url: str,
+        filename: str,
+        caption: str = None
+    ) -> Optional[str]:
+        """
+        Send document (PDF) via WhatsApp Cloud API
+
+        Args:
+            to: Phone number (without +)
+            document_url: URL to document (uploaded to WhatsApp Media API)
+            filename: Document filename
+            caption: Optional caption text
+
+        Returns:
+            Message ID if successful, None otherwise
+        """
+        url = f"{self.base_url}/{self.phone_id}/messages"
+
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": to,
+            "type": "document",
+            "document": {
+                "link": document_url,
+                "filename": filename
+            }
+        }
+
+        if caption:
+            payload["document"]["caption"] = caption
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(url, headers=self.headers, json=payload)
+
+                if response.status_code in [200, 201]:
+                    return response.json().get("messages", [{}])[0].get("id")
+
+                logger.error(f"WhatsApp document send failed: {response.text}")
+                return None
+
+        except Exception as e:
+            logger.error(f"Error sending document: {e}")
+            return None

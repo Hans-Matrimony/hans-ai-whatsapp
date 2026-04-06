@@ -565,6 +565,52 @@ async def _upload_base64_to_whatsapp_media(client: httpx.AsyncClient, b64_data: 
         return None
 
 
+async def _upload_pdf_to_whatsapp_media(client: httpx.AsyncClient, pdf_bytes: bytes, filename: str) -> Optional[str]:
+    """
+    Upload PDF to WhatsApp Media API
+
+    Args:
+        client: HTTP client
+        pdf_bytes: PDF file bytes
+        filename: Document filename
+
+    Returns:
+        Media ID if successful, None otherwise
+    """
+    if not WHATSAPP_ACCESS_TOKEN:
+        logger.error("WhatsApp access token missing")
+        return None
+
+    url = f"{FB_API_URL}/{WHATSAPP_PHONE_ID}/media"
+
+    try:
+        # Upload as multipart form data
+        files = {
+            "file": (filename, pdf_bytes, "application/pdf"),
+        }
+        data = {
+            "messaging_product": "whatsapp",
+            "type": "application/pdf",
+        }
+        headers = {
+            "Authorization": f"Bearer {WHATSAPP_ACCESS_TOKEN}",
+        }
+
+        response = await client.post(url, headers=headers, data=data, files=files)
+
+        if response.status_code in [200, 201]:
+            media_id = response.json().get("id")
+            logger.info(f"[PDF] Uploaded to WhatsApp Media: {media_id}")
+            return media_id
+
+        logger.error(f"[PDF] Upload failed: {response.status_code} {response.text}")
+        return None
+
+    except Exception as e:
+        logger.error(f"[PDF] Error uploading PDF: {e}", exc_info=True)
+        return None
+
+
 async def _send_whatsapp_image(client: httpx.AsyncClient, phone: str, media_id: str = None, image_url: str = None, caption: str = None) -> dict:
     """Send image message via WhatsApp API using media_id or URL."""
     if not WHATSAPP_PHONE_ID or not WHATSAPP_ACCESS_TOKEN:
@@ -754,6 +800,71 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
     access_type = access.get("access", "unknown")
     if access_type != "trial" or access.get("skip_reason"):
         logger.info(f"[Subscription] {phone} has access: {access_type} (reason: {access.get('skip_reason', 'valid_access')})")
+
+    # ===================================================================
+
+    # ==================== KUNDLI PDF REQUEST DETECTION ====================
+
+    # Check if user is requesting Kundli PDF
+    pdf_keywords = ["KUNDLI PDF", "MY KUNDLI", "PDF REPORT", "DETAILED REPORT", "GET PDF", "DOWNLOAD PDF"]
+    message_upper = message.strip().upper()
+
+    if any(keyword in message_upper for keyword in pdf_keywords):
+        logger.info(f"[PDF Request] User {user_id} requested Kundli PDF")
+
+        # Check if user has completed onboarding (has birth details)
+        if ONBOARDING_ENABLED:
+            profile_service = UserProfileService()
+            profile = await profile_service.get_user_profile(user_id)
+
+            if not profile or profile.get("onboardingStage", 0) < 4:
+                # User hasn't completed onboarding - ask for birth details
+                missing_info = []
+                if not profile or not profile.get("dateOfBirth"):
+                    missing_info.append("birth date")
+                if not profile or not profile.get("timeOfBirth"):
+                    missing_info.append("birth time")
+                if not profile or not profile.get("birthPlace"):
+                    missing_info.append("birth place")
+
+                onboarding_message = (
+                    f"To generate your Kundli PDF, I need your birth details first.\n\n"
+                    f"Missing: {', '.join(missing_info)}\n\n"
+                    f"Please provide your birth details in this format:\n"
+                    f"• Date of Birth: 15 January 1990\n"
+                    f"• Time of Birth: 10:30 AM\n"
+                    f"• Place of Birth: Mumbai\n\n"
+                    f"After providing these details, you can request the PDF again!"
+                )
+
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    await _send_whatsapp_message(client, phone, onboarding_message)
+                await _log_to_mongo(session_id, user_id, "assistant", onboarding_message, "whatsapp", "text", None)
+
+                return {"status": "onboarding_required", "missing_info": missing_info}
+
+            # User has birth details - trigger PDF generation
+            logger.info(f"[PDF] User {user_id} has birth details - generating PDF")
+
+            # Trigger PDF generation in background
+            generate_kundli_pdf_task.delay(phone, user_id)
+
+            # Send confirmation message
+            confirmation_message = (
+                f"Great! I'm generating your detailed Janam Kundli PDF. ✨\n\n"
+                f"This will include:\n"
+                f"• Birth Charts (Lagna + Navamsa)\n"
+                f"• Planetary Positions\n"
+                f"• Life Predictions (Career, Marriage, Health, Wealth)\n"
+                f"• Astrological Remedies\n\n"
+                f"Please wait 2-3 minutes... I'll send it to your WhatsApp shortly! 📄"
+            )
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                await _send_whatsapp_message(client, phone, confirmation_message)
+            await _log_to_mongo(session_id, user_id, "assistant", confirmation_message, "whatsapp", "text", None)
+
+            return {"status": "pdf_generating"}
 
     # ===================================================================
 
@@ -1228,6 +1339,143 @@ def health_check_task():
     """Periodic health check task."""
     logger.info("[Celery] Health check - worker is running")
     return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
+
+
+@celery_app.task(bind=True, max_retries=2, default_retry_delay=60)
+def generate_kundli_pdf_task(self, phone: str, user_id: str):
+    """
+    Generate and send Kundli PDF to user
+
+    Args:
+        phone: User's phone number (without +)
+        user_id: User's ID (with +)
+    """
+    try:
+        logger.info(f"[PDF Task] Starting for {user_id}")
+
+        # Run async code in sync context
+        import asyncio
+        result = asyncio.run(_generate_kundli_pdf_async(phone, user_id))
+
+        logger.info(f"[PDF Task] Completed for {user_id}: {result}")
+        return result
+
+    except Exception as e:
+        logger.error(f"[PDF Task] Failed for {user_id}: {e}")
+        # Retry with exponential backoff
+        raise self.retry(exc=e, countdown=2 ** self.request.retries)
+
+
+async def _generate_kundli_pdf_async(phone: str, user_id: str) -> dict:
+    """Async implementation of PDF generation"""
+    from app.services.profile_service import UserProfileService
+    from app.services.kundli_calculator_wrapper import KundliCalculatorWrapper
+    from app.services.kundli_pdf_generator import KundliPDFGenerator
+    from app.services.whatsapp_api import WhatsAppAPI
+
+    session_id = f"whatsapp:+{phone}"
+
+    # Step 1: Get user profile
+    profile_service = UserProfileService()
+    profile = await profile_service.get_user_profile(user_id)
+
+    if not profile:
+        logger.error(f"[PDF] User profile not found for {user_id}")
+        return {"error": "User profile not found"}
+
+    logger.info(f"[PDF] User profile found: {profile.get('name')}")
+
+    # Step 2: Check if user has birth details
+    dob = profile.get("dateOfBirth")
+    tob = profile.get("timeOfBirth")
+    place = profile.get("birthPlace")
+
+    if not all([dob, tob, place]):
+        logger.error(f"[PDF] Missing birth details for {user_id}: DOB={dob}, TOB={tob}, Place={place}")
+        return {"error": "Birth details incomplete"}
+
+    logger.info(f"[PDF] Birth details: DOB={dob}, TOB={tob}, Place={place}")
+
+    # Step 3: Calculate kundli
+    calculator = KundliCalculatorWrapper()
+    kundli_result = calculator.calculate_complete_kundli(dob, tob, place)
+
+    if not kundli_result.get("success"):
+        logger.error(f"[PDF] Kundli calculation failed: {kundli_result.get('error')}")
+        return {"error": "Kundli calculation failed"}
+
+    kundli_data = kundli_result["data"]
+    logger.info(f"[PDF] Kundli calculated: Lagna={kundli_data.get('lagna')}, Rashi={kundli_data.get('moon_sign')}")
+
+    # Step 4: Generate charts
+    charts = calculator.generate_charts(kundli_data)
+
+    if "error" in charts:
+        logger.error(f"[PDF] Chart generation failed: {charts.get('error')}")
+        return {"error": "Chart generation failed"}
+
+    logger.info("[PDF] Charts generated successfully")
+
+    # Step 5: Generate PDF
+    try:
+        pdf_generator = KundliPDFGenerator()
+        pdf_bytes = pdf_generator.generate_pdf(profile, kundli_data, charts)
+
+        logger.info(f"[PDF] PDF generated: {len(pdf_bytes)} bytes")
+
+    except Exception as e:
+        logger.error(f"[PDF] PDF generation failed: {e}", exc_info=True)
+        return {"error": f"PDF generation failed: {str(e)}"}
+
+    # Step 6: Upload PDF to WhatsApp Media
+    filename = f"Kundli_{user_id.replace('+', '')}.pdf"
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        # Upload PDF
+        media_id = await _upload_pdf_to_whatsapp_media(client, pdf_bytes, filename)
+
+        if not media_id:
+            logger.error("[PDF] PDF upload to WhatsApp failed")
+            return {"error": "PDF upload failed"}
+
+        logger.info(f"[PDF] PDF uploaded to WhatsApp: {media_id}")
+
+        # Get direct URL from media ID
+        document_url = f"{FB_API_URL}/{media_id}"
+
+        # Send PDF via WhatsApp
+        whatsapp_api = WhatsAppAPI(
+            phone_id=WHATSAPP_PHONE_ID,
+            access_token=WHATSAPP_ACCESS_TOKEN
+        )
+
+        caption = f"Namaste {profile.get('name', 'User')}! 🙏 Here's your detailed Janam Kundli PDF."
+
+        message_id = await whatsapp_api.send_document(
+            to=phone,
+            document_url=document_url,
+            filename=filename,
+            caption=caption
+        )
+
+        if message_id:
+            logger.info(f"[PDF] Sent Kundli PDF to {user_id}, message_id={message_id}")
+
+            # Log to MongoDB
+            await _log_to_mongo(
+                session_id,
+                user_id,
+                "assistant",
+                f"Kundli PDF sent: {filename}",
+                "whatsapp",
+                "document",
+                {"filename": filename, "size": len(pdf_bytes)}
+            )
+
+            return {"success": True, "message_id": message_id}
+        else:
+            logger.error("[PDF] Failed to send PDF via WhatsApp")
+            return {"error": "Failed to send PDF"}
 
 
 @celery_app.task
