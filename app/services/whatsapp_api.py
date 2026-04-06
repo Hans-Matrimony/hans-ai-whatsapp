@@ -182,8 +182,9 @@ class WhatsAppAPI:
     async def send_document(
         self,
         to: str,
-        document_url: str,
-        filename: str,
+        document_url: str = None,
+        media_id: str = None,
+        filename: str = None,
         caption: str = None
     ) -> Optional[str]:
         """
@@ -191,7 +192,8 @@ class WhatsAppAPI:
 
         Args:
             to: Phone number (without +)
-            document_url: URL to document (uploaded to WhatsApp Media API)
+            document_url: URL to document (external URL)
+            media_id: WhatsApp Media ID (from upload)
             filename: Document filename
             caption: Optional caption text
 
@@ -204,11 +206,21 @@ class WhatsAppAPI:
             "messaging_product": "whatsapp",
             "to": to,
             "type": "document",
-            "document": {
-                "link": document_url,
-                "filename": filename
-            }
+            "document": {}
         }
+
+        # Use media_id if provided (for uploaded files), else use document_url (for external URLs)
+        if media_id:
+            payload["document"]["id"] = media_id
+            if filename:
+                payload["document"]["filename"] = filename
+        elif document_url:
+            payload["document"]["link"] = document_url
+            if filename:
+                payload["document"]["filename"] = filename
+        else:
+            logger.error("Either media_id or document_url must be provided")
+            return None
 
         if caption:
             payload["document"]["caption"] = caption

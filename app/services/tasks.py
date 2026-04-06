@@ -1406,10 +1406,7 @@ async def _generate_kundli_pdf_async(phone: str, user_id: str, dob: str, tob: st
 
         logger.info(f"[PDF] PDF uploaded to WhatsApp: {media_id}")
 
-        # Get direct URL from media ID
-        document_url = f"{FB_API_URL}/{media_id}"
-
-        # Send PDF via WhatsApp
+        # Send PDF via WhatsApp using media_id (not URL)
         whatsapp_api = WhatsAppAPI(
             phone_id=WHATSAPP_PHONE_ID,
             access_token=WHATSAPP_ACCESS_TOKEN
@@ -1419,7 +1416,7 @@ async def _generate_kundli_pdf_async(phone: str, user_id: str, dob: str, tob: st
 
         message_id = await whatsapp_api.send_document(
             to=phone,
-            document_url=document_url,
+            media_id=media_id,
             filename=filename,
             caption=caption
         )
