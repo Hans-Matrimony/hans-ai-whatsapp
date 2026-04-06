@@ -67,15 +67,13 @@ class KundliPDFGenerator:
             fontName='Helvetica-Bold'
         ))
 
-        # Normal justified text
-        self.styles.add(ParagraphStyle(
-            name='BodyText',
-            fontSize=11,
-            alignment=TA_LEFT,
-            spaceAfter=8,
-            fontName='Helvetica',
-            leading=14
-        ))
+        # Update existing BodyText style instead of adding it again
+        if 'BodyText' in self.styles:
+            self.styles['BodyText'].fontSize = 11
+            self.styles['BodyText'].alignment = TA_LEFT
+            self.styles['BodyText'].spaceAfter = 8
+            self.styles['BodyText'].fontName = 'Helvetica'
+            self.styles['BodyText'].leading = 14
 
         # Bold text
         self.styles.add(ParagraphStyle(
