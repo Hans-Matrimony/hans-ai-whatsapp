@@ -812,8 +812,8 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
     if any(keyword in message_upper for keyword in pdf_keywords):
         logger.info(f"[PDF Request] User {user_id} requested Kundli PDF")
 
-        # Check if user has birth details from MongoDB Logger
-        user_data = await _get_user_birth_details_from_conversation(user_id, session_id)
+        # Check if user has birth details from Mem0
+        user_data = await _get_user_birth_details_from_mem0(user_id)
 
         # Check if user has birth details
         has_dob = bool(user_data and user_data.get("dateOfBirth"))
@@ -1344,36 +1344,43 @@ def health_check_task():
     return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
 
 
-async def _get_user_birth_details_from_conversation(user_id: str, session_id: str) -> Optional[dict]:
+async def _get_user_birth_details_from_mem0(user_id: str) -> Optional[dict]:
     """
-    Retrieve user birth details from MongoDB Logger conversation history.
+    Retrieve user birth details from Mem0 memory system.
 
     Args:
-        user_id: User's WhatsApp number
-        session_id: Session ID for conversation
+        user_id: User's WhatsApp number (with or without +)
 
     Returns:
         Dict with dateOfBirth, timeOfBirth, birthPlace, and name if found, None otherwise
     """
-    if not MONGO_LOGGER_URL:
-        logger.warning("[PDF] MONGO_LOGGER_URL not set - cannot retrieve user birth details")
+    if not MEM0_URL:
+        logger.warning("[PDF] MEM0_URL not set - cannot retrieve user birth details")
         return None
+
+    # Clean user_id (remove + if present)
+    clean_user_id = user_id.lstrip("+")
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            # Query conversation history from MongoDB Logger
-            # Using the conversations API endpoint
-            url = f"{MONGO_LOGGER_URL}/api/conversations/{user_id}"
+            # Query Mem0 API for user memories
+            url = f"{MEM0_URL}/v1/memories"
 
-            response = await client.get(url)
+            params = {
+                "user_id": clean_user_id,
+                "limit": 100  # Get recent memories
+            }
+
+            response = await client.get(url, params=params)
+
             if response.status_code != 200:
-                logger.warning(f"[PDF] Failed to fetch conversation for {user_id}: {response.status_code}")
+                logger.warning(f"[PDF] Failed to fetch memories for {user_id}: {response.status_code}")
                 return None
 
             data = response.json()
-            messages = data.get("messages", [])
+            memories = data if isinstance(data, list) else data.get("memories", [])
 
-            # Search for birth details in conversation
+            # Search for birth details in memories
             user_data = {}
 
             # Patterns to extract birth details
@@ -1383,24 +1390,28 @@ async def _get_user_birth_details_from_conversation(user_id: str, session_id: st
                 "birthPlace": r"(?:place\s*of\s*birth|birth\s*place|birthplace|born\s*in)[:\s]*([A-Za-z][A-Za-z\s]+)",
             }
 
-            for msg in messages:
-                text = msg.get("text", "")
+            for memory in memories:
+                # Get memory text/content
+                memory_text = memory.get("memory", "") or memory.get("content", "") or ""
 
                 # Extract birth details using patterns
                 for field, pattern in patterns.items():
                     if field not in user_data:
-                        match = re.search(pattern, text, re.IGNORECASE)
+                        match = re.search(pattern, memory_text, re.IGNORECASE)
                         if match:
                             user_data[field] = match.group(1).strip()
+                            logger.info(f"[PDF] Found {field} in memory: {user_data[field]}")
 
                 # Extract name if mentioned
                 if "name" not in user_data:
-                    name_match = re.search(r"(?:my\s*name\s*is|i\s*am)\s+([A-Z][a-z]+)", text, re.IGNORECASE)
+                    name_match = re.search(r"(?:my\s*name\s*is|i\s*am|name\s*is)[:\s]+([A-Z][a-z]+)", memory_text, re.IGNORECASE)
                     if name_match:
                         user_data["name"] = name_match.group(1).strip()
+                        logger.info(f"[PDF] Found name in memory: {user_data['name']}")
 
                 # Break if we have all required fields
                 if all(k in user_data for k in ["dateOfBirth", "timeOfBirth", "birthPlace"]):
+                    logger.info(f"[PDF] Found all birth details for {user_id}")
                     break
 
             # Return user_data if we have at least some information
@@ -1408,11 +1419,11 @@ async def _get_user_birth_details_from_conversation(user_id: str, session_id: st
                 logger.info(f"[PDF] Retrieved birth details for {user_id}: {list(user_data.keys())}")
                 return user_data
             else:
-                logger.warning(f"[PDF] No birth details found in conversation for {user_id}")
+                logger.warning(f"[PDF] No birth details found in memories for {user_id}")
                 return None
 
     except Exception as e:
-        logger.error(f"[PDF] Error retrieving birth details for {user_id}: {e}")
+        logger.error(f"[PDF] Error retrieving birth details from Mem0 for {user_id}: {e}")
         return None
 
 
@@ -1449,8 +1460,8 @@ async def _generate_kundli_pdf_async(phone: str, user_id: str) -> dict:
 
     session_id = f"whatsapp:+{phone}"
 
-    # Step 1: Get user birth details from MongoDB Logger
-    user_data = await _get_user_birth_details_from_conversation(user_id, session_id)
+    # Step 1: Get user birth details from Mem0
+    user_data = await _get_user_birth_details_from_mem0(user_id)
 
     if not user_data:
         logger.error(f"[PDF] User data not found for {user_id}")
