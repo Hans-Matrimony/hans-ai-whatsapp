@@ -1060,6 +1060,9 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
         # Detect user gender for personality adaptation
         user_gender = get_user_gender(phone, message)
 
+        # DEBUG: Log gender detection
+        logger.info(f"[GENDER DEBUG] User: +{phone}, Message: {message[:50]}, Detected Gender: {user_gender}")
+
         # Create envelope with gender context for AI personality
         timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
         envelope = f"[From: WhatsApp User (+{phone}) at {timestamp}]"
@@ -1124,6 +1127,9 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
                 "user_gender": user_gender,
             }
         }
+
+        # DEBUG: Log metadata being sent
+        logger.info(f"[GENDER DEBUG] Sending to OpenClaw - User: +{phone}, Metadata: {payload['metadata']}")
 
         # Add lightweight metadata (no base64 in metadata — it goes in input_image)
         if media_info:
