@@ -38,6 +38,244 @@ SUBSCRIPTION_TEST_NUMBER = os.getenv("SUBSCRIPTION_TEST_NUMBER", "9760347653")
 # Testing mode: Only send proactive nudges to this number (None = send to all users)
 PROACTIVE_NUDGE_TEST_NUMBER = os.getenv("PROACTIVE_NUDGE_TEST_NUMBER", "+919760347653")
 
+# Gender-based Astrologer Personality Configuration
+ASTROLOGER_PERSONALITIES = {
+    "male": {
+        "name": "Aarav",
+        "traits": "warm, caring, emotionally intelligent male astrologer friend",
+        "speaking_style": "friendly, supportive, uses 'main' (I), caring tone",
+        "greeting_style": "gentle, brotherly warmth"
+    },
+    "female": {
+        "name": "Meera",
+        "traits": "warm, caring, emotionally intelligent female astrologer friend",
+        "speaking_style": "friendly, supportive, uses 'main' (I), caring tone",
+        "greeting_style": "gentle, sisterly warmth"
+    }
+}
+
+# Common Indian names for gender detection
+MALE_NAMES = {
+    "aarav", "aarush", "adi", "advait", "advik", "agastya", "aryan", "arush", "arav",
+    "ayush", "arjun", "abhay", "abhiram", "adhrit", "aditya", "anirudh", "anant",
+    "anay", "ankit", "ansh", "aravind", "arman", "arnav", "aryan", "atharv",
+    "bhairav", "bhavin", "brijesh",
+    "chirag", "chetan", "chaitanya",
+    "dev", "devansh", "dhanush", "dhiraj", "dhruv", "divit", "diya",
+    "ekansh", "evan",
+    "gaurav", "gagan", "gautam", "giri", "govind",
+    "harsh", "harry", "harshit", "harikrishnan", "hitesh", "hemanth",
+    "ishan", "ishaan", "ivann",
+    "jai", "kabir", "kairav", "karan", "kavin", "keshav", "krishna", "kush",
+    "laksh", "love", "luv",
+    "madhav", "manas", "manav", "mohan", "moksh",
+    "nitya", "niranjan", "nitin", "navya",
+    "om", "omkar", "onkar",
+    "pranav", "pranay", "priyansh", "pratham", "purab",
+    "rahul", "raj", "rajan", "rajat", "rajesh", "raju", "raman", "rishi", "ritvik", "rohan", "ronit", "rudra",
+    "sai", "samarth", "samay", "sanjay", "sarthak", "sathvik", "saurabh", "shankar", "shaurya", "shreyas", "shiv", "shiva", "shivansh", "siddharth", "sri", "srikar", "srinath", "stuvan", "surya", "swastik",
+    "tanay", "tarun", "tejas", "trilok",
+    "udit", "utsav",
+    "vayun", "vivan", "viraat", "vishal", "vivan", "vikram", "vijay",
+    "yaan", "yash", "yug", "yuvan",
+    # Common English male names
+    "alex", "andrew", "anthony", "aaron", "adam", "arthur", "axl",
+    "ben", "blake", "bradley", "brandon", "brian",
+    "carl", "caleb", "cameron", "charles", "chris", "christian", "connor",
+    "daniel", "david", "dylan", "dominic", "drake",
+    "edward", "ethan", "eric", "evan",
+    "frank", "felix", "finn", "freddy", "fred",
+    "george", "gabriel", "gavin", "gary",
+    "harry", "henry", "hugo", "hunter",
+    "isaac", "ian", "ivan", "issac",
+    "jacob", "jack", "james", "jason", "justin", "john", "joe", "josh", "jordan", "jake",
+    "kai", "kevin", "kyle", "kris",
+    "liam", "lucas", "luke", "logan", "louis", "leo",
+    "mason", "michael", "max", "matthew", "mike", "mark", "martin", "mitch", "marcus",
+    "nathan", "nicholas", "noah", "neil", "nick", "nolan",
+    "oliver", "oscar", "owen",
+    "paul", "peter", "patrick", "phillip", "parker",
+    "quinn",
+    "ryan", "robert", "richard", "roger", "rick", "ronald", "ross", "russell",
+    "sam", "sean", "steven", "stephen", "scott", "simon", "stan", "shane", "stefan",
+    "thomas", "timothy", "tyler", "trevor", "ted", "troy",
+    "ulysses",
+    "victor", "vince", "vincent",
+    "william", "wyatt", "walker", "walter", "warren",
+    "xavier",
+    "zach", "zack", "zander"
+}
+
+FEMALE_NAMES = {
+    "aadhya", "aanya", "aara", "aarohi", "adhya", "adwitiya", "ananya", "anika", "anika", "anindita", "anika", "anya", "arya", "avni",
+    "bani", "bhavya",
+    "chhavi", "charu",
+    "darshi", "divya", "diya", "dhriti", "drishti",
+    "edha", "elakshi", "esha", "eva",
+    "gargi",
+    "hamsini", "hina", "hridya",
+    "isha", "ishaani", "ishita", "ivana", "indira", "indu", "ira",
+    "jia", "jiya",
+    "kaira", "kavya", "kiara", "kriya",
+    "lakshmi", "lavanya", "leshna",
+    "madhuri", "mahika", "meera", "mishti", "myra",
+    "naina", "nandini", "navya", "neha", "nikita", "nishtha",
+    "oshin", "ody",
+    "pahal", "priya", "prisha", "pooja", "presha",
+    "rachel", "radha", "rahima", "rani", "ritika", "rhea", "riya", "roshni", "ruta",
+    "saanvi", "sara", "savita", "siya", "sneha", "sravya", "stuti", "suhasini", "swara",
+    "tanya", "tanvi", "trisha", "tripti",
+    "uda", "urvi", "utkarsha",
+    "vaishnavi", "vanya", "vedika", "vidya", "vani", "varsha", "vibha",
+    "yamini", "yara",
+    # Common English female names
+    "abby", "abigail", "ada", "alice", "alison", "amanda", "amber", "amy", "ana", "andrea", "angel", "angela", "anna", "ann", "anne",
+    "barbara", "bella", "beth", "brittany", "brooke", "brenda",
+    "caroline", "catherine", "cathy", "charlotte", "chelsea", "christina", "claire", "courtney",
+    "diana", "danielle", "debbie", "donna", "dorothy",
+    "elizabeth", "eleanor", "emily", "emma", "evelyn", "eileen",
+    "faith", "fiona", "felicity", "florence", "frances",
+    "gabriella", "grace", "georgia", "gina", "gloria",
+    "hannah", "heather", "helen", "holly", "hope",
+    "isabella", "ivy", "irene", "iris",
+    "jane", "jennifer", "jessica", "julie", "joyce", "justine", "jasmine",
+    "katherine", "kate", "kelly", "kimberly", "katie", "karen",
+    "laura", "lisa", "lillian", "lilly", "lucy", "lydia", "linda", "louise",
+    "michelle", "maria", "mary", "melissa", "monica", "megan", "molly", "margaret", "martha",
+    "nancy", "nicole", "natalie", "nina", "naomi",
+    "olivia", "oprah",
+    "patricia", "paula", "penelope", "paige", "pamela", "peggy",
+    "quinn",
+    "rachel", "rose", "ruth", "rebecca", "roberta", "ruby", "rita", "rhonda",
+    "sarah", "susan", "sandra", "sophia", "samantha", "stephanie", "sharon", "sheila", "stella", "sherry",
+    "tiffany", "tina", "theresa", "tracy", "tara",
+    "ursula",
+    "vanessa", "victoria", "violet", "veronica", "vicki", "virginia", "vivian",
+    "wendy", "whitney",
+    "xena", "xavia",
+    "yvonne",
+    "zoe", "zelda"
+}
+
+# Simple in-memory cache for user gender (can be enhanced with persistent storage)
+_user_gender_cache = {}
+
+
+def detect_gender_from_name(name: str) -> Optional[str]:
+    """
+    Detect gender from user's name using pattern matching.
+
+    Args:
+        name: User's name
+
+    Returns:
+        "male", "female", or None (if unknown)
+    """
+    if not name:
+        return None
+
+    # Clean the name: remove spaces, special chars, convert to lowercase
+    clean_name = name.strip().lower()
+    clean_name = re.sub(r'[^a-z]', '', clean_name)
+
+    if not clean_name:
+        return None
+
+    # Check if it's a male name
+    if clean_name in MALE_NAMES:
+        logger.info(f"[Gender Detection] '{name}' detected as MALE")
+        return "male"
+
+    # Check if it's a female name
+    if clean_name in FEMALE_NAMES:
+        logger.info(f"[Gender Detection] '{name}' detected as FEMALE")
+        return "female"
+
+    # Check for common gender patterns in Indian names
+    # Female: often ends with a, i, ya, ia, ka, na, ri
+    female_endings = ('a', 'i', 'ya', 'ia', 'ka', 'na', 'ri', 'ta', 'la', 'sha', 'ra', 'da')
+    # Male: often ends with h, sh, k, r, t, v, n, d
+    male_endings = ('h', 'sh', 'k', 'r', 't', 'v', 'n', 'd', 'j', 'l', 'm', 'th')
+
+    if clean_name.endswith(female_endings):
+        logger.info(f"[Gender Detection] '{name}' detected as FEMALE (pattern)")
+        return "female"
+
+    if clean_name.endswith(male_endings):
+        logger.info(f"[Gender Detection] '{name}' detected as MALE (pattern)")
+        return "male"
+
+    logger.info(f"[Gender Detection] '{name}' - gender UNKNOWN, using default")
+    return None
+
+
+def get_user_gender(phone: str, message: str) -> str:
+    """
+    Get user gender from cache or detect from message.
+
+    Args:
+        phone: User's phone number
+        message: Current message (may contain name)
+
+    Returns:
+        "male", "female", or "unknown"
+    """
+    user_id = f"+{phone}"
+
+    # Check cache first
+    if user_id in _user_gender_cache:
+        return _user_gender_cache[user_id]
+
+    # Try to detect from current message
+    # Look for name patterns like "mera naam [NAME] hai", "I am [NAME]", "main [NAME] hoon"
+    name_patterns = [
+        r'(?:mera|meri)\s+naam\s+is\s+(\w+)',  # "mera naam X hai"
+        r'(?:mera|meri)\s+naam\s+(\w+)\s+hai',  # "mera naam X"
+        r'(?:(?:i|i|i)\s+am|i\'m|i am)\s+(\w+)',  # "I am X", "i'm X"
+        r'main\s+(\w+)\s+hoon',  # "main X hoon"
+        r'hello\s+(?:main|i)\s+(\w+)',  # "hello main X"
+        r'hi\s+(?:main|i)\s+(\w+)',  # "hi i am X"
+        r'name\s+(?:is|:)\s*(\w+)',  # "name: X" or "name is X"
+        r'mera\s+naam\s+(\w+)',  # "mera naam X"
+    ]
+
+    for pattern in name_patterns:
+        match = re.search(pattern, message, re.IGNORECASE)
+        if match:
+            name = match.group(1)
+            detected_gender = detect_gender_from_name(name)
+
+            if detected_gender:
+                # Cache the detected gender
+                _user_gender_cache[user_id] = detected_gender
+                logger.info(f"[Gender Detection] Detected and cached gender for {user_id}: {detected_gender} (from name: {name})")
+                return detected_gender
+
+    # Default: return unknown
+    logger.info(f"[Gender Detection] Gender unknown for {user_id}")
+    return "unknown"
+
+
+def get_astrologer_personality(user_gender: str) -> dict:
+    """
+    Get astrologer personality based on user's gender.
+
+    Args:
+        user_gender: User's detected gender ("male", "female", "unknown")
+
+    Returns:
+        Astrologer personality dict with name, traits, speaking_style
+    """
+    if user_gender == "male":
+        # User is male → Female astrologer (Meera)
+        return ASTROLOGER_PERSONALITIES["female"]
+    elif user_gender == "female":
+        # User is female → Male astrologer (Aarav)
+        return ASTROLOGER_PERSONALITIES["male"]
+    else:
+        # Unknown gender → Default to neutral/male astrologer (Aarav)
+        return ASTROLOGER_PERSONALITIES["male"]
+
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
 def process_message_task(self, phone: str, message: str, message_id: str, message_type: str = "text", media_info: dict = None):
@@ -819,7 +1057,10 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
         if OPENCLAW_GATEWAY_TOKEN:
             headers["Authorization"] = f"Bearer {OPENCLAW_GATEWAY_TOKEN}"
 
-        # Create envelope with media context
+        # Detect user gender for personality adaptation
+        user_gender = get_user_gender(phone, message)
+
+        # Create envelope with gender context for AI personality
         timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
         envelope = f"[From: WhatsApp User (+{phone}) at {timestamp}]"
 
@@ -879,6 +1120,9 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
             "model": "agent:astrologer",
             "input": payload_input,
             "user": f"+{phone}",
+            "metadata": {
+                "user_gender": user_gender,
+            }
         }
 
         # Add lightweight metadata (no base64 in metadata — it goes in input_image)

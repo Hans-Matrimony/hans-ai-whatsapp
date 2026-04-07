@@ -365,7 +365,7 @@ async def send_inactive_template(
     test_number: Optional[str] = Query(None)
 ):
     """
-    Send approved WhatsApp template to users inactive for 12+ hours.
+    Send approved WhatsApp template to users inactive for 20+ hours.
     Requires API key authentication.
 
     Usage:
@@ -391,9 +391,9 @@ async def send_inactive_template(
         if not MONGO_LOGGER_URL:
             raise HTTPException(status_code=500, detail="MongoDB Logger URL not configured")
 
-        # Calculate time threshold (12 hours ago)
+        # Calculate time threshold (20 hours ago)
         now = datetime.now(timezone.utc)
-        threshold = now - timedelta(hours=12)
+        threshold = now - timedelta(hours=20)
 
         logger.info(f"[Admin API] Finding users with lastMessageTime before {threshold.isoformat()}")
 
@@ -461,7 +461,7 @@ async def send_inactive_template(
 
             logger.info(f"[Admin API] Found {len(users)} total users in Mongo Logger")
 
-            # Filter users inactive for 12+ hours
+            # Filter users inactive for 20+ hours
             inactive_users = []
             for user in users:
                 user_id = user.get("userId", "")
@@ -488,8 +488,8 @@ async def send_inactive_template(
                         # Calculate inactive hours
                         inactive_hours = (now - last_msg_time).total_seconds() / 3600
 
-                        # Only include if inactive for 12+ hours
-                        if inactive_hours >= 12:
+                        # Only include if inactive for 20+ hours
+                        if inactive_hours >= 20:
                             inactive_users.append({
                                 "user_id": user_id,
                                 "inactive_hours": inactive_hours
@@ -500,7 +500,7 @@ async def send_inactive_template(
                         logger.debug(f"[Admin API] Error parsing time for {user_id}: {e}")
                         continue
 
-            logger.info(f"[Admin API] Found {len(inactive_users)} users inactive for 12+ hours")
+            logger.info(f"[Admin API] Found {len(inactive_users)} users inactive for 20+ hours")
 
             if len(inactive_users) == 0:
                 return {
