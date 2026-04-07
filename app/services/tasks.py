@@ -1127,11 +1127,9 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
 
         # Add lightweight metadata (no base64 in metadata — it goes in input_image)
         if media_info:
-            payload["metadata"] = {
-                "message_type": message_type,
-                "media_type": media_info.get("type", message_type),
-                "media_id": media_info.get("id", ""),
-            }
+            payload["metadata"]["message_type"] = message_type
+            payload["metadata"]["media_type"] = media_info.get("type", message_type)
+            payload["metadata"]["media_id"] = media_info.get("id", "")
             if "caption" in media_info:
                 payload["metadata"]["media_caption"] = media_info["caption"]
             if "filename" in media_info:
