@@ -160,6 +160,18 @@ FEMALE_NAMES = {
 # Simple in-memory cache for user gender (can be enhanced with persistent storage)
 _user_gender_cache = {}
 
+# Pre-populated known users (persists across deployments)
+_KNOWN_USERS_GENDER = {
+    "919760347653": "male",  # Vardhan
+    "918607836217": "male",  # Rishabh
+    # Add more users as needed: "phone": "gender"
+}
+
+# Initialize cache with known users
+for phone, gender in _KNOWN_USERS_GENDER.items():
+    _user_gender_cache[f"+{phone}"] = gender
+    logger.info(f"[Gender Cache] Pre-loaded known user: +{phone} → {gender}")
+
 
 def detect_gender_from_name(name: str) -> Optional[str]:
     """
