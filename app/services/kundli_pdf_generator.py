@@ -241,40 +241,24 @@ class KundliPDFGenerator:
         return content
 
     def _create_charts_page(self, charts: Dict) -> List:
-        """Create page with birth chart and navamsa chart"""
+        """Create page with birth chart (Lagna Kundli only)"""
         content = []
 
-        content.append(Paragraph("Birth Charts", self.styles['SectionHeader']))
+        content.append(Paragraph("Birth Chart (Lagna Kundli)", self.styles['SectionHeader']))
 
-        # Chart container
-        chart_data = []
-
-        # Birth chart (left)
+        # Birth chart
         if 'birth_chart' in charts:
             try:
-                birth_chart_img = self._base64_to_image(charts['birth_chart'], width=3.0)
-                chart_data.append([Paragraph("<b>Lagna Kundli</b>", self.styles['SubsectionHeader']), birth_chart_img])
+                birth_chart_img = self._base64_to_image(charts['birth_chart'], width=5.0)
+                # Center the chart
+                content.append(Spacer(1, 0.2*inch))
+                content.append(birth_chart_img)
+                content.append(Spacer(1, 0.2*inch))
             except Exception as e:
                 logger.error(f"Failed to create birth chart image: {e}")
-                chart_data.append([Paragraph("<b>Lagna Kundli</b>", self.styles['SubsectionHeader']), Paragraph("Chart image not available", self.styles['BodyText'])])
-
-        # Navamsa chart (right)
-        if 'navamsa_chart' in charts:
-            try:
-                navamsa_chart_img = self._base64_to_image(charts['navamsa_chart'], width=3.0)
-                chart_data.append([Paragraph("<b>Navamsa Chart (D9)</b>", self.styles['SubsectionHeader']), navamsa_chart_img])
-            except Exception as e:
-                logger.error(f"Failed to create navamsa chart image: {e}")
-                chart_data.append([Paragraph("<b>Navamsa Chart (D9)</b>", self.styles['SubsectionHeader']), Paragraph("Chart image not available", self.styles['BodyText'])])
-
-        # Create side-by-side layout
-        if chart_data:
-            charts_table = Table(chart_data, colWidths=[3.2*inch, 3.2*inch])
-            charts_table.setStyle(TableStyle([
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ]))
-            content.append(charts_table)
+                content.append(Paragraph("Chart image not available", self.styles['BodyText']))
+        else:
+            content.append(Paragraph("Chart not available", self.styles['BodyText']))
 
         return content
 
