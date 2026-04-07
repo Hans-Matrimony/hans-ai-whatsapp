@@ -308,6 +308,9 @@ class PredictionEngine:
         """
         Generate astrological remedies based on functional nature of planets
 
+        CRITICAL: Only recommend gemstones for benefic planets.
+        Use donations/pacification for Maraka and malefic planets.
+
         Args:
             kundli_data: Calculated kundli data
 
@@ -318,19 +321,12 @@ class PredictionEngine:
         lagna = kundli_data.get("lagna", "Unknown")
 
         # Determine functional nature of planets based on Lagna
-        # For each Lagna, certain planets are benefic or malefic
         functional_benefics = self._get_functional_benefics(lagna)
         functional_malefics = self._get_functional_malefics(lagna)
+        maraka_planets = self._get_maraka_planets(lagna)
 
-        # Check for malefic planets in dusthana houses (6, 8, 12)
-        malefic_planets = []
-        for planet_name, planet_data in planets.items():
-            house = planet_data.get("house")
-            planet_ruler = planet_data.get("planet")
-
-            # Check if planet is functionally malefic or in dusthana
-            if house in [6, 8, 12] or planet_ruler in functional_malefics:
-                malefic_planets.append(planet_name)
+        # Yogakaraka planets (rulers of both Kendra and Trikona)
+        yogakaraka = self._get_yogakaraka(lagna)
 
         remedies = {
             "gemstones": "",
@@ -338,25 +334,149 @@ class PredictionEngine:
             "general": ""
         }
 
-        # Saturn remedies
-        if "saturn" in malefic_planets:
-            remedies["gemstones"] += "Blue Sapphire (Neelam) can help strengthen Saturn. "
+        # Check planets in dusthana houses (6, 8, 12) or afflicted positions
+        afflicted_planets = []
+        for planet_name, planet_data in planets.items():
+            house = planet_data.get("house")
+            planet_ruler = planet_data.get("planet")
+
+            # Planet is afflicted if in dusthana or functionally malefic
+            if house in [6, 8, 12] or planet_ruler in functional_malefics:
+                afflicted_planets.append(planet_name)
+
+        # SATURN REMEDIES
+        # Saturn is Yogakaraka for Libra, Taurus - can recommend gemstone
+        # For others, use pacification only
+        if "saturn" in afflicted_planets:
+            if lagna in ["Libra", "Taurus"] and "saturn" in yogakaraka:
+                # Saturn is Yogakaraka - gemstone is safe and beneficial
+                remedies["gemstones"] += "Blue Sapphire (Neelam) is highly beneficial for you. Saturn is your Yogakaraka planet. "
+            elif "saturn" in functional_benefics:
+                # Saturn is functional benefic - gemstone is safe
+                remedies["gemstones"] += "Blue Sapphire (Neelam) can help strengthen Saturn. "
+            else:
+                # Saturn is neutral or malefic - NO gemstone, only pacification
+                remedies["gemstones"] += "⚠️ Avoid Blue Sapphire - use pacification remedies instead. "
+
             remedies["mantras"] += "Chant 'Om Sham Shanicharaya Namah' on Saturdays (108 times). "
             remedies["general"] += "• Donate black sesame seeds, iron, or black clothes on Saturdays\n"
             remedies["general"] += "• Feed stray dogs and birds\n"
             remedies["general"] += "• Light mustard oil lamp under Peepal tree on Saturdays\n"
 
-        # Rahu remedies
-        if "rahu" in malefic_planets:
+        # MARS REMEDIES
+        # CRITICAL: Mars is Maraka for Libra, Cancer - NEVER recommend Red Coral
+        if "mars" in afflicted_planets:
+            if lagna in ["Libra", "Cancer"]:
+                # Mars is Maraka - NO gemstone, only pacification
+                remedies["gemstones"] += "⚠️ AVOID Red Coral (Moonga) - Mars is your Maraka planet. Use donations instead. "
+            elif "mars" in yogakaraka:
+                # Mars is Yogakaraka (for Cancer, Leo) - gemstone is safe
+                remedies["gemstones"] += "Red Coral (Moonga) can help strengthen Mars. "
+            elif "mars" in functional_benefics:
+                remedies["gemstones"] += "Red Coral (Moonga) can help strengthen Mars. "
+            else:
+                # Mars is malefic - NO gemstone
+                remedies["gemstones"] += "⚠️ Avoid Red Coral - use Tuesday donations instead. "
+
+            remedies["mantras"] += "Chant 'Om Ang Angarkaya Namah' on Tuesdays (108 times). "
+            remedies["general"] += "• Donate red items, wheat, or jaggery on Tuesdays\n"
+            remedies["general"] += "• Feed stray cows\n"
+            remedies["general"] += "• Avoid getting angry unnecessarily\n"
+
+        # RAHU REMEDIES
+        if "rahu" in afflicted_planets:
             remedies["gemstones"] += "Hessonite (Gomed) can help balance Rahu. "
             remedies["mantras"] += "Chant 'Om Raam Rahave Namah' during Rahu Kaal (90 minutes before sunset). "
             remedies["general"] += "• Donate coconut, mustard oil, or black gram on Wednesdays\n"
             remedies["general"] += "• Avoid wearing grey or blue clothes\n"
             remedies["general"] += "• Feed stray dogs\n"
 
-        # Ketu remedies
-        if "ketu" in malefic_planets:
+        # KETU REMEDIES
+        if "ketu" in afflicted_planets:
             remedies["gemstones"] += "Cat's Eye (Lehsunia) can help pacify Ketu. "
+            remedies["mantras"] += "Chant 'Om Kem Ketave Namah' regularly (108 times). "
+            remedies["general"] += "• Donate brown colored items, dog food, or blankets to the needy\n"
+            remedies["general"] += "• Keep a dog as a pet\n"
+            remedies["general"] += "• Visit religious places regularly\n"
+
+        # JUPITER REMEDIES
+        if "jupiter" in afflicted_planets:
+            if "jupiter" in functional_benefics:
+                remedies["gemstones"] += "Yellow Sapphire (Pukhraj) can help strengthen Jupiter. "
+            else:
+                remedies["gemstones"] += "⚠️ Avoid Yellow Sapphire - use Thursday donations instead. "
+
+            remedies["mantras"] += "Chant 'Om Brim Brihaspataye Namah' on Thursdays (108 times). "
+            remedies["general"] += "• Donate yellow items, turmeric, or gram on Thursdays\n"
+            remedies["general"] += "• Respect teachers and elders\n"
+            remedies["general"] += "• Study religious texts\n"
+
+        # VENUS REMEDIES
+        # Venus is Maraka for Aquarius - avoid gemstone
+        if "venus" in afflicted_planets:
+            if lagna == "Aquarius":
+                # Venus is Maraka for Aquarius
+                remedies["gemstones"] += "⚠️ AVOID Diamond - Venus is your Maraka planet. Use donations instead. "
+            elif "venus" in yogakaraka:
+                # Venus is Yogakaraka for Capricorn, Aquarius
+                remedies["gemstones"] += "Diamond (Heera) is highly beneficial for you. "
+            elif "venus" in functional_benefics:
+                remedies["gemstones"] += "Diamond (Heera) can help strengthen Venus. "
+            else:
+                remedies["gemstones"] += "⚠️ Avoid Diamond - use Friday donations instead. "
+
+            remedies["mantras"] += "Chant 'Om Shum Shukraya Namah' on Fridays (108 times). "
+            remedies["general"] += "• Donate white items, rice, or sugar on Fridays\n"
+            remedies["general"] += "• Respect women and help them\n"
+            remedies["general"] += "• Wear clean and presentable clothes\n"
+
+        # General remedies (always good)
+        if not remedies["general"]:
+            remedies["general"] += "• Practice meditation regularly\n"
+            remedies["general"] += "• Respect your parents and elders\n"
+            remedies["general"] += "• Help the needy through donations\n"
+            remedies["general"] += "• Chant Gayatri Mantra daily\n"
+
+        return remedies
+
+    def _get_maraka_planets(self, lagna: str) -> list:
+        """
+        Get Maraka planets (lords of 2nd and 7th houses)
+
+        These planets can cause death-like effects and should NEVER be strengthened with gemstones
+        """
+        # 2nd and 7th house lords
+        second_lord = self._get_house_ruler(2, lagna)
+        seventh_lord = self._get_house_ruler(7, lagna)
+
+        return [second_lord, seventh_lord]
+
+    def _get_yogakaraka(self, lagna: str) -> list:
+        """
+        Get Yogakaraka planets (rulers of both Kendra and Trikona)
+
+        These are the most beneficial planets for the Lagna
+        """
+        # Kendra houses: 1, 4, 7, 10
+        # Trikona houses: 1, 5, 9
+        # Yogakaraka = rules both a Kendra and Trikona (excluding Lagna lord)
+
+        # For each Lagna, which planet rules both Kendra and Trikona
+        yogakaraka_map = {
+            "Aries": [],  # No single planet rules both
+            "Taurus": ["Saturn"],  # Rules 5th (Trikona) and 9th (Trikona), also 4th (Kendra)
+            "Gemini": ["Venus"],  # Rules 5th and 12th, also 7th (Kendra) - partially
+            "Cancer": ["Mars"],  # Rules 5th and 10th
+            "Leo": ["Mars"],  # Rules 4th and 9th
+            "Virgo": [],  # No single planet
+            "Libra": ["Saturn"],  # Rules 4th and 5th - true Yogakaraka!
+            "Scorpio": ["Sun", "Jupiter"],  # Sun rules 10th, Jupiter rules 5th
+            "Sagittarius": ["Mars"],  # Rules 5th and 12th
+            "Capricorn": ["Venus"],  # Rules 5th and 10th
+            "Aquarius": ["Venus"],  # Rules 4th and 9th
+            "Pisces": []  # No single planet
+        }
+        return yogakaraka_map.get(lagna, [])
             remedies["mantras"] += "Chant 'Om Kem Ketave Namah' regularly (108 times). "
             remedies["general"] += "• Donate brown colored items, dog food, or blankets to the needy\n"
             remedies["general"] += "• Keep a dog as a pet\n"
