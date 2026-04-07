@@ -97,7 +97,9 @@ class KundliPDFGenerator:
         self,
         user_data: Dict[str, Any],
         kundli_data: Dict[str, Any],
-        charts: Dict[str, str]
+        charts: Dict[str, str],
+        openclaw_url: str = None,
+        openclaw_token: str = None
     ) -> bytes:
         """
         Generate complete Kundli PDF
@@ -106,6 +108,8 @@ class KundliPDFGenerator:
             user_data: User profile (name, gender, birth details)
             kundli_data: Calculated kundli data
             charts: Dict containing birth_chart and navamsa_chart base64 images
+            openclaw_url: OpenClaw API URL (for AI predictions)
+            openclaw_token: OpenClaw API token
 
         Returns:
             PDF as bytes
@@ -139,8 +143,8 @@ class KundliPDFGenerator:
             # Page break
             content.append(PageBreak())
 
-            # 4. Life Predictions
-            predictions = self._generate_predictions(kundli_data)
+            # 4. Life Predictions (using AI if available)
+            predictions = self._generate_predictions(kundli_data, openclaw_url, openclaw_token)
             content.extend(self._create_predictions_section(predictions))
 
             # Page break
@@ -338,12 +342,40 @@ class KundliPDFGenerator:
 
         return content
 
-    def _generate_predictions(self, kundli_data: Dict) -> Dict:
-        """Generate life predictions based on planetary positions"""
+    def _generate_predictions(self, kundli_data: Dict, openclaw_url: str = None, openclaw_token: str = None) -> Dict:
+        """Generate life predictions using OpenClaw AI or fallback to static"""
         from app.services.prediction_engine import PredictionEngine
+        import asyncio
 
         engine = PredictionEngine()
-        return engine.generate_all_predictions(kundli_data)
+
+        # Try AI predictions first
+        if openclaw_url:
+            try:
+                # Run async prediction in sync context
+                loop = asyncio.get_event_loop()
+                if loop and loop.is_running():
+                    # If there's a running loop, create task
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        future = executor.submit(
+                            asyncio.run,
+                            engine.generate_all_predictions(kundli_data, openclaw_url, openclaw_token)
+                        )
+                        predictions = future.result(timeout=30)
+                else:
+                    # No running loop, run directly
+                    predictions = asyncio.run(engine.generate_all_predictions(kundli_data, openclaw_url, openclaw_token))
+
+                if predictions and all(predictions.values()):
+                    logger.info("[PDF] Using AI-generated predictions")
+                    return predictions
+            except Exception as e:
+                logger.warning(f"[PDF] AI predictions failed: {e}, using static predictions")
+
+        # Fallback to static predictions
+        logger.info("[PDF] Using static rule-based predictions")
+        return engine._generate_static_predictions(kundli_data)
 
     def _create_predictions_section(self, predictions: Dict) -> List:
         """Create predictions section with formatted text"""

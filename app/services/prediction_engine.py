@@ -109,21 +109,125 @@ class PredictionEngine:
         }
         return malefic_map.get(lagna, ["Saturn", "Rahu", "Ketu"])
 
-    def generate_all_predictions(self, kundli_data: dict) -> dict:
+    async def generate_all_predictions(self, kundli_data: dict, openclaw_url: str = None, openclaw_token: str = None) -> dict:
         """
-        Generate predictions for all life areas
+        Generate predictions for all life areas using OpenClaw AI Agent
+
+        Uses AI instead of static rules for high-quality, personalized predictions
 
         Args:
             kundli_data: Calculated kundli data with planet_positions
+            openclaw_url: OpenClaw API URL
+            openclaw_token: OpenClaw API token
 
         Returns:
             Dict with predictions for career, marriage, health, wealth
+        """
+        import httpx
+        import json
+
+        planet_positions = kundli_data.get("planet_positions", {})
+        lagna = kundli_data.get("lagna", "Unknown")
+        moon_sign = kundli_data.get("moon_sign", "Unknown")
+        nakshatra = kundli_data.get("nakshatra", "Unknown")
+
+        logger.info(f"[Predictions] Generating AI predictions for Lagna: {lagna}, Moon: {moon_sign}")
+
+        # If OpenClaw URL is not provided, fall back to static predictions
+        if not openclaw_url:
+            logger.warning("[Predictions] OpenClaw URL not provided, using static predictions")
+            return self._generate_static_predictions(kundli_data)
+
+        # Prepare kundli summary for AI
+        kundli_summary = self._prepare_kundli_summary_for_ai(kundli_data)
+
+        # Build prompt for OpenClaw AI
+        prompt = f"""You are a Vedic astrology expert. Generate life predictions based on this kundli data:
+
+Lagna (Ascendant): {lagna}
+Moon Sign: {moon_sign}
+Nakshatra: {nakshatra}
+
+Planetary Positions:
+{self._format_planets_for_ai(planet_positions)}
+
+Please generate predictions in the following EXACT format:
+
+**CAREER & PROFESSION:**
+[2-3 sentences about career based on actual planetary positions]
+
+**MARRIAGE & LOVE:**
+[2-3 sentences about marriage based on actual planetary positions]
+
+**HEALTH & WELLNESS:**
+[2-3 sentences about health based on actual planetary positions]
+
+**WEALTH & FINANCE:**
+[2-3 sentences about wealth based on actual planetary positions]
+
+IMPORTANT:
+- Base predictions on ACTUAL house rulers for {lagna} Lagna
+- Consider the functional nature of planets (benefic/malefic for this Lagna)
+- Be specific to this chart, not generic
+- Use proper Vedic astrology principles
+"""
+
+        try:
+            headers = {
+                "Content-Type": "application/json",
+            }
+
+            if openclaw_token:
+                headers["Authorization"] = f"Bearer {openclaw_token}"
+
+            payload = {
+                "message": prompt,
+                "stream": False,
+                "max_tokens": 1000
+            }
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{openclaw_url}/v1/responses",
+                    json=payload,
+                    headers=headers
+                )
+
+                if response.status_code != 200:
+                    logger.error(f"[Predictions] OpenClaw API error {response.status_code}: {response.text}")
+                    return self._generate_static_predictions(kundli_data)
+
+                data = response.json()
+
+                # Extract AI response
+                output = data.get("output", [])
+                if output and len(output) > 0:
+                    content = output[0].get("content", [])
+                    if content and len(content) > 0:
+                        ai_response = content[0].get("text", "")
+
+                        # Parse AI response into sections
+                        predictions = self._parse_ai_predictions(ai_response)
+
+                        logger.info(f"[Predictions] AI predictions generated successfully")
+                        return predictions
+
+                logger.warning("[Predictions] Could not parse AI response, using static predictions")
+                return self._generate_static_predictions(kundli_data)
+
+        except Exception as e:
+            logger.error(f"[Predictions] AI prediction failed: {e}, using static predictions")
+            return self._generate_static_predictions(kundli_data)
+
+    def _generate_static_predictions(self, kundli_data: dict) -> dict:
+        """
+        Fallback to static predictions when AI is unavailable
         """
         planet_positions = kundli_data.get("planet_positions", {})
         lagna = kundli_data.get("lagna", "Unknown")
         moon_sign = kundli_data.get("moon_sign", "Unknown")
 
-        logger.info(f"[Predictions] Generating for Lagna: {lagna}, Moon: {moon_sign}")
+        logger.info(f"[Predictions] Using static predictions for Lagna: {lagna}")
 
         return {
             "career": self._predict_career(planet_positions, lagna),
@@ -131,6 +235,86 @@ class PredictionEngine:
             "health": self._predict_health(planet_positions, lagna),
             "wealth": self._predict_wealth(planet_positions, lagna)
         }
+
+    def _prepare_kundli_summary_for_ai(self, kundli_data: dict) -> str:
+        """Prepare kundli summary for AI consumption"""
+        planet_positions = kundli_data.get("planet_positions", {})
+
+        summary = []
+        for planet_name, planet_data in planet_positions.items():
+            planet = planet_data.get("planet", planet_name)
+            sign = planet_data.get("sign", "Unknown")
+            house = planet_data.get("house", 0)
+            degree = planet_data.get("degree", 0.0)
+
+            summary.append(f"{planet}: House {house} ({sign}, {degree:.2f}°)")
+
+        return "\n".join(summary)
+
+    def _format_planets_for_ai(self, planet_positions: dict) -> str:
+        """Format planetary positions for AI prompt"""
+        lines = []
+        for planet_name, planet_data in planet_positions.items():
+            planet = planet_data.get("planet", planet_name)
+            sign = planet_data.get("sign", "Unknown")
+            house = planet_data.get("house", 0)
+            degree = planet_data.get("degree", 0.0)
+
+            lines.append(f"• {planet}: House {house} in {sign} ({degree:.2f}°)")
+
+        return "\n".join(lines)
+
+    def _parse_ai_predictions(self, ai_response: str) -> dict:
+        """Parse AI response into prediction sections"""
+        predictions = {
+            "career": "",
+            "marriage": "",
+            "health": "",
+            "wealth": ""
+        }
+
+        # Split by section headers
+        sections = {
+            "CAREER": "career",
+            "MARRIAGE": "marriage",
+            "HEALTH": "health",
+            "WEALTH": "wealth"
+        }
+
+        current_section = None
+        current_content = []
+
+        for line in ai_response.split('\n'):
+            line = line.strip()
+
+            # Check if this is a section header
+            for section_key, section_name in sections.items():
+                if section_key in line.upper():
+                    # Save previous section
+                    if current_section and current_content:
+                        predictions[current_section] = ' '.join(current_content).strip()
+
+                    current_section = section_name
+                    current_content = []
+                    break
+            else:
+                # Not a section header, add to current content
+                if current_section and line and not line.startswith('**'):
+                    # Clean up the line
+                    clean_line = line.lstrip('•').strip()
+                    if clean_line:
+                        current_content.append(clean_line)
+
+        # Save last section
+        if current_section and current_content:
+            predictions[current_section] = ' '.join(current_content).strip()
+
+        # If any section is empty, provide fallback
+        for section_name in predictions:
+            if not predictions[section_name]:
+                predictions[section_name] = f"Based on your planetary positions, favorable results are indicated in this area of life."
+
+        return predictions
 
     def _predict_career(self, planets: dict, lagna: str) -> str:
         """Generate career predictions based on 10th house and Saturn"""

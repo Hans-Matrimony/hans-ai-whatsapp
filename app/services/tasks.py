@@ -1650,7 +1650,13 @@ async def _generate_kundli_pdf_async(phone: str, user_id: str, dob: str, tob: st
     # Generate PDF
     try:
         pdf_generator = KundliPDFGenerator()
-        pdf_bytes = pdf_generator.generate_pdf(user_data, kundli_data, charts)
+        pdf_bytes = pdf_generator.generate_pdf(
+            user_data,
+            kundli_data,
+            charts,
+            openclaw_url=OPENCLAW_URL,
+            openclaw_token=OPENCLAW_GATEWAY_TOKEN
+        )
 
         logger.info(f"[PDF] PDF generated: {len(pdf_bytes)} bytes")
 
