@@ -540,7 +540,7 @@ IMPORTANT:
                 remedies["gemstones"] += "Blue Sapphire (Neelam) can help strengthen Saturn. "
             else:
                 # Saturn is neutral or malefic - NO gemstone, only pacification
-                remedies["gemstones"] += "⚠️ Avoid Blue Sapphire - use pacification remedies instead. "
+                remedies["gemstones"] += "⚠️ Avoid Blue Sapphire: Use pacification remedies instead. "
 
             remedies["mantras"] += "Chant 'Om Sham Shanicharaya Namah' on Saturdays (108 times). "
             remedies["general"] += "• Donate black sesame seeds, iron, or black clothes on Saturdays\n"
@@ -552,7 +552,7 @@ IMPORTANT:
         if "mars" in afflicted_planets:
             if lagna in ["Libra", "Cancer"]:
                 # Mars is Maraka - NO gemstone, only pacification
-                remedies["gemstones"] += "⚠️ AVOID Red Coral (Moonga) - Mars is your Maraka planet. Use donations instead. "
+                remedies["gemstones"] += "⚠️ AVOID Red Coral (Moonga): Mars is your Maraka planet. Use donations instead. "
             elif "mars" in yogakaraka:
                 # Mars is Yogakaraka (for Cancer, Leo) - gemstone is safe
                 remedies["gemstones"] += "Red Coral (Moonga) can help strengthen Mars. "
@@ -560,7 +560,7 @@ IMPORTANT:
                 remedies["gemstones"] += "Red Coral (Moonga) can help strengthen Mars. "
             else:
                 # Mars is malefic - NO gemstone
-                remedies["gemstones"] += "⚠️ Avoid Red Coral - use Tuesday donations instead. "
+                remedies["gemstones"] += "⚠️ Avoid Red Coral: Use Tuesday donations instead. "
 
             remedies["mantras"] += "Chant 'Om Ang Angarkaya Namah' on Tuesdays (108 times). "
             remedies["general"] += "• Donate red items, wheat, or jaggery on Tuesdays\n"
@@ -588,7 +588,7 @@ IMPORTANT:
             if "jupiter" in functional_benefics:
                 remedies["gemstones"] += "Yellow Sapphire (Pukhraj) can help strengthen Jupiter. "
             else:
-                remedies["gemstones"] += "⚠️ Avoid Yellow Sapphire - use Thursday donations instead. "
+                remedies["gemstones"] += "⚠️ Avoid Yellow Sapphire: Use Thursday donations instead. "
 
             remedies["mantras"] += "Chant 'Om Brim Brihaspataye Namah' on Thursdays (108 times). "
             remedies["general"] += "• Donate yellow items, turmeric, or gram on Thursdays\n"
@@ -600,14 +600,14 @@ IMPORTANT:
         if "venus" in afflicted_planets:
             if lagna == "Aquarius":
                 # Venus is Maraka for Aquarius
-                remedies["gemstones"] += "⚠️ AVOID Diamond - Venus is your Maraka planet. Use donations instead. "
+                remedies["gemstones"] += "⚠️ AVOID Diamond: Venus is your Maraka planet. Use donations instead. "
             elif "venus" in yogakaraka:
                 # Venus is Yogakaraka for Capricorn, Aquarius
                 remedies["gemstones"] += "Diamond (Heera) is highly beneficial for you. "
             elif "venus" in functional_benefics:
                 remedies["gemstones"] += "Diamond (Heera) can help strengthen Venus. "
             else:
-                remedies["gemstones"] += "⚠️ Avoid Diamond - use Friday donations instead. "
+                remedies["gemstones"] += "⚠️ Avoid Diamond: Use Friday donations instead. "
 
             remedies["mantras"] += "Chant 'Om Shum Shukraya Namah' on Fridays (108 times). "
             remedies["general"] += "• Donate white items, rice, or sugar on Fridays\n"
