@@ -661,27 +661,6 @@ IMPORTANT:
             "Pisces": []  # No single planet
         }
         return yogakaraka_map.get(lagna, [])
-            remedies["mantras"] += "Chant 'Om Kem Ketave Namah' regularly (108 times). "
-            remedies["general"] += "• Donate brown colored items, dog food, or blankets to the needy\n"
-            remedies["general"] += "• Keep a dog as a pet\n"
-            remedies["general"] += "• Visit religious places regularly\n"
-
-        # Mars remedies
-        if "mars" in malefic_planets:
-            remedies["gemstones"] += "Red Coral (Moonga) can help strengthen Mars. "
-            remedies["mantras"] += "Chant 'Om Ang Angarkaya Namah' on Tuesdays. "
-            remedies["general"] += "• Donate red items, wheat, or jaggery on Tuesdays\n"
-            remedies["general"] += "• Feed stray cows\n"
-            remedies["general"] += "• Avoid getting angry unnecessarily\n"
-
-        # General remedies (always good)
-        if not remedies["general"]:
-            remedies["general"] += "• Practice meditation regularly\n"
-            remedies["general"] += "• Respect your parents and elders\n"
-            remedies["general"] += "• Help the needy through donations\n"
-            remedies["general"] += "• Chant Gayatri Mantra daily\n"
-
-        return remedies
 
     def _get_career_field(self, ruler: str) -> str:
         """Get career field based on house ruler"""
