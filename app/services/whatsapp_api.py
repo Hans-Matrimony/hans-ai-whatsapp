@@ -266,16 +266,8 @@ class WhatsAppAPI:
         """
         url = f"{self.base_url}/{self.phone_id}/messages"
 
-        # Build the flow action object - SIMPLE VERSION
-        # For payment flows, the Flow itself contains the payment configuration
-        flow_action_obj = {
-            "name": "flow",
-            "parameters": {
-                "flow_id": flow_id,
-                "flow_cta": flow_cta
-            }
-        }
-
+        # Build the interactive message with Flow component
+        # CORRECT STRUCTURE according to Meta API
         payload = {
             "messaging_product": "whatsapp",
             "to": to.lstrip("+"),
@@ -289,7 +281,14 @@ class WhatsAppAPI:
                 "body": {
                     "text": body
                 },
-                "action": flow_action_obj,
+                "action": {
+                    "name": "flow",
+                    "parameters": {
+                        "flow_id": flow_id,
+                        "flow_cta": flow_cta,
+                        "flow_update": False
+                    }
+                },
                 "footer": {
                     "text": "Powered by Razorpay"
                 }
