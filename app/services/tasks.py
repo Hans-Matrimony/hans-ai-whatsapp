@@ -1050,6 +1050,80 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
 
     # ===================================================================
 
+    # ==================== PAY COMMAND CHECK (GLOBAL) ====================
+    # Check for PAY command FIRST, before subscription check
+    # This allows ANY user to request plan options
+
+    pay_command = message.strip().upper()
+    if pay_command in ["PAY", "PAYMENT", "PLAN", "PLANS", "SUBSCRIBE"]:
+        # Fetch and send plan options
+        plans_message = await _get_plans_message()
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            await _send_whatsapp_message(client, phone, plans_message)
+        await _log_to_mongo(session_id, user_id, "assistant", plans_message, "whatsapp")
+        return {"status": "plans_sent"}
+
+    # Check if user is selecting a plan (replying with number 1, 2, 3, etc.)
+    if message.strip().isdigit():
+        plan_number = int(message.strip())
+
+        # First fetch plan details
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                plans_response = await client.get(
+                    f"{SUBSCRIPTIONS_URL}/plans?active_only=true"
+                )
+                if plans_response.status_code == 200:
+                    plans_data = plans_response.json()
+                    plans = plans_data.get("plans", [])
+
+                    if 1 <= plan_number <= len(plans):
+                        selected_plan = plans[plan_number - 1]
+                        plan_id = selected_plan.get("planId")
+                        plan_name = selected_plan.get("name", "Plan")
+                        amount = selected_plan.get("price", 0)
+
+                        # Try to send WhatsApp Flow (in-WhatsApp payment)
+                        if WHATSAPP_FLOW_ID and WHATSAPP_PAYMENT_CONFIG_ID:
+                            flow_message_id = await _send_whatsapp_payment_flow(
+                                phone=phone,
+                                user_id=user_id,
+                                plan_id=plan_id,
+                                amount=amount,
+                                plan_name=plan_name
+                            )
+
+                            if flow_message_id:
+                                flow_message = (
+                                    f"Great! You selected **{plan_name}**.\n\n"
+                                    f"Please complete the payment securely within WhatsApp. 💫\n\n"
+                                    f"After payment, send me a message to start!"
+                                )
+                                async with httpx.AsyncClient(timeout=30.0) as client:
+                                    await _send_whatsapp_message(client, phone, flow_message)
+                                await _log_to_mongo(session_id, user_id, "assistant", flow_message, "whatsapp")
+                                return {"status": "payment_flow_sent", "flow_id": flow_message_id}
+
+                        # Fallback to payment link if Flow is not configured
+                        payment_link = await _generate_payment_link(user_id, plan_number)
+                        if payment_link:
+                            link_message = (
+                                f"Great! You selected **{plan_name}**.\n\n"
+                                f"Click here to complete payment: {payment_link}\n\n"
+                                f"After payment, come back and send me a message! 💫"
+                            )
+                            async with httpx.AsyncClient(timeout=30.0) as client:
+                                await _send_whatsapp_message(client, phone, link_message)
+                            await _log_to_mongo(session_id, user_id, "assistant", link_message, "whatsapp")
+                            return {"status": "payment_link_sent", "payment_link": payment_link}
+
+            # Invalid plan number
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                await _send_whatsapp_message(client, phone, "Invalid plan number. Please select a valid plan (1, 2, 3...).")
+            return {"status": "invalid_plan", "plan_number": plan_number}
+
+    # ===================================================================
+
     # ==================== SUBSCRIPTION CHECK ====================
 
     # Check if user has valid subscription (trial or active)
@@ -1102,76 +1176,6 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
                     await _send_whatsapp_message(client, phone, trial_message)
                 await _log_to_mongo(session_id, user_id, "assistant", trial_message, "whatsapp", "text", None, nudge_level=1)
                 return {"status": "trial_activation_required", "trial_activation_link": trial_activation_link}
-
-        # User is requesting to see plans
-        if message.strip().upper() in ["PAY", "PAYMENT", "PLAN", "PLANS", "SUBSCRIBE"]:
-            # Fetch and send plan options
-            plans_message = await _get_plans_message()
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                await _send_whatsapp_message(client, phone, plans_message)
-            await _log_to_mongo(session_id, user_id, "assistant", plans_message, "whatsapp")
-            return {"status": "plans_sent", "access": access}
-
-        # Check if user is selecting a plan (replying with number 1, 2, 3, etc.)
-        if message.strip().isdigit():
-            plan_number = int(message.strip())
-
-            # First fetch plan details
-            try:
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    plans_response = await client.get(
-                        f"{SUBSCRIPTIONS_URL}/plans?active_only=true"
-                    )
-                    if plans_response.status_code == 200:
-                        plans_data = plans_response.json()
-                        plans = plans_data.get("plans", [])
-
-                        if 1 <= plan_number <= len(plans):
-                            selected_plan = plans[plan_number - 1]
-                            plan_id = selected_plan.get("planId")
-                            plan_name = selected_plan.get("name", "Plan")
-                            amount = selected_plan.get("price", 0)
-
-                            # Try to send WhatsApp Flow (in-WhatsApp payment)
-                            if WHATSAPP_FLOW_ID and WHATSAPP_PAYMENT_CONFIG_ID:
-                                flow_message_id = await _send_whatsapp_payment_flow(
-                                    phone=phone,
-                                    user_id=user_id,
-                                    plan_id=plan_id,
-                                    amount=amount,
-                                    plan_name=plan_name
-                                )
-
-                                if flow_message_id:
-                                    flow_message = (
-                                        f"Great! You selected **{plan_name}**.\n\n"
-                                        f"Please complete the payment securely within WhatsApp. 💫\n\n"
-                                        f"After payment, send me a message to start!"
-                                    )
-                                    async with httpx.AsyncClient(timeout=30.0) as client:
-                                        await _send_whatsapp_message(client, phone, flow_message)
-                                    await _log_to_mongo(session_id, user_id, "assistant", flow_message, "whatsapp")
-                                    return {"status": "payment_flow_sent", "flow_id": flow_message_id}
-
-                            # Fallback to payment link if Flow is not configured
-                            payment_link = await _generate_payment_link(user_id, plan_number)
-                            if payment_link:
-                                link_message = (
-                                    f"Great! You selected **{plan_name}**.\n\n"
-                                    f"Click here to complete payment: {payment_link}\n\n"
-                                    f"After payment, come back and send me a message! 💫"
-                                )
-                                async with httpx.AsyncClient(timeout=30.0) as client:
-                                    await _send_whatsapp_message(client, phone, link_message)
-                                await _log_to_mongo(session_id, user_id, "assistant", link_message, "whatsapp")
-                                return {"status": "payment_link_sent", "payment_link": payment_link}
-            except Exception as e:
-                logger.error(f"Error processing plan selection: {e}")
-
-            # Invalid plan number
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                await _send_whatsapp_message(client, phone, "Invalid plan number. Please select a valid plan (1, 2, 3...).")
-            return {"status": "invalid_plan", "plan_number": plan_number}
 
         # Default payment nudge message (trial expired)
         payment_message = (
