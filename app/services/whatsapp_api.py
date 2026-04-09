@@ -285,8 +285,7 @@ class WhatsAppAPI:
                     "name": "flow",
                     "parameters": {
                         "flow_id": flow_id,
-                        "flow_cta": flow_cta,
-                        "flow_update": False
+                        "flow_cta": flow_cta
                     }
                 },
                 "footer": {
