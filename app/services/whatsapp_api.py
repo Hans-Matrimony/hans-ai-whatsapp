@@ -245,8 +245,7 @@ class WhatsAppAPI:
         header: str,
         body: str,
         flow_id: str,
-        flow_cta: str = "Pay Now",
-        flow_payload: Optional[Dict] = None
+        flow_cta: str = "Pay Now"
     ) -> Optional[str]:
         """
         Send WhatsApp Flow message for in-WhatsApp payments.
@@ -257,18 +256,18 @@ class WhatsAppAPI:
             body: Body text for the message
             flow_id: Flow ID from Meta (created in Business Manager)
             flow_cta: Button text (default "Pay Now")
-            flow_payload: Optional payload data - will be BASE64 encoded
 
         Returns:
             Message ID if successful, None otherwise
 
-        Example for Payments on WhatsApp:
-            - flow_id: The Flow ID created in Meta Business Manager
-            - flow_payload: Contains payment details (will be JSON stringified and base64 encoded)
+        Note:
+            WhatsApp Flows with payment components must be pre-configured in Meta Business Manager.
+            The Flow ID is sufficient - no dynamic payload can be passed during runtime.
         """
         url = f"{self.base_url}/{self.phone_id}/messages"
 
-        # Build the flow action object - CORRECT STRUCTURE
+        # Build the flow action object - SIMPLE VERSION
+        # For payment flows, the Flow itself contains the payment configuration
         flow_action_obj = {
             "name": "flow",
             "parameters": {
@@ -276,15 +275,6 @@ class WhatsAppAPI:
                 "flow_cta": flow_cta
             }
         }
-
-        # Add payload if provided - must be BASE64 encoded JSON string
-        if flow_payload:
-            import json
-            import base64
-            # Convert payload to JSON string and then base64 encode
-            payload_json = json.dumps(flow_payload)
-            payload_b64 = base64.b64encode(payload_json.encode()).decode()
-            flow_action_obj["parameters"]["flow_payload"] = payload_b64
 
         payload = {
             "messaging_product": "whatsapp",

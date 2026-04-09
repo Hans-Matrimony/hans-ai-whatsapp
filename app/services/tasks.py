@@ -547,30 +547,18 @@ async def _send_whatsapp_payment_flow(
             access_token=WHATSAPP_ACCESS_TOKEN
         )
 
-        # Create flow payload for Razorpay Payments on WhatsApp
-        flow_payload = {
-            "payment_config_id": WHATSAPP_PAYMENT_CONFIG_ID,
-            "merchant_payment_id": f"{user_id}_{plan_id}_{int(datetime.now().timestamp())}",
-            "amount": amount,
-            "currency": "INR",
-            "metadata": {
-                "user_id": user_id,
-                "plan_id": plan_id,
-                "plan_name": plan_name
-            }
-        }
-
         # Clean phone number for WhatsApp API
         clean_phone = phone.replace("+", "")
 
         # Send the flow message
+        # Note: WhatsApp Flows with payment components must be pre-configured in Meta Business Manager
+        # The Flow itself contains the payment configuration (amount, etc.)
         message_id = await whatsapp_api.send_flow(
             to=clean_phone,
             header=f"Pay for {plan_name}",
             body=f"Complete your payment of ₹{amount // 100} for {plan_name} safely within WhatsApp.",
             flow_id=WHATSAPP_FLOW_ID,
-            flow_cta="Pay Now",
-            flow_payload=flow_payload
+            flow_cta="Pay Now"
         )
 
         if message_id:
