@@ -152,6 +152,62 @@ async def health():
     }
 
 
+@app.get("/health/whatsapp-payments")
+async def whatsapp_payments_health():
+    """
+    Health check for WhatsApp Payments (Flows API) configuration.
+    Validates that all required environment variables are set for in-WhatsApp payments.
+    """
+    config_status = {
+        "status": "unknown",
+        "configured": False,
+        "enabled": False,
+        "missing_vars": [],
+        "configured_vars": {}
+    }
+
+    # Check required WhatsApp Payments variables
+    required_vars = {
+        "WHATSAPP_PHONE_ID": os.getenv("WHATSAPP_PHONE_ID"),
+        "WHATSAPP_ACCESS_TOKEN": os.getenv("WHATSAPP_ACCESS_TOKEN"),
+        "WHATSAPP_WABA_ID": os.getenv("WHATSAPP_WABA_ID"),
+        "WHATSAPP_PAYMENT_CONFIG_ID": os.getenv("WHATSAPP_PAYMENT_CONFIG_ID"),
+        "WHATSAPP_PAYMENT_MID": os.getenv("WHATSAPP_PAYMENT_MID"),
+        "WHATSAPP_FLOW_ID": os.getenv("WHATSAPP_FLOW_ID")
+    }
+
+    missing = []
+    configured = {}
+
+    for var_name, var_value in required_vars.items():
+        if var_value:
+            # Mask sensitive values
+            if "TOKEN" in var_name or "SECRET" in var_name:
+                configured[var_name] = f"{var_value[:8]}..." if len(var_value) > 8 else "***"
+            elif "MID" in var_name:
+                configured[var_name] = f"{var_value[:4]}..." if len(var_value) > 4 else "***"
+            else:
+                configured[var_name] = var_value
+        else:
+            missing.append(var_name)
+
+    config_status["missing_vars"] = missing
+    config_status["configured_vars"] = configured
+    config_status["configured"] = len(missing) == 0
+    config_status["enabled"] = len(missing) == 0
+    config_status["status"] = "enabled" if len(missing) == 0 else "incomplete"
+
+    # Add warning if not configured
+    if len(missing) > 0:
+        config_status["warning"] = f"WhatsApp Payments (Flows) not available. Missing: {', '.join(missing)}. System will fallback to payment links."
+        config_status["fallback_mode"] = "payment_links"
+    else:
+        config_status["info"] = "WhatsApp Payments (Flows) is enabled. Users can pay within WhatsApp."
+        config_status["payment_mode"] = "in_app_flow"
+
+    return config_status
+
+
 # =============================================================================
 # Webhook Verification
 # =============================================================================
@@ -190,6 +246,17 @@ async def receive_webhook(request: Request):
         changes = entry.get("changes", [{}])[0]
         value = changes.get("value", {})
 
+        # =====================================================================
+        # NEW: Handle Payment Events from WhatsApp Flows API
+        # =====================================================================
+        if "payments" in value:
+            logger.info("[WhatsApp Payments] Payment event detected")
+            await _forward_payment_event(value)
+            return {"status": "ok"}
+
+        # =====================================================================
+        # EXISTING: Handle Messages
+        # =====================================================================
         if "messages" in value:
             for msg in value["messages"]:
                 phone = msg.get("from")
@@ -258,6 +325,35 @@ async def receive_webhook(request: Request):
     except Exception as e:
         logger.error(f"Webhook error: {e}", exc_info=True)
         return {"status": "error"}
+
+
+async def _forward_payment_event(payment_data: dict):
+    """
+    Forward payment event from Meta to subscriptions service.
+    This handles payment completion events from WhatsApp Flows API.
+    """
+    if not SUBSCRIPTIONS_URL:
+        logger.error("[WhatsApp Payments] SUBSCRIPTIONS_URL not configured")
+        return
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # Forward the payment data to subscriptions service
+            response = await client.post(
+                f"{SUBSCRIPTIONS_URL}/payments/internal/process-whatsapp-payment",
+                json=payment_data,
+                headers={"Content-Type": "application/json"}
+            )
+
+            if response.status_code == 200:
+                logger.info(f"[WhatsApp Payments] Payment event forwarded successfully")
+            else:
+                logger.error(f"[WhatsApp Payments] Failed to forward payment event: {response.status_code}")
+
+    except Exception as e:
+        logger.error(f"[WhatsApp Payments] Error forwarding payment event: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 # =============================================================================

@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     whatsapp_business_id: Optional[str] = Field(None, description="Business account ID")
     whatsapp_phone_number: str = Field(default="", description="Business phone number")
 
+    # WhatsApp Payments (Flows API) Configuration
+    whatsapp_waba_id: Optional[str] = Field(None, description="WABA ID for Payments")
+    whatsapp_payment_config_id: Optional[str] = Field(None, description="Payment Config ID from Meta")
+    whatsapp_payment_mid: Optional[str] = Field(None, description="Payment Gateway MID (Razorpay)")
+
     # OpenClaw Configuration
     openclaw_url: str = Field(..., description="OpenClaw Gateway URL")
     openclaw_gateway_token: Optional[str] = Field(None, description="Gateway auth token")

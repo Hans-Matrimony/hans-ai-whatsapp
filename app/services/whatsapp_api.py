@@ -238,3 +238,159 @@ class WhatsAppAPI:
         except Exception as e:
             logger.error(f"Error sending document: {e}")
             return None
+
+    async def send_flow(
+        self,
+        to: str,
+        header: str,
+        body: str,
+        flow_id: str,
+        flow_cta: str = "Pay Now",
+        flow_action: str = "navigate",
+        flow_payload: Optional[Dict] = None,
+        flow_json: Optional[Dict] = None
+    ) -> Optional[str]:
+        """
+        Send WhatsApp Flow message for in-WhatsApp payments.
+
+        Args:
+            to: Phone number (with or without +)
+            header: Header text for the message
+            body: Body text for the message
+            flow_id: Flow ID from Meta (created in Business Manager)
+            flow_cta: Button text (default "Pay Now")
+            flow_action: Action type ("navigate" or "data_exchange")
+            flow_payload: Optional payload data to send with the flow
+            flow_json: Optional flow JSON for dynamic flows
+
+        Returns:
+            Message ID if successful, None otherwise
+
+        Example for Payments on WhatsApp:
+            - flow_id: The Flow ID created in Meta Business Manager
+            - flow_action: "navigate" for opening payment flow
+            - flow_payload: Contains payment details (amount, currency, etc.)
+        """
+        url = f"{self.base_url}/{self.phone_id}/messages"
+
+        # Build the flow action object
+        flow_action_obj = {
+            "name": flow_action,
+            "parameters": {
+                "flow_id": flow_id
+            }
+        }
+
+        # Add payload if provided
+        if flow_payload:
+            flow_action_obj["parameters"]["payload"] = flow_payload
+
+        # Add flow JSON for dynamic flows (optional)
+        if flow_json:
+            flow_action_obj["parameters"]["flow_json"] = flow_json
+
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": to.lstrip("+"),
+            "type": "interactive",
+            "interactive": {
+                "type": "flow",
+                "header": {
+                    "type": "text",
+                    "text": header
+                },
+                "body": {
+                    "text": body
+                },
+                "action": flow_action_obj,
+                "footer": {
+                    "text": "Powered by Razorpay"
+                }
+            }
+        }
+
+        # Add CTA if action is navigate
+        if flow_action == "navigate":
+            payload["interactive"]["action"]["navigate"] = {
+                "flow_title": flow_cta,
+                "flow_cta": flow_cta
+            }
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(url, headers=self.headers, json=payload)
+
+                if response.status_code in [200, 201]:
+                    data = response.json()
+                    logger.info(f"WhatsApp Flow sent successfully: {data}")
+                    return data.get("messages", [{}])[0].get("id")
+                else:
+                    logger.error(f"WhatsApp Flow send failed: {response.status_code} - {response.text}")
+                    return None
+
+        except Exception as e:
+            logger.error(f"Error sending WhatsApp Flow: {e}")
+            return None
+
+    async def send_interactive_list(
+        self,
+        to: str,
+        header: str,
+        body: str,
+        footer: str,
+        button_text: str,
+        sections: List[Dict]
+    ) -> Optional[str]:
+        """
+        Send interactive list message (for plan selection).
+
+        Args:
+            to: Phone number (with or without +)
+            header: Header text
+            body: Body text
+            footer: Footer text
+            button_text: Button text (e.g., "Select Plan")
+            sections: List of section objects with rows
+
+        Returns:
+            Message ID if successful, None otherwise
+        """
+        url = f"{self.base_url}/{self.phone_id}/messages"
+
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": to.lstrip("+"),
+            "type": "interactive",
+            "interactive": {
+                "type": "list",
+                "header": {
+                    "type": "text",
+                    "text": header
+                },
+                "body": {
+                    "text": body
+                },
+                "footer": {
+                    "text": footer
+                },
+                "action": {
+                    "button": button_text,
+                    "sections": sections
+                }
+            }
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(url, headers=self.headers, json=payload)
+
+                if response.status_code in [200, 201]:
+                    data = response.json()
+                    return data.get("messages", [{}])[0].get("id")
+                else:
+                    logger.error(f"List message send failed: {response.status_code} - {response.text}")
+                    return None
+
+        except Exception as e:
+            logger.error(f"Error sending list message: {e}")
+            return None

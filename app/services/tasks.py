@@ -13,7 +13,9 @@ from typing import Optional, Tuple, List
 from pathlib import Path
 
 import httpx
+from pymongo import MongoClient
 from app.services.celery_app import celery_app
+from app.services.message_limiter import MessageLimiter
 
 # Add skills directory to path for audio processor
 skills_path = os.path.join(os.path.dirname(__file__), '../../skills')
@@ -34,6 +36,12 @@ MEM0_URL = os.getenv("MEM0_URL", "https://rg4g0gkk0wwkk4cc00g4sg0c.api.hansastro
 # Subscription Service Configuration
 SUBSCRIPTIONS_URL = os.getenv("SUBSCRIPTIONS_URL")
 SUBSCRIPTION_TEST_NUMBER = os.getenv("SUBSCRIPTION_TEST_NUMBER", "9760347653")
+
+# WhatsApp Payments Configuration (Flows API)
+WHATSAPP_WABA_ID = os.getenv("WHATSAPP_WABA_ID")
+WHATSAPP_PAYMENT_CONFIG_ID = os.getenv("WHATSAPP_PAYMENT_CONFIG_ID")
+WHATSAPP_PAYMENT_MID = os.getenv("WHATSAPP_PAYMENT_MID")
+WHATSAPP_FLOW_ID = os.getenv("WHATSAPP_FLOW_ID")  # Flow ID from Meta Business Manager
 
 # Testing mode: Only send proactive nudges to this number (None = send to all users)
 PROACTIVE_NUDGE_TEST_NUMBER = os.getenv("PROACTIVE_NUDGE_TEST_NUMBER", "+919760347653")
@@ -490,6 +498,80 @@ async def _generate_trial_activation_link(user_id: str) -> str:
 
     except Exception as e:
         logger.error(f"Error generating trial activation link: {e}")
+        return None
+
+
+async def _send_whatsapp_payment_flow(
+    phone: str,
+    user_id: str,
+    plan_id: str,
+    amount: int,
+    plan_name: str
+) -> Optional[str]:
+    """
+    Send WhatsApp Flow for in-WhatsApp payment using Razorpay Payments on WhatsApp.
+
+    Args:
+        phone: User's phone number
+        user_id: User ID
+        plan_id: Plan ID
+        amount: Amount in paise (e.g., 10000 for INR 100)
+        plan_name: Plan name
+
+    Returns:
+        Message ID if successful, None otherwise
+    """
+    if not all([WHATSAPP_PHONE_ID, WHATSAPP_ACCESS_TOKEN, WHATSAPP_FLOW_ID]):
+        logger.error("[WhatsApp Flow] Required configuration missing. Falling back to payment link.")
+        return None
+
+    try:
+        # Import here to avoid circular dependency
+        from app.services.whatsapp_api import WhatsAppAPI
+
+        whatsapp_api = WhatsAppAPI(
+            phone_id=WHATSAPP_PHONE_ID,
+            access_token=WHATSAPP_ACCESS_TOKEN
+        )
+
+        # Create flow payload for Razorpay Payments on WhatsApp
+        flow_payload = {
+            "payment_config_id": WHATSAPP_PAYMENT_CONFIG_ID,
+            "merchant_payment_id": f"{user_id}_{plan_id}_{int(datetime.now().timestamp())}",
+            "amount": amount,
+            "currency": "INR",
+            "metadata": {
+                "user_id": user_id,
+                "plan_id": plan_id,
+                "plan_name": plan_name
+            }
+        }
+
+        # Clean phone number for WhatsApp API
+        clean_phone = phone.replace("+", "")
+
+        # Send the flow message
+        message_id = await whatsapp_api.send_flow(
+            to=clean_phone,
+            header=f"Pay for {plan_name}",
+            body=f"Complete your payment of ₹{amount // 100} for {plan_name} safely within WhatsApp.",
+            flow_id=WHATSAPP_FLOW_ID,
+            flow_cta="Pay Now",
+            flow_action="navigate",
+            flow_payload=flow_payload
+        )
+
+        if message_id:
+            logger.info(f"[WhatsApp Flow] Payment flow sent successfully: {message_id}")
+            return message_id
+        else:
+            logger.error("[WhatsApp Flow] Failed to send payment flow")
+            return None
+
+    except Exception as e:
+        logger.error(f"[WhatsApp Flow] Error sending payment flow: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 
@@ -984,7 +1066,29 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
             # New user - Needs to pay ₹1 to activate 7-day trial
             logger.info(f"[Subscription] New user - requires ₹1 trial activation: {phone}")
 
-            # Generate ₹1 trial activation payment link
+            # Try to send WhatsApp Flow for trial activation (in-WhatsApp payment)
+            if WHATSAPP_FLOW_ID and WHATSAPP_PAYMENT_CONFIG_ID:
+                flow_message_id = await _send_whatsapp_payment_flow(
+                    phone=phone,
+                    user_id=user_id,
+                    plan_id="trial_activation",
+                    amount=100,  # ₹1 in paise
+                    plan_name="7-Day Trial Activation"
+                )
+
+                if flow_message_id:
+                    trial_message = (
+                        "👋 Welcome to Astrofriend!\n\n"
+                        "To activate your **7-day FREE trial**, please pay ₹1 (verification fee).\n\n"
+                        "Complete the payment securely within WhatsApp. 💫\n\n"
+                        "After payment, send me a message to start!"
+                    )
+                    async with httpx.AsyncClient(timeout=30.0) as client:
+                        await _send_whatsapp_message(client, phone, trial_message)
+                    await _log_to_mongo(session_id, user_id, "assistant", trial_message, "whatsapp", "text", None, nudge_level=1)
+                    return {"status": "trial_activation_flow_sent", "flow_id": flow_message_id}
+
+            # Fallback to payment link if Flow is not configured
             trial_activation_link = await _generate_trial_activation_link(user_id)
 
             if trial_activation_link:
@@ -1011,17 +1115,63 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
         # Check if user is selecting a plan (replying with number 1, 2, 3, etc.)
         if message.strip().isdigit():
             plan_number = int(message.strip())
-            payment_link = await _generate_payment_link(user_id, plan_number)
-            if payment_link:
-                link_message = (
-                    f"Great! You selected Plan {plan_number}.\n\n"
-                    f"Click here to complete payment: {payment_link}\n\n"
-                    f"After payment, come back and send me a message! 💫"
-                )
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    await _send_whatsapp_message(client, phone, link_message)
-                await _log_to_mongo(session_id, user_id, "assistant", link_message, "whatsapp")
-                return {"status": "payment_link_sent", "payment_link": payment_link}
+
+            # First fetch plan details
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    plans_response = await client.get(
+                        f"{SUBSCRIPTIONS_URL}/plans?active_only=true"
+                    )
+                    if plans_response.status_code == 200:
+                        plans_data = plans_response.json()
+                        plans = plans_data.get("plans", [])
+
+                        if 1 <= plan_number <= len(plans):
+                            selected_plan = plans[plan_number - 1]
+                            plan_id = selected_plan.get("planId")
+                            plan_name = selected_plan.get("name", "Plan")
+                            amount = selected_plan.get("price", 0)
+
+                            # Try to send WhatsApp Flow (in-WhatsApp payment)
+                            if WHATSAPP_FLOW_ID and WHATSAPP_PAYMENT_CONFIG_ID:
+                                flow_message_id = await _send_whatsapp_payment_flow(
+                                    phone=phone,
+                                    user_id=user_id,
+                                    plan_id=plan_id,
+                                    amount=amount,
+                                    plan_name=plan_name
+                                )
+
+                                if flow_message_id:
+                                    flow_message = (
+                                        f"Great! You selected **{plan_name}**.\n\n"
+                                        f"Please complete the payment securely within WhatsApp. 💫\n\n"
+                                        f"After payment, send me a message to start!"
+                                    )
+                                    async with httpx.AsyncClient(timeout=30.0) as client:
+                                        await _send_whatsapp_message(client, phone, flow_message)
+                                    await _log_to_mongo(session_id, user_id, "assistant", flow_message, "whatsapp")
+                                    return {"status": "payment_flow_sent", "flow_id": flow_message_id}
+
+                            # Fallback to payment link if Flow is not configured
+                            payment_link = await _generate_payment_link(user_id, plan_number)
+                            if payment_link:
+                                link_message = (
+                                    f"Great! You selected **{plan_name}**.\n\n"
+                                    f"Click here to complete payment: {payment_link}\n\n"
+                                    f"After payment, come back and send me a message! 💫"
+                                )
+                                async with httpx.AsyncClient(timeout=30.0) as client:
+                                    await _send_whatsapp_message(client, phone, link_message)
+                                await _log_to_mongo(session_id, user_id, "assistant", link_message, "whatsapp")
+                                return {"status": "payment_link_sent", "payment_link": payment_link}
+            except Exception as e:
+                logger.error(f"Error processing plan selection: {e}")
+
+            # Invalid plan number
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                await _send_whatsapp_message(client, phone, "Invalid plan number. Please select a valid plan (1, 2, 3...).")
+            return {"status": "invalid_plan", "plan_number": plan_number}
 
         # Default payment nudge message (trial expired)
         payment_message = (
@@ -1051,6 +1201,53 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
     access_type = access.get("access", "unknown")
     if access_type != "trial" or access.get("skip_reason"):
         logger.info(f"[Subscription] {phone} has access: {access_type} (reason: {access.get('skip_reason', 'valid_access')})")
+
+    # ==================== MESSAGE LIMIT CHECK ====================
+    # Check message limit BEFORE processing with OpenClaw
+    # Only applies if subscription check passed (user has access)
+
+    try:
+        # Initialize MongoDB client for message limiter
+        mongo_client = MongoClient(MONGO_LOGGER_URL) if MONGO_LOGGER_URL else None
+
+        if mongo_client:
+            message_limiter = MessageLimiter(mongo_client)
+            limit_check = message_limiter.check_message_limit(user_id)
+
+            # Log limit check
+            logger.info(f"[Message Limiter] User: {user_id}, Allowed: {limit_check.get('allowed')}, Phase: {limit_check.get('phase')}, Messages Remaining: {limit_check.get('messagesRemaining')}")
+
+            # If paywall not enabled for this user, skip check (existing users)
+            if not limit_check.get("paywallDisabled"):
+                # Check if user has hit limit
+                if not limit_check.get("allowed"):
+                    # User has hit limit - send paywall message and block
+                    paywall_message = limit_check.get("message")
+                    async with httpx.AsyncClient(timeout=30.0) as client:
+                        await _send_whatsapp_message(client, phone, paywall_message)
+                    await _log_to_mongo(session_id, user_id, "assistant", paywall_message, "whatsapp", "text", None, nudge_level=1)
+                    logger.warning(f"[Message Limiter] User {user_id} hit message limit, blocking message")
+                    return {"status": "blocked", "reason": "message_limit", "limit_check": limit_check}
+
+                # Check if we should show paywall message (soft paywall at message 40)
+                elif limit_check.get("showPaywall"):
+                    paywall_type = limit_check.get("paywallType")
+                    if paywall_type == "soft":
+                        # Show soft paywall but still allow message
+                        paywall_message = limit_check.get("message")
+                        message_limiter.mark_paywall_shown(user_id)
+                        # Send paywall message first, then continue to process normally
+                        async with httpx.AsyncClient(timeout=30.0) as client:
+                            await _send_whatsapp_message(client, phone, paywall_message)
+                        await _log_to_mongo(session_id, user_id, "assistant", paywall_message, "whatsapp", "text", None, nudge_level=1)
+                        logger.info(f"[Message Limiter] Soft paywall shown to user {user_id}, continuing message processing")
+                        # Continue to process the actual message below...
+
+    except Exception as e:
+        logger.error(f"[Message Limiter] Error checking message limit: {e}")
+        # On error, continue with message processing (fail open)
+
+    # ============================================================
 
     if not OPENCLAW_URL:
         logger.warning("OPENCLAW_URL not set")
@@ -1409,6 +1606,20 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
                     logger.error(f"Error processing DALL-E URL: {e}", exc_info=True)
 
         await _log_to_mongo(session_id, user_id, "assistant", clean_reply or reply, "whatsapp")
+
+        # ==================== INCREMENT MESSAGE COUNT ====================
+        # Increment message count AFTER successful message processing
+        try:
+            mongo_client = MongoClient(MONGO_LOGGER_URL) if MONGO_LOGGER_URL else None
+            if mongo_client:
+                message_limiter = MessageLimiter(mongo_client)
+                result = message_limiter.increment_message_count(user_id)
+                logger.info(f"[Message Limiter] Incremented count for {user_id}: {result.get('messageCount', 0)} total messages")
+        except Exception as e:
+            logger.error(f"[Message Limiter] Error incrementing message count: {e}")
+            # Don't fail the message if count increment fails
+        # ===============================================================
+
         return {"status": "sent", "message_id": message_id}
 
 
