@@ -246,8 +246,7 @@ class WhatsAppAPI:
         body: str,
         flow_id: str,
         flow_cta: str = "Pay Now",
-        flow_payload: Optional[Dict] = None,
-        flow_json: Optional[Dict] = None
+        flow_payload: Optional[Dict] = None
     ) -> Optional[str]:
         """
         Send WhatsApp Flow message for in-WhatsApp payments.
@@ -258,15 +257,14 @@ class WhatsAppAPI:
             body: Body text for the message
             flow_id: Flow ID from Meta (created in Business Manager)
             flow_cta: Button text (default "Pay Now")
-            flow_payload: Optional payload data to send with the flow
-            flow_json: Optional flow JSON for dynamic flows
+            flow_payload: Optional payload data - will be BASE64 encoded
 
         Returns:
             Message ID if successful, None otherwise
 
         Example for Payments on WhatsApp:
             - flow_id: The Flow ID created in Meta Business Manager
-            - flow_payload: Contains payment details (amount, currency, etc.)
+            - flow_payload: Contains payment details (will be JSON stringified and base64 encoded)
         """
         url = f"{self.base_url}/{self.phone_id}/messages"
 
@@ -279,13 +277,14 @@ class WhatsAppAPI:
             }
         }
 
-        # Add payload if provided
+        # Add payload if provided - must be BASE64 encoded JSON string
         if flow_payload:
-            flow_action_obj["parameters"]["flow_payload"] = flow_payload
-
-        # Add flow JSON for dynamic flows (optional)
-        if flow_json:
-            flow_action_obj["parameters"]["flow_json"] = flow_json
+            import json
+            import base64
+            # Convert payload to JSON string and then base64 encode
+            payload_json = json.dumps(flow_payload)
+            payload_b64 = base64.b64encode(payload_json.encode()).decode()
+            flow_action_obj["parameters"]["flow_payload"] = payload_b64
 
         payload = {
             "messaging_product": "whatsapp",
