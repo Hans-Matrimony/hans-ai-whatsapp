@@ -521,9 +521,22 @@ async def _send_whatsapp_payment_flow(
     Returns:
         Message ID if successful, None otherwise
     """
-    if not all([WHATSAPP_PHONE_ID, WHATSAPP_ACCESS_TOKEN, WHATSAPP_FLOW_ID]):
-        logger.error("[WhatsApp Flow] Required configuration missing. Falling back to payment link.")
+    # Check all required variables for WhatsApp Flow
+    required_vars = {
+        "WHATSAPP_PHONE_ID": WHATSAPP_PHONE_ID,
+        "WHATSAPP_ACCESS_TOKEN": WHATSAPP_ACCESS_TOKEN,
+        "WHATSAPP_FLOW_ID": WHATSAPP_FLOW_ID,
+        "WHATSAPP_PAYMENT_CONFIG_ID": WHATSAPP_PAYMENT_CONFIG_ID
+    }
+
+    missing_vars = [var_name for var_name, var_value in required_vars.items() if not var_value]
+
+    if missing_vars:
+        logger.error(f"[WhatsApp Flow] Missing required variables: {missing_vars}. Falling back to payment link.")
+        logger.error(f"[WhatsApp Flow] Available vars: {list(required_vars.keys())}")
         return None
+
+    logger.info(f"[WhatsApp Flow] All required variables present. Flow ID: {WHATSAPP_FLOW_ID}")
 
     try:
         # Import here to avoid circular dependency
