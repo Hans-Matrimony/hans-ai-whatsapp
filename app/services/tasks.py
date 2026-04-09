@@ -570,7 +570,6 @@ async def _send_whatsapp_payment_flow(
             body=f"Complete your payment of ₹{amount // 100} for {plan_name} safely within WhatsApp.",
             flow_id=WHATSAPP_FLOW_ID,
             flow_cta="Pay Now",
-            flow_action="navigate",
             flow_payload=flow_payload
         )
 

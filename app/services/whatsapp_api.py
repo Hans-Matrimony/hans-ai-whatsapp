@@ -246,7 +246,6 @@ class WhatsAppAPI:
         body: str,
         flow_id: str,
         flow_cta: str = "Pay Now",
-        flow_action: str = "navigate",
         flow_payload: Optional[Dict] = None,
         flow_json: Optional[Dict] = None
     ) -> Optional[str]:
@@ -259,7 +258,6 @@ class WhatsAppAPI:
             body: Body text for the message
             flow_id: Flow ID from Meta (created in Business Manager)
             flow_cta: Button text (default "Pay Now")
-            flow_action: Action type ("navigate" or "data_exchange")
             flow_payload: Optional payload data to send with the flow
             flow_json: Optional flow JSON for dynamic flows
 
@@ -268,22 +266,22 @@ class WhatsAppAPI:
 
         Example for Payments on WhatsApp:
             - flow_id: The Flow ID created in Meta Business Manager
-            - flow_action: "navigate" for opening payment flow
             - flow_payload: Contains payment details (amount, currency, etc.)
         """
         url = f"{self.base_url}/{self.phone_id}/messages"
 
-        # Build the flow action object
+        # Build the flow action object - CORRECT STRUCTURE
         flow_action_obj = {
-            "name": flow_action,
+            "name": "flow",
             "parameters": {
-                "flow_id": flow_id
+                "flow_id": flow_id,
+                "flow_cta": flow_cta
             }
         }
 
         # Add payload if provided
         if flow_payload:
-            flow_action_obj["parameters"]["payload"] = flow_payload
+            flow_action_obj["parameters"]["flow_payload"] = flow_payload
 
         # Add flow JSON for dynamic flows (optional)
         if flow_json:
@@ -308,13 +306,6 @@ class WhatsAppAPI:
                 }
             }
         }
-
-        # Add CTA if action is navigate
-        if flow_action == "navigate":
-            payload["interactive"]["action"]["navigate"] = {
-                "flow_title": flow_cta,
-                "flow_cta": flow_cta
-            }
 
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
