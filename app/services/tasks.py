@@ -1117,10 +1117,13 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
                             await _log_to_mongo(session_id, user_id, "assistant", link_message, "whatsapp")
                             return {"status": "payment_link_sent", "payment_link": payment_link}
 
-            # Invalid plan number
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                await _send_whatsapp_message(client, phone, "Invalid plan number. Please select a valid plan (1, 2, 3...).")
-            return {"status": "invalid_plan", "plan_number": plan_number}
+        except Exception as e:
+            logger.error(f"Error processing plan selection: {e}")
+
+        # Invalid plan number
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            await _send_whatsapp_message(client, phone, "Invalid plan number. Please select a valid plan (1, 2, 3...).")
+        return {"status": "invalid_plan", "plan_number": plan_number}
 
     # ===================================================================
 
