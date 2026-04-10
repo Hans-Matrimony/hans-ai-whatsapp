@@ -40,8 +40,8 @@ class KundliPDFGenerator:
         # Title style
         self.styles.add(ParagraphStyle(
             name='TitleStyle',
-            fontSize=24,
-            textColor=colors.darkblue,
+            fontSize=28,
+            textColor=colors.whitesmoke,
             alignment=TA_CENTER,
             spaceAfter=20,
             fontName='Helvetica-Bold'
@@ -50,8 +50,8 @@ class KundliPDFGenerator:
         # Section header
         self.styles.add(ParagraphStyle(
             name='SectionHeader',
-            fontSize=16,
-            textColor=colors.darkblue,
+            fontSize=18,
+            textColor=colors.gold,
             spaceAfter=12,
             spaceBefore=20,
             fontName='Helvetica-Bold'
@@ -61,7 +61,7 @@ class KundliPDFGenerator:
         self.styles.add(ParagraphStyle(
             name='SubsectionHeader',
             fontSize=14,
-            textColor=colors.darkblue,
+            textColor=colors.gold,
             spaceAfter=10,
             spaceBefore=15,
             fontName='Helvetica-Bold'
@@ -70,6 +70,7 @@ class KundliPDFGenerator:
         # Update existing BodyText style instead of adding it again
         if 'BodyText' in self.styles:
             self.styles['BodyText'].fontSize = 11
+            self.styles['BodyText'].textColor = colors.whitesmoke
             self.styles['BodyText'].alignment = TA_LEFT
             self.styles['BodyText'].spaceAfter = 8
             self.styles['BodyText'].fontName = 'Helvetica'
@@ -79,6 +80,7 @@ class KundliPDFGenerator:
         self.styles.add(ParagraphStyle(
             name='BoldText',
             fontSize=11,
+            textColor=colors.whitesmoke,
             alignment=TA_LEFT,
             spaceAfter=8,
             fontName='Helvetica-Bold'
@@ -87,11 +89,51 @@ class KundliPDFGenerator:
     def _setup_fonts(self):
         """Setup custom fonts if available"""
         try:
-            # Try to register a better font if available
-            # For now, we'll use standard Helvetica
-            pass
+            font_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "fonts", "NotoSansDevanagari-Regular.ttf")
+            if os.path.exists(font_path):
+                pdfmetrics.registerFont(TTFont('Devanagari', font_path))
+                logger.info("[PDF] Registered Devanagari font.")
+            else:
+                logger.warning(f"[PDF] Font not found at {font_path}")
         except Exception as e:
             logger.warning(f"Could not register custom fonts: {e}")
+
+    def _draw_background(self, canvas, doc):
+        """Draw custom background and border for each page"""
+        canvas.saveState()
+        
+        # Draw background color (deep maroon red)
+        bg_color = colors.HexColor('#8b0000')
+        canvas.setFillColor(bg_color)
+        canvas.rect(0, 0, doc.pagesize[0], doc.pagesize[1], fill=1, stroke=0)
+        
+        # Draw Om bordered pattern
+        try:
+            canvas.setFont('Devanagari', 14)
+            has_font = True
+        except KeyError:
+            canvas.setFont('Helvetica', 14)
+            has_font = False
+            
+        canvas.setFillColor(colors.gold)
+        om_char = "\u0950" if has_font else "*"
+        
+        width = doc.pagesize[0]
+        height = doc.pagesize[1]
+        margin = 35
+        
+        step = 25
+        # Top and bottom borders
+        for x in range(margin + 5, int(width - margin) - 10, step):
+            canvas.drawString(x, height - margin + 8, om_char)
+            canvas.drawString(x, margin - 18, om_char)
+            
+        # Left and right borders
+        for y in range(margin - 10, int(height - margin) + 15, step):
+            canvas.drawString(margin - 20, y, om_char)
+            canvas.drawString(width - margin + 8, y, om_char)
+            
+        canvas.restoreState()
 
     def generate_pdf(
         self,
@@ -155,7 +197,11 @@ class KundliPDFGenerator:
             content.extend(self._create_remedies_section(remedies))
 
             # Build PDF
-            doc.build(content)
+            doc.build(
+                content,
+                onFirstPage=self._draw_background,
+                onLaterPages=self._draw_background
+            )
 
             # Get PDF bytes
             pdf_bytes = buffer.getvalue()
@@ -183,7 +229,7 @@ class KundliPDFGenerator:
             ParagraphStyle(
                 'Subtitle',
                 fontSize=14,
-                textColor=colors.gray,
+                textColor=colors.gold,
                 alignment=TA_CENTER,
                 spaceAfter=30
             )
@@ -199,16 +245,19 @@ class KundliPDFGenerator:
 
         details_table = Table(details, colWidths=[2*inch, 4*inch])
         details_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (0, -1), colors.lightblue),
-            ('TEXTCOLOR', (0, 0), (0, -1), colors.black),
+            ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#600000')),
+            ('TEXTCOLOR', (0, 0), (0, -1), colors.gold),
+            ('BACKGROUND', (1, 0), (-1, -1), colors.HexColor('#a00000')),
+            ('TEXTCOLOR', (1, 0), (-1, -1), colors.whitesmoke),
             ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
+            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('FONTNAME', (1, 0), (-1, -1), 'Helvetica'),
             ('FONTSIZE', (0, 0), (-1, -1), 12),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
             ('TOPPADDING', (0, 0), (-1, -1), 12),
             ('LEFTPADDING', (0, 0), (-1, -1), 12),
             ('RIGHTPADDING', (0, 0), (-1, -1), 12),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+            ('GRID', (0, 0), (-1, -1), 1, colors.gold)
         ]))
 
         content.append(details_table)
@@ -238,7 +287,7 @@ class KundliPDFGenerator:
         content.append(Paragraph(disclaimer, ParagraphStyle(
             'Disclaimer',
             fontSize=9,
-            textColor=colors.gray,
+            textColor=colors.whitesmoke,
             alignment=TA_CENTER
         )))
 
@@ -326,15 +375,16 @@ class KundliPDFGenerator:
         # Create table
         table = Table(table_data, colWidths=[1.2*inch, 1.2*inch, 0.8*inch, 1.2*inch, 1.6*inch])
         table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.gold),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.darkred),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
             ('FONTSIZE', (0, 0), (-1, -1), 10),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
             ('TOPPADDING', (0, 0), (-1, -1), 10),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black),
-            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey])
+            ('GRID', (0, 0), (-1, -1), 1, colors.gold),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.HexColor('#a00000'), colors.HexColor('#8b0000')]),
+            ('TEXTCOLOR', (0, 1), (-1, -1), colors.whitesmoke)
         ]))
 
         content.append(table)
