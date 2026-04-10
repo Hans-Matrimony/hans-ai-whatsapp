@@ -284,6 +284,7 @@ class WhatsAppAPI:
                 "action": {
                     "name": "flow",
                     "parameters": {
+                        "flow_message_version": "3",
                         "flow_id": flow_id,
                         "flow_cta": flow_cta
                     }
