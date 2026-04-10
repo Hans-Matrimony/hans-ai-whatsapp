@@ -410,9 +410,11 @@ class WhatsAppAPI:
         payment_config_id: str
     ) -> Optional[str]:
         """
-        Send exactly formatted WhatsApp Indian Native Payment (order_details) checkout via Gateway (Razorpay/PayU)
+        Send WhatsApp Indian Native Payment (order_details) checkout via Razorpay.
+        Uses v21.0 API which fully supports order_details for India payments.
         """
-        url = f"{self.base_url}/{self.phone_id}/messages"
+        # Use v21.0 specifically for payments - v18.0 may not support order_details
+        url = f"https://graph.facebook.com/v21.0/{self.phone_id}/messages"
 
         payload = {
             "messaging_product": "whatsapp",
@@ -436,7 +438,6 @@ class WhatsAppAPI:
                     "parameters": {
                         "reference_id": reference_id,
                         "type": "digital-goods",
-                        "payment_type": "payment_gateway",
                         "payment_configuration": payment_config_id,
                         "currency": "INR",
                         "total_amount": {
@@ -469,7 +470,10 @@ class WhatsAppAPI:
         }
 
         try:
-            logger.info(f"[DEBUG] Sending WhatsApp Native Payment with Reference: {reference_id}")
+            import json
+            logger.info(f"[NativePayment] Full payload: {json.dumps(payload, indent=2)}")
+            logger.info(f"[NativePayment] URL: {url}")
+
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(url, headers=self.headers, json=payload)
 
