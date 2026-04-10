@@ -675,38 +675,23 @@ async def _send_whatsapp_payment_flow(
     Returns:
         Message ID if successful, None otherwise
     """
-    # Check required variables for WhatsApp Flow
-    # NOTE: Payment config (PAYMENT_CONFIG_ID, PAYMENT_MID) should be pre-configured in Meta Business Manager
-    # They are NOT sent in the API request, so we don't check for them here
+    # Check required variables for WhatsApp Native Payments
     required_vars = {
         "WHATSAPP_PHONE_ID": WHATSAPP_PHONE_ID,
         "WHATSAPP_ACCESS_TOKEN": WHATSAPP_ACCESS_TOKEN,
-        "WHATSAPP_FLOW_ID": WHATSAPP_FLOW_ID
+        "WHATSAPP_PAYMENT_CONFIG_ID": WHATSAPP_PAYMENT_CONFIG_ID
     }
 
     missing_vars = [var_name for var_name, var_value in required_vars.items() if not var_value]
 
     if missing_vars:
-        logger.error(f"[WhatsApp Flow] Missing required variables: {missing_vars}. Falling back to payment link.")
-        logger.error(f"[WhatsApp Flow] WHATSAPP_PHONE_ID: {'✓' if WHATSAPP_PHONE_ID else '✗'}")
-        logger.error(f"[WhatsApp Flow] WHATSAPP_ACCESS_TOKEN: {'✓' if WHATSAPP_ACCESS_TOKEN else '✗'}")
-        logger.error(f"[WhatsApp Flow] WHATSAPP_FLOW_ID: {'✓ ' + WHATSAPP_FLOW_ID if WHATSAPP_FLOW_ID else '✗'}")
+        logger.error(f"[WhatsApp Payment] Missing required variables: {missing_vars}. Falling back to payment link.")
         return None
 
-    # Log payment config status (not required for API, but should be configured in Meta)
-    if WHATSAPP_PAYMENT_CONFIG_ID:
-        logger.info(f"[WhatsApp Flow] Payment Config ID '{WHATSAPP_PAYMENT_CONFIG_ID}' found (should be pre-configured in Flow)")
-    else:
-        logger.warning(f"[WhatsApp Flow] WHATSAPP_PAYMENT_CONFIG_ID not set - make sure payment is configured in Meta Business Manager!")
-
-    if WHATSAPP_PAYMENT_MID:
-        logger.info(f"[WhatsApp Flow] Payment MID '{WHATSAPP_PAYMENT_MID[:10]}...' found (should be pre-configured in Flow)")
-    else:
-        logger.warning(f"[WhatsApp Flow] WHATSAPP_PAYMENT_MID not set - make sure payment is configured in Meta Business Manager!")
-
-    logger.info(f"[WhatsApp Flow] ✓ All required variables present. Flow ID: {WHATSAPP_FLOW_ID}")
+    logger.info(f"[WhatsApp Payment] ✓ All required variables present. Config ID: {WHATSAPP_PAYMENT_CONFIG_ID}")
 
     try:
+        import time
         # Import here to avoid circular dependency
         from app.services.whatsapp_api import WhatsAppAPI
 
@@ -715,31 +700,29 @@ async def _send_whatsapp_payment_flow(
             access_token=WHATSAPP_ACCESS_TOKEN
         )
 
-        # Clean phone number for WhatsApp API
         clean_phone = phone.replace("+", "")
+        # Generate unique order id required by Razorpay Native implementation
+        reference_id = f"order_{clean_phone}_{int(time.time())}"
 
-        # Send the flow message
-        # Note: WhatsApp Flows with payment components must be pre-configured in Meta Business Manager
-        # The Flow itself contains the payment configuration (amount, etc.)
-        message_id = await whatsapp_api.send_flow(
+        message_id = await whatsapp_api.send_native_payment(
             to=clean_phone,
             header=f"Pay for {plan_name}",
-            body=f"Complete your payment of ₹{amount // 100} for {plan_name} safely within WhatsApp.",
-            flow_id=WHATSAPP_FLOW_ID,
-            flow_cta="Pay Now",
-            payment_config_id=WHATSAPP_PAYMENT_CONFIG_ID,
-            payment_mid=WHATSAPP_PAYMENT_MID
+            body=f"Complete your payment of ₹{amount // 100} for {plan_name} securely via Razorpay in WhatsApp.",
+            plan_name=plan_name,
+            amount_paise=amount,
+            reference_id=reference_id,
+            payment_config_id=WHATSAPP_PAYMENT_CONFIG_ID
         )
 
         if message_id:
-            logger.info(f"[WhatsApp Flow] Payment flow sent successfully: {message_id}")
+            logger.info(f"[WhatsApp Payment] Native checkout sent successfully: {message_id}")
             return message_id
         else:
-            logger.error("[WhatsApp Flow] Failed to send payment flow")
+            logger.error("[WhatsApp Payment] Failed to send native checkout")
             return None
 
     except Exception as e:
-        logger.error(f"[WhatsApp Flow] Error sending payment flow: {e}")
+        logger.error(f"[WhatsApp Payment] Error sending payment flow: {e}")
         import traceback
         traceback.print_exc()
         return None

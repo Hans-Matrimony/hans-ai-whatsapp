@@ -398,3 +398,87 @@ class WhatsAppAPI:
         except Exception as e:
             logger.error(f"Error sending list message: {e}")
             return None
+
+    async def send_native_payment(
+        self,
+        to: str,
+        header: str,
+        body: str,
+        plan_name: str,
+        amount_paise: int,
+        reference_id: str,
+        payment_config_id: str
+    ) -> Optional[str]:
+        """
+        Send exactly formatted WhatsApp Indian Native Payment (order_details) checkout via Gateway (Razorpay/PayU)
+        """
+        url = f"{self.base_url}/{self.phone_id}/messages"
+
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": to.lstrip("+"),
+            "type": "interactive",
+            "interactive": {
+                "type": "order_details",
+                "header": {
+                    "type": "text",
+                    "text": header
+                },
+                "body": {
+                    "text": body
+                },
+                "footer": {
+                    "text": "Powered by Razorpay"
+                },
+                "action": {
+                    "name": "review_and_pay",
+                    "parameters": {
+                        "reference_id": reference_id,
+                        "type": "digital-goods",
+                        "payment_settings": [{
+                            "type": "payment_gateway",
+                            "payment_gateway": {
+                                "type": "razorpay",
+                                "configuration_name": payment_config_id,
+                                "razorpay": {
+                                    "receipt": reference_id
+                                }
+                            }
+                        }],
+                        "currency": "INR",
+                        "total_amount": {
+                            "value": amount_paise,
+                            "offset": 100
+                        },
+                        "order": {
+                            "status": "pending",
+                            "items": [{
+                                "name": plan_name,
+                                "amount": {
+                                    "value": amount_paise,
+                                    "offset": 100
+                                },
+                                "quantity": 1
+                            }]
+                        }
+                    }
+                }
+            }
+        }
+
+        try:
+            logger.info(f"[DEBUG] Sending WhatsApp Native Payment with Reference: {reference_id}")
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(url, headers=self.headers, json=payload)
+
+                if response.status_code in [200, 201]:
+                    data = response.json()
+                    logger.info(f"WhatsApp Native Payment Checkout sent successfully: {data}")
+                    return data.get("messages", [{}])[0].get("id")
+                else:
+                    logger.error(f"WhatsApp Native Payment send failed: {response.status_code} - {response.text}")
+                    return None
+
+        except Exception as e:
+            logger.error(f"Error sending WhatsApp Native Payment: {e}")
+            return None
