@@ -416,6 +416,7 @@ class WhatsAppAPI:
 
         payload = {
             "messaging_product": "whatsapp",
+            "recipient_type": "individual",
             "to": to.lstrip("+"),
             "type": "interactive",
             "interactive": {
@@ -435,6 +436,7 @@ class WhatsAppAPI:
                     "parameters": {
                         "reference_id": reference_id,
                         "type": "digital-goods",
+                        "payment_type": "payment_gateway",
                         "payment_configuration": payment_config_id,
                         "currency": "INR",
                         "total_amount": {
@@ -451,6 +453,10 @@ class WhatsAppAPI:
                                 "retailer_id": reference_id,
                                 "name": plan_name,
                                 "amount": {
+                                    "value": amount_paise,
+                                    "offset": 100
+                                },
+                                "sale_amount": {
                                     "value": amount_paise,
                                     "offset": 100
                                 },
