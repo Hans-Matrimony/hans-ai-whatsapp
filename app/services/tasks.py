@@ -721,7 +721,6 @@ async def _send_whatsapp_payment_flow(
         # Send the flow message
         # Note: WhatsApp Flows with payment components must be pre-configured in Meta Business Manager
         # The Flow itself contains the payment configuration (amount, etc.)
-        # We pass plan data via flow_data for the Flow to read
         message_id = await whatsapp_api.send_flow(
             to=clean_phone,
             header=f"Pay for {plan_name}",
@@ -729,13 +728,7 @@ async def _send_whatsapp_payment_flow(
             flow_id=WHATSAPP_FLOW_ID,
             flow_cta="Pay Now",
             payment_config_id=WHATSAPP_PAYMENT_CONFIG_ID,
-            payment_mid=WHATSAPP_PAYMENT_MID,
-            flow_data={
-                "plan_id": plan_id,
-                "plan_name": plan_name,
-                "amount": str(amount // 100),
-                "currency": "INR"
-            }
+            payment_mid=WHATSAPP_PAYMENT_MID
         )
 
         if message_id:
