@@ -23,9 +23,20 @@ def init_user_metadata_service(mongo_url: str):
     Initialize the user metadata service with MongoDB connection.
 
     Args:
-        mongo_url: MongoDB connection string
+        mongo_url: MongoDB connection string (must start with mongodb:// or mongodb+srv://)
     """
     global MONGO_LOGGER_URL, _db, _users_collection
+
+    # Validate URL format
+    if not mongo_url or not isinstance(mongo_url, str):
+        logger.error("[User Metadata] Invalid MongoDB URL: URL is empty or not a string")
+        return False
+
+    if not mongo_url.startswith(("mongodb://", "mongodb+srv://")):
+        logger.error(f"[User Metadata] Invalid MongoDB URL format: '{mongo_url}'")
+        logger.error("[User Metadata] URL must start with 'mongodb://' or 'mongodb+srv://'")
+        logger.error("[User Metadata] User metadata service will be disabled")
+        return False
 
     MONGO_LOGGER_URL = mongo_url
 
@@ -42,10 +53,12 @@ def init_user_metadata_service(mongo_url: str):
         logger.info("[User Metadata] Service initialized successfully")
         logger.info(f"[User Metadata] Database: {_db.name}")
         logger.info(f"[User Metadata] Collection: {_users_collection.name}")
+        return True
 
     except Exception as e:
         logger.error(f"[User Metadata] Failed to initialize: {e}")
-        raise
+        logger.error("[User Metadata] User metadata service will be disabled")
+        return False
 
 
 async def get_user_metadata(phone: str) -> Optional[Dict]:

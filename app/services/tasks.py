@@ -9,7 +9,7 @@ import base64
 import tempfile
 import asyncio
 from datetime import datetime
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Dict
 from pathlib import Path
 
 import httpx
@@ -34,13 +34,19 @@ WHATSAPP_ACCESS_TOKEN = os.getenv("WHATSAPP_ACCESS_TOKEN")
 FB_API_URL = "https://graph.facebook.com/v18.0"
 MEM0_URL = os.getenv("MEM0_URL", "https://rg4g0gkk0wwkk4cc00g4sg0c.api.hansastro.com")
 
-# Initialize user metadata service if MongoDB URL is available
-if MONGO_LOGGER_URL:
+# Initialize user metadata service if MongoDB URL is available and is a direct connection
+if MONGO_LOGGER_URL and MONGO_LOGGER_URL.startswith(("mongodb://", "mongodb+srv://")):
     try:
-        user_metadata.init_user_metadata_service(MONGO_LOGGER_URL)
-        logger.info("[User Metadata] Service initialized successfully")
+        init_result = user_metadata.init_user_metadata_service(MONGO_LOGGER_URL)
+        if init_result:
+            logger.info("[User Metadata] Service initialized successfully")
+        else:
+            logger.warning("[User Metadata] Failed to initialize service")
     except Exception as e:
         logger.warning(f"[User Metadata] Failed to initialize service: {e}")
+elif MONGO_LOGGER_URL:
+    logger.warning("[User Metadata] MONGO_LOGGER_URL is set but is not a direct MongoDB connection (HTTP URL detected)")
+    logger.warning("[User Metadata] User metadata features disabled - requires mongodb:// or mongodb+srv:// URL")
 else:
     logger.warning("[User Metadata] MONGO_LOGGER_URL not set, user metadata features disabled")
 

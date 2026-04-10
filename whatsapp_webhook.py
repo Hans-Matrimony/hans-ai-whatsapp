@@ -259,10 +259,21 @@ async def user_metadata_health():
         metadata_status["error"] = "MONGO_LOGGER_URL not set"
         return metadata_status
 
+    # Check if URL is a direct MongoDB connection string (not HTTP API URL)
+    if not mongo_url.startswith(("mongodb://", "mongodb+srv://")):
+        metadata_status["status"] = "not_configured"
+        metadata_status["error"] = "MONGO_LOGGER_URL is not a direct MongoDB connection (it's an HTTP URL)"
+        metadata_status["info"] = "User metadata service requires direct MongoDB connection (mongodb://...)"
+        return metadata_status
+
     try:
         # Initialize service if not already initialized
         if not user_metadata._users_collection:
-            user_metadata.init_user_metadata_service(mongo_url)
+            init_result = user_metadata.init_user_metadata_service(mongo_url)
+            if not init_result:
+                metadata_status["status"] = "error"
+                metadata_status["error"] = "Failed to initialize user metadata service"
+                return metadata_status
 
         # Get user statistics
         stats = await asyncio.run(user_metadata.get_user_stats())
