@@ -435,16 +435,7 @@ class WhatsAppAPI:
                     "parameters": {
                         "reference_id": reference_id,
                         "type": "digital-goods",
-                        "payment_settings": [{
-                            "type": "payment_gateway",
-                            "payment_gateway": {
-                                "type": "razorpay",
-                                "configuration_name": payment_config_id,
-                                "razorpay": {
-                                    "receipt": reference_id
-                                }
-                            }
-                        }],
+                        "payment_configuration": payment_config_id,
                         "currency": "INR",
                         "total_amount": {
                             "value": amount_paise,
@@ -452,12 +443,12 @@ class WhatsAppAPI:
                         },
                         "order": {
                             "status": "pending",
-                            "description": f"Subscription for {plan_name}",
-                            "sub_total": {
+                            "subtotal": {
                                 "value": amount_paise,
                                 "offset": 100
                             },
                             "items": [{
+                                "retailer_id": reference_id,
                                 "name": plan_name,
                                 "amount": {
                                     "value": amount_paise,
