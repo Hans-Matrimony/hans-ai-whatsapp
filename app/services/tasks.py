@@ -552,23 +552,36 @@ async def _send_whatsapp_payment_flow(
     Returns:
         Message ID if successful, None otherwise
     """
-    # Check all required variables for WhatsApp Flow
+    # Check required variables for WhatsApp Flow
+    # NOTE: Payment config (PAYMENT_CONFIG_ID, PAYMENT_MID) should be pre-configured in Meta Business Manager
+    # They are NOT sent in the API request, so we don't check for them here
     required_vars = {
         "WHATSAPP_PHONE_ID": WHATSAPP_PHONE_ID,
         "WHATSAPP_ACCESS_TOKEN": WHATSAPP_ACCESS_TOKEN,
-        "WHATSAPP_FLOW_ID": WHATSAPP_FLOW_ID,
-        "WHATSAPP_PAYMENT_CONFIG_ID": WHATSAPP_PAYMENT_CONFIG_ID,
-        "WHATSAPP_PAYMENT_MID": WHATSAPP_PAYMENT_MID
+        "WHATSAPP_FLOW_ID": WHATSAPP_FLOW_ID
     }
 
     missing_vars = [var_name for var_name, var_value in required_vars.items() if not var_value]
 
     if missing_vars:
         logger.error(f"[WhatsApp Flow] Missing required variables: {missing_vars}. Falling back to payment link.")
-        logger.error(f"[WhatsApp Flow] Available vars: {list(required_vars.keys())}")
+        logger.error(f"[WhatsApp Flow] WHATSAPP_PHONE_ID: {'✓' if WHATSAPP_PHONE_ID else '✗'}")
+        logger.error(f"[WhatsApp Flow] WHATSAPP_ACCESS_TOKEN: {'✓' if WHATSAPP_ACCESS_TOKEN else '✗'}")
+        logger.error(f"[WhatsApp Flow] WHATSAPP_FLOW_ID: {'✓ ' + WHATSAPP_FLOW_ID if WHATSAPP_FLOW_ID else '✗'}")
         return None
 
-    logger.info(f"[WhatsApp Flow] All required variables present. Flow ID: {WHATSAPP_FLOW_ID}")
+    # Log payment config status (not required for API, but should be configured in Meta)
+    if WHATSAPP_PAYMENT_CONFIG_ID:
+        logger.info(f"[WhatsApp Flow] Payment Config ID '{WHATSAPP_PAYMENT_CONFIG_ID}' found (should be pre-configured in Flow)")
+    else:
+        logger.warning(f"[WhatsApp Flow] WHATSAPP_PAYMENT_CONFIG_ID not set - make sure payment is configured in Meta Business Manager!")
+
+    if WHATSAPP_PAYMENT_MID:
+        logger.info(f"[WhatsApp Flow] Payment MID '{WHATSAPP_PAYMENT_MID[:10]}...' found (should be pre-configured in Flow)")
+    else:
+        logger.warning(f"[WhatsApp Flow] WHATSAPP_PAYMENT_MID not set - make sure payment is configured in Meta Business Manager!")
+
+    logger.info(f"[WhatsApp Flow] ✓ All required variables present. Flow ID: {WHATSAPP_FLOW_ID}")
 
     try:
         # Import here to avoid circular dependency

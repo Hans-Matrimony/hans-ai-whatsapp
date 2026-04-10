@@ -258,15 +258,16 @@ class WhatsAppAPI:
             body: Body text for the message
             flow_id: Flow ID from Meta (created in Business Manager)
             flow_cta: Button text (default "Pay Now")
-            payment_config_id: Payment configuration ID from Meta (optional, for payment flows)
-            payment_mid: Payment Gateway MID (optional, for payment flows)
+            payment_config_id: Payment configuration ID (kept for compatibility, not used in API)
+            payment_mid: Payment Gateway MID (kept for compatibility, not used in API)
 
         Returns:
             Message ID if successful, None otherwise
 
         Note:
             WhatsApp Flows with payment components must be pre-configured in Meta Business Manager.
-            For payment flows, payment_config_id and payment_mid should be provided.
+            The Flow itself contains the payment configuration (amount, etc.).
+            Payment config is NOT sent in the API - it's configured in the Flow in Meta Business Manager.
         """
         # Validate flow_id
         if not flow_id:
@@ -277,7 +278,8 @@ class WhatsAppAPI:
         url = f"{self.base_url}/{self.phone_id}/messages"
 
         # Build the interactive message with Flow component
-        # CORRECT STRUCTURE according to Meta API
+        # NOTE: Payment configuration is pre-configured in the Flow in Meta Business Manager
+        # We do NOT send payment_config_id or payment_mid in the API request
         payload = {
             "messaging_product": "whatsapp",
             "to": to.lstrip("+"),
@@ -306,13 +308,11 @@ class WhatsAppAPI:
             }
         }
 
-        # Add payment configuration if provided
-        if payment_config_id or payment_mid:
-            payload["interactive"]["action"]["parameters"]["mode"] = "payment"
-            if payment_config_id:
-                payload["interactive"]["action"]["parameters"]["payment_config_id"] = payment_config_id
-            if payment_mid:
-                payload["interactive"]["action"]["parameters"]["payment_mid"] = payment_mid
+        # Log that payment config is pre-configured (not sent in API)
+        if payment_config_id:
+            logger.info(f"[WhatsApp Flow] Payment config '{payment_config_id}' is pre-configured in Meta Business Manager (not sent in API)")
+        if payment_mid:
+            logger.info(f"[WhatsApp Flow] Payment MID '{payment_mid[:10]}...' is pre-configured in Meta Business Manager (not sent in API)")
 
         try:
             # DEBUG: Log the exact payload being sent
