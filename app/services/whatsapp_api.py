@@ -452,6 +452,11 @@ class WhatsAppAPI:
                         },
                         "order": {
                             "status": "pending",
+                            "description": f"Subscription for {plan_name}",
+                            "sub_total": {
+                                "value": amount_paise,
+                                "offset": 100
+                            },
                             "items": [{
                                 "name": plan_name,
                                 "amount": {
