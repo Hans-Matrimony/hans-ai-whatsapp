@@ -130,6 +130,8 @@ class MessageResponse(BaseModel):
 async def health():
     """Health check endpoint."""
     from app.services.celery_app import celery_app
+    import asyncio
+    from app.services import user_metadata
 
     # Check if Celery workers are available
     celery_status = "unknown"
@@ -140,7 +142,7 @@ async def health():
     except Exception:
         celery_status = "disconnected"
 
-    return {
+    health_data = {
         "status": "healthy",
         "service": "whatsapp-webhook",
         "whatsapp_configured": bool(WHATSAPP_PHONE_ID),
@@ -150,6 +152,30 @@ async def health():
         "subscriptions_test_number": SUBSCRIPTION_TEST_NUMBER if SUBSCRIPTIONS_URL else None,
         "celery_status": celery_status
     }
+
+    # Add user metadata stats if available
+    if MONGO_LOGGER_URL:
+        try:
+            stats = await asyncio.run(user_metadata.get_user_stats())
+            health_data["user_metadata"] = {
+                "enabled": True,
+                "total_users": stats.get("total_users", 0),
+                "male_users": stats.get("male_users", 0),
+                "female_users": stats.get("female_users", 0),
+                "new_users_last_7_days": stats.get("new_users_last_7_days", 0)
+            }
+        except Exception as e:
+            health_data["user_metadata"] = {
+                "enabled": False,
+                "error": str(e)
+            }
+    else:
+        health_data["user_metadata"] = {
+            "enabled": False,
+            "reason": "MONGO_LOGGER_URL not set"
+        }
+
+    return health_data
 
 
 @app.get("/health/whatsapp-payments")
@@ -164,6 +190,93 @@ async def whatsapp_payments_health():
         "enabled": False,
         "missing_vars": [],
         "configured_vars": {}
+    }
+
+    # Check required WhatsApp Payments variables
+    required_vars = {
+        "WHATSAPP_PHONE_ID": os.getenv("WHATSAPP_PHONE_ID"),
+        "WHATSAPP_ACCESS_TOKEN": os.getenv("WHATSAPP_ACCESS_TOKEN"),
+        "WHATSAPP_WABA_ID": os.getenv("WHATSAPP_WABA_ID"),
+        "WHATSAPP_PAYMENT_CONFIG_ID": os.getenv("WHATSAPP_PAYMENT_CONFIG_ID"),
+        "WHATSAPP_PAYMENT_MID": os.getenv("WHATSAPP_PAYMENT_MID"),
+        "WHATSAPP_FLOW_ID": os.getenv("WHATSAPP_FLOW_ID")
+    }
+
+    missing = []
+    configured = {}
+
+    for var_name, var_value in required_vars.items():
+        if var_value:
+            # Mask sensitive values
+            if "TOKEN" in var_name or "SECRET" in var_name:
+                configured[var_name] = f"{var_value[:8]}..." if len(var_value) > 8 else "***"
+            elif "MID" in var_name:
+                configured[var_name] = f"{var_value[:4]}..." if len(var_value) > 4 else "***"
+            else:
+                configured[var_name] = var_value
+        else:
+            missing.append(var_name)
+
+    config_status["missing_vars"] = missing
+    config_status["configured_vars"] = configured
+    config_status["configured"] = len(missing) == 0
+    config_status["enabled"] = len(missing) == 0
+    config_status["status"] = "enabled" if len(missing) == 0 else "incomplete"
+
+    # Add warning if not configured
+    if len(missing) > 0:
+        config_status["warning"] = f"WhatsApp Payments (Flows) not available. Missing: {', '.join(missing)}. System will fallback to payment links."
+        config_status["fallback_mode"] = "payment_links"
+    else:
+        config_status["info"] = "WhatsApp Payments (Flows) is enabled. Users can pay within WhatsApp."
+        config_status["payment_mode"] = "in_app_flow"
+
+    return config_status
+
+
+@app.get("/health/user-metadata")
+async def user_metadata_health():
+    """
+    Health check for User Metadata service (MongoDB).
+    Shows statistics about users stored in MongoDB.
+    """
+    import asyncio
+    from app.services import user_metadata
+
+    metadata_status = {
+        "service": "user-metadata",
+        "status": "unknown",
+        "enabled": False,
+        "database": "MongoDB",
+        "collection": "users",
+        "stats": {}
+    }
+
+    # Check if MongoDB is configured
+    mongo_url = os.getenv("MONGO_LOGGER_URL")
+    if not mongo_url:
+        metadata_status["status"] = "not_configured"
+        metadata_status["error"] = "MONGO_LOGGER_URL not set"
+        return metadata_status
+
+    try:
+        # Initialize service if not already initialized
+        if not user_metadata._users_collection:
+            user_metadata.init_user_metadata_service(mongo_url)
+
+        # Get user statistics
+        stats = await asyncio.run(user_metadata.get_user_stats())
+        metadata_status["stats"] = stats
+        metadata_status["status"] = "enabled"
+        metadata_status["enabled"] = True
+        metadata_status["info"] = f"User metadata service is working. Total users: {stats.get('total_users', 0)}"
+
+        return metadata_status
+
+    except Exception as e:
+        metadata_status["status"] = "error"
+        metadata_status["error"] = str(e)
+        return metadata_status
     }
 
     # Check required WhatsApp Payments variables

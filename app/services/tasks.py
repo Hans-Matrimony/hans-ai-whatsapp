@@ -16,6 +16,7 @@ import httpx
 from pymongo import MongoClient
 from app.services.celery_app import celery_app
 from app.services.message_limiter import MessageLimiter
+from app.services import user_metadata  # NEW: Import user metadata service
 
 # Add skills directory to path for audio processor
 skills_path = os.path.join(os.path.dirname(__file__), '../../skills')
@@ -32,6 +33,16 @@ WHATSAPP_PHONE_ID = os.getenv("WHATSAPP_PHONE_ID")
 WHATSAPP_ACCESS_TOKEN = os.getenv("WHATSAPP_ACCESS_TOKEN")
 FB_API_URL = "https://graph.facebook.com/v18.0"
 MEM0_URL = os.getenv("MEM0_URL", "https://rg4g0gkk0wwkk4cc00g4sg0c.api.hansastro.com")
+
+# Initialize user metadata service if MongoDB URL is available
+if MONGO_LOGGER_URL:
+    try:
+        user_metadata.init_user_metadata_service(MONGO_LOGGER_URL)
+        logger.info("[User Metadata] Service initialized successfully")
+    except Exception as e:
+        logger.warning(f"[User Metadata] Failed to initialize service: {e}")
+else:
+    logger.warning("[User Metadata] MONGO_LOGGER_URL not set, user metadata features disabled")
 
 # Subscription Service Configuration
 SUBSCRIPTIONS_URL = os.getenv("SUBSCRIPTIONS_URL")
@@ -231,7 +242,9 @@ def detect_gender_from_name(name: str) -> Optional[str]:
 
 def get_user_gender(phone: str, message: str) -> str:
     """
-    Get user gender from cache or detect from message.
+    Get user gender from MongoDB, cache, or detect from message.
+
+    Priority: MongoDB > Cache > Detection
 
     Args:
         phone: User's phone number
@@ -240,13 +253,29 @@ def get_user_gender(phone: str, message: str) -> str:
     Returns:
         "male", "female", or "unknown"
     """
+    import asyncio
+
     user_id = f"+{phone}"
 
-    # Check cache first
+    # PRIORITY 1: Check MongoDB first (FASTEST!)
+    try:
+        # Run async function in sync context
+        user_data = asyncio.run(user_metadata.get_user_metadata(phone))
+        if user_data and user_data.get("gender"):
+            gender = user_data["gender"]
+            logger.info(f"[Gender Detection] Found gender in MongoDB for {user_id}: {gender}")
+            # Update cache for next time
+            _user_gender_cache[user_id] = gender
+            return gender
+    except Exception as e:
+        logger.warning(f"[Gender Detection] MongoDB lookup failed: {e}")
+
+    # PRIORITY 2: Check cache
     if user_id in _user_gender_cache:
+        logger.info(f"[Gender Detection] Found gender in cache for {user_id}: {_user_gender_cache[user_id]}")
         return _user_gender_cache[user_id]
 
-    # Try to detect from current message
+    # PRIORITY 3: Detect from current message
     # Look for name patterns like "mera naam [NAME] hai", "I am [NAME]", "main [NAME] hoon"
     name_patterns = [
         r'(?:mera|meri)\s+naam\s+is\s+(\w+)',  # "mera naam X hai"
@@ -268,7 +297,14 @@ def get_user_gender(phone: str, message: str) -> str:
             if detected_gender:
                 # Cache the detected gender
                 _user_gender_cache[user_id] = detected_gender
-                logger.info(f"[Gender Detection] Detected and cached gender for {user_id}: {detected_gender} (from name: {name})")
+                logger.info(f"[Gender Detection] Detected gender for {user_id}: {detected_gender} (from name: {name})")
+
+                # Save to MongoDB for next time (async, don't wait)
+                try:
+                    asyncio.create_task(user_metadata.update_user_metadata(phone, {"gender": detected_gender}))
+                except Exception as e:
+                    logger.warning(f"[Gender Detection] Failed to save gender to MongoDB: {e}")
+
                 return detected_gender
 
     # Default: return unknown
@@ -326,6 +362,78 @@ def _get_gender_instruction(user_gender: str) -> str:
         return """NOTE: User gender unknown. Use neutral warm friendly tone.
 - Use inclusive language like "dost", "friend"
 - Be warm and supportive without gender-specific expressions"""
+
+
+async def _extract_and_save_birth_details(phone: str, message: str) -> Optional[Dict]:
+    """
+    Extract birth details from user message and save to MongoDB.
+
+    Args:
+        phone: User's phone number
+        message: User message that may contain birth details
+
+    Returns:
+        Dict with extracted details or None
+    """
+    import asyncio
+
+    # Pattern to match birth details in various formats
+    # Matches: "Name: X, DOB: YYYY-MM-DD, Time: HH:MM, Place: City"
+    # Or: "naam: x, janam tithi: DD-MM-YYYY, samay: HH:MM, sthaan: city"
+    dob_pattern = r'(?:(?:DOB|Date of Birth|Birth Date|janam tithi|dob)[:\s]+([0-9]{1,4}[-/][0-9]{1,2}[-/][0-9]{1,4}))'
+    time_pattern = r'(?:(?:Time|Birth Time|samay|tob|time)[:\s]+([0-9]{1,2}:[0-9]{2})'
+    place_pattern = r'(?:(?:Place|Birth Place|City|janam sthaan|place|sthaan)[:\s]+([A-Za-z\s]+?)(?:,|\.|\n|$|Gender|gender|ling|$))'
+    name_pattern = r'(?:(?:Name|naam|name)[:\s]+([A-Za-z]+))'
+    gender_pattern = r'(?:(?:Gender|ling|gender)[:\s]+(male|female|Male|Female))'
+
+    details = {}
+
+    # Extract DOB
+    dob_match = re.search(dob_pattern, message, re.IGNORECASE)
+    if dob_match:
+        details["dob"] = dob_match.group(1)
+
+    # Extract Time
+    time_match = re.search(time_pattern, message, re.IGNORECASE)
+    if time_match:
+        details["tob"] = time_match.group(1)
+
+    # Extract Place
+    place_match = re.search(place_pattern, message, re.IGNORECASE)
+    if place_match:
+        details["place"] = place_match.group(1).strip()
+
+    # Extract Name
+    name_match = re.search(name_pattern, message, re.IGNORECASE)
+    if name_match:
+        details["name"] = name_match.group(1)
+
+    # Extract Gender
+    gender_match = re.search(gender_pattern, message, re.IGNORECASE)
+    if gender_match:
+        details["gender"] = gender_match.group(1).lower()
+
+    # If we found at least DOB or Time or Place, save to MongoDB
+    if len(details) >= 2:
+        logger.info(f"[Birth Details] Extracted for {phone}: {list(details.keys())}")
+
+        try:
+            # Save to MongoDB
+            await user_metadata.save_user_metadata(
+                phone=phone,
+                name=details.get("name"),
+                dob=details.get("dob"),
+                tob=details.get("tob"),
+                place=details.get("place"),
+                gender=details.get("gender")
+            )
+            logger.info(f"[Birth Details] Saved to MongoDB for {phone}")
+            return details
+
+        except Exception as e:
+            logger.error(f"[Birth Details] Failed to save to MongoDB: {e}")
+
+    return None
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
@@ -1059,6 +1167,25 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
     if media_info:
         log_media_info = {k: v for k, v in media_info.items() if k != "base64_data"}
     await _log_to_mongo(session_id, user_id, "user", message, "whatsapp", message_type, log_media_info)
+
+    # ==================== BIRTH DETAILS EXTRACTION (MongoDB) ====================
+    # Extract and save birth details to MongoDB if present in message
+    # This runs in background and doesn't block message processing
+    try:
+        extracted_details = await _extract_and_save_birth_details(phone, message)
+        if extracted_details:
+            logger.info(f"[Birth Details] Successfully extracted and saved details for {phone}")
+    except Exception as e:
+        logger.warning(f"[Birth Details] Extraction failed: {e}")
+
+    # Update user stats in MongoDB (increment question count, update last_seen)
+    # This runs in background and doesn't block message processing
+    try:
+        await user_metadata.increment_user_questions(phone)
+    except Exception as e:
+        logger.warning(f"[User Metadata] Failed to increment question count: {e}")
+
+    # ===================================================================
 
     # ==================== AUDIO MESSAGE PROCESSING ====================
 
