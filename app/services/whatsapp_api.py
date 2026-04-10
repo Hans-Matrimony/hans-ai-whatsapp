@@ -247,7 +247,8 @@ class WhatsAppAPI:
         flow_id: str,
         flow_cta: str = "Pay Now",
         payment_config_id: str = None,
-        payment_mid: str = None
+        payment_mid: str = None,
+        flow_data: dict = None
     ) -> Optional[str]:
         """
         Send WhatsApp Flow message for in-WhatsApp payments.
@@ -260,6 +261,7 @@ class WhatsAppAPI:
             flow_cta: Button text (default "Pay Now")
             payment_config_id: Payment configuration ID (kept for compatibility, not used in API)
             payment_mid: Payment Gateway MID (kept for compatibility, not used in API)
+            flow_data: Dynamic data to pass to the Flow (plan_id, amount, etc.)
 
         Returns:
             Message ID if successful, None otherwise
@@ -268,6 +270,7 @@ class WhatsAppAPI:
             WhatsApp Flows with payment components must be pre-configured in Meta Business Manager.
             The Flow itself contains the payment configuration (amount, etc.).
             Payment config is NOT sent in the API - it's configured in the Flow in Meta Business Manager.
+            flow_data allows passing dynamic parameters that the Flow can read.
         """
         # Validate flow_id
         if not flow_id:
@@ -280,6 +283,18 @@ class WhatsAppAPI:
         # Build the interactive message with Flow component
         # NOTE: Payment configuration is pre-configured in the Flow in Meta Business Manager
         # We do NOT send payment_config_id or payment_mid in the API request
+        parameters = {
+            "flow_message_version": "3",
+            "flow_id": flow_id,
+            "flow_cta": flow_cta,
+            "flow_token": flow_id  # Use flow_id as flow_token for payment flows
+        }
+
+        # Add flow_data if provided (for dynamic payments)
+        if flow_data:
+            parameters["flow_data"] = flow_data
+            logger.info(f"[WhatsApp Flow] Sending flow data: {flow_data}")
+
         payload = {
             "messaging_product": "whatsapp",
             "to": to.lstrip("+"),
@@ -295,12 +310,7 @@ class WhatsAppAPI:
                 },
                 "action": {
                     "name": "flow",
-                    "parameters": {
-                        "flow_message_version": "3",
-                        "flow_id": flow_id,
-                        "flow_cta": flow_cta,
-                        "flow_token": flow_id  # Use flow_id as flow_token for payment flows
-                    }
+                    "parameters": parameters
                 },
                 "footer": {
                     "text": "Powered by Razorpay"
