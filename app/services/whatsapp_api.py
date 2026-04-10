@@ -245,7 +245,9 @@ class WhatsAppAPI:
         header: str,
         body: str,
         flow_id: str,
-        flow_cta: str = "Pay Now"
+        flow_cta: str = "Pay Now",
+        payment_config_id: str = None,
+        payment_mid: str = None
     ) -> Optional[str]:
         """
         Send WhatsApp Flow message for in-WhatsApp payments.
@@ -256,14 +258,22 @@ class WhatsAppAPI:
             body: Body text for the message
             flow_id: Flow ID from Meta (created in Business Manager)
             flow_cta: Button text (default "Pay Now")
+            payment_config_id: Payment configuration ID from Meta (optional, for payment flows)
+            payment_mid: Payment Gateway MID (optional, for payment flows)
 
         Returns:
             Message ID if successful, None otherwise
 
         Note:
             WhatsApp Flows with payment components must be pre-configured in Meta Business Manager.
-            The Flow ID is sufficient - no dynamic payload can be passed during runtime.
+            For payment flows, payment_config_id and payment_mid should be provided.
         """
+        # Validate flow_id
+        if not flow_id:
+            logger.error("[WhatsApp Flow] flow_id is None or empty. Cannot send Flow message.")
+            logger.error(f"[WhatsApp Flow] WHATSAPP_FLOW_ID environment variable may not be set.")
+            return None
+
         url = f"{self.base_url}/{self.phone_id}/messages"
 
         # Build the interactive message with Flow component
@@ -286,7 +296,8 @@ class WhatsAppAPI:
                     "parameters": {
                         "flow_message_version": "3",
                         "flow_id": flow_id,
-                        "flow_cta": flow_cta
+                        "flow_cta": flow_cta,
+                        "flow_token": flow_id  # Use flow_id as flow_token for payment flows
                     }
                 },
                 "footer": {
@@ -295,7 +306,20 @@ class WhatsAppAPI:
             }
         }
 
+        # Add payment configuration if provided
+        if payment_config_id or payment_mid:
+            payload["interactive"]["action"]["parameters"]["mode"] = "payment"
+            if payment_config_id:
+                payload["interactive"]["action"]["parameters"]["payment_config_id"] = payment_config_id
+            if payment_mid:
+                payload["interactive"]["action"]["parameters"]["payment_mid"] = payment_mid
+
         try:
+            # DEBUG: Log the exact payload being sent
+            logger.info(f"[DEBUG] Sending WhatsApp Flow with flow_id: {flow_id}")
+            logger.info(f"[DEBUG] Full payload: {payload}")
+            logger.info(f"[DEBUG] Phone ID: {self.phone_id}")
+
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(url, headers=self.headers, json=payload)
 
@@ -305,6 +329,7 @@ class WhatsAppAPI:
                     return data.get("messages", [{}])[0].get("id")
                 else:
                     logger.error(f"WhatsApp Flow send failed: {response.status_code} - {response.text}")
+                    logger.error(f"[DEBUG] Response body: {response.text}")
                     return None
 
         except Exception as e:

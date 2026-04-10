@@ -297,6 +297,37 @@ def get_astrologer_personality(user_gender: str) -> dict:
         return ASTROLOGER_PERSONALITIES["male"]
 
 
+def _get_gender_instruction(user_gender: str) -> str:
+    """
+    Generate gender-based personality instruction for AI.
+
+    This creates an explicit instruction that tells the AI what gender to use
+    in its responses, ensuring the gender-based personality logic works correctly.
+
+    Args:
+        user_gender: User's detected gender ("male", "female", "unknown")
+
+    Returns:
+        Instruction string to prepend to the message
+    """
+    if user_gender == "male":
+        return """IMPORTANT: You are talking to a MALE user. You MUST respond as a FEMALE friend.
+- Use FEMALE verbs: "sakti", "rahì", "dekh rahi hoon", "samajh sakti hoon"
+- Be warm, nurturing, and emotionally supportive
+- Use caring tone like "Aww", "please", "Tension mat lo"
+- Show emotional empathy and validation"""
+    elif user_gender == "female":
+        return """IMPORTANT: You are talking to a FEMALE user. You MUST respond as a MALE friend.
+- Use MALE verbs: "sakta", "raha", "dekh raha hoon", "samajh sakta hoon"
+- Be strong, protective, and encouraging
+- Use confident tone like "Bilkul", "Pakka", "Tum kar sakti ho"
+- Build confidence and provide reliable support"""
+    else:
+        return """NOTE: User gender unknown. Use neutral warm friendly tone.
+- Use inclusive language like "dost", "friend"
+- Be warm and supportive without gender-specific expressions"""
+
+
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
 def process_message_task(self, phone: str, message: str, message_id: str, message_type: str = "text", media_info: dict = None):
     """
@@ -526,7 +557,8 @@ async def _send_whatsapp_payment_flow(
         "WHATSAPP_PHONE_ID": WHATSAPP_PHONE_ID,
         "WHATSAPP_ACCESS_TOKEN": WHATSAPP_ACCESS_TOKEN,
         "WHATSAPP_FLOW_ID": WHATSAPP_FLOW_ID,
-        "WHATSAPP_PAYMENT_CONFIG_ID": WHATSAPP_PAYMENT_CONFIG_ID
+        "WHATSAPP_PAYMENT_CONFIG_ID": WHATSAPP_PAYMENT_CONFIG_ID,
+        "WHATSAPP_PAYMENT_MID": WHATSAPP_PAYMENT_MID
     }
 
     missing_vars = [var_name for var_name, var_value in required_vars.items() if not var_value]
@@ -558,7 +590,9 @@ async def _send_whatsapp_payment_flow(
             header=f"Pay for {plan_name}",
             body=f"Complete your payment of ₹{amount // 100} for {plan_name} safely within WhatsApp.",
             flow_id=WHATSAPP_FLOW_ID,
-            flow_cta="Pay Now"
+            flow_cta="Pay Now",
+            payment_config_id=WHATSAPP_PAYMENT_CONFIG_ID,
+            payment_mid=WHATSAPP_PAYMENT_MID
         )
 
         if message_id:
@@ -1281,7 +1315,11 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
 
         # Create envelope with gender context for AI personality
         timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-        envelope = f"[From: WhatsApp User (+{phone}) at {timestamp}]"
+
+        # IMPORTANT: Inject gender into the envelope so AI can see it
+        # This is required because OpenCLAW doesn't automatically inject metadata into system prompt
+        gender_context = f" [Gender: {user_gender}]" if user_gender != "unknown" else ""
+        envelope = f"[From: WhatsApp User (+{phone}){gender_context} at {timestamp}]"
 
         # Build context text (no image data in text — that goes via input_image)
         if message_type != "text" and media_info:
@@ -1305,15 +1343,18 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
         if has_image_data:
             # Use OpenClaw's input_image format — sends full base64 image
             mime = media_info.get("mime_type", "image/jpeg")
-            
+
             # Ensure mime is one of the allowed types by the schema
             allowed_mimes = ["image/jpeg", "image/png", "image/gif", "image/webp"]
             if mime not in allowed_mimes:
                 # Default to jpeg if an unsupported mime type is used
                 mime = "image/jpeg"
-                
+
+            # Add system message to explicitly tell AI about user's gender
+            gender_instruction = _get_gender_instruction(user_gender)
+
             content_parts = [
-                {"type": "input_text", "text": text_content},
+                {"type": "input_text", "text": f"{gender_instruction}\n\n{text_content}"},
                 {
                     "type": "input_image",
                     "source": {
@@ -1332,8 +1373,10 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
             ]
             logger.info(f"Sending image to OpenClaw via input_image: mime={mime}, b64_len={len(media_info['base64_data'])}")
         else:
-            # Plain text input
-            payload_input = text_content
+            # Add system message to explicitly tell AI about user's gender
+            gender_instruction = _get_gender_instruction(user_gender)
+            # Plain text input with gender instruction
+            payload_input = f"{gender_instruction}\n\n{text_content}"
 
         payload = {
             "model": "agent:astrologer",
@@ -2308,14 +2351,10 @@ async def _check_inactive_users():
                         hours_inactive = inactive_minutes / 60
                         logger.info(f"[Proactive Nudge] ELIGIBLE: {user_id} inactive for {hours_inactive:.1f} hours")
 
-                        # DUPLICATE PREVENTION: Check if last message was from bot (proactive nudge)
-                        messages = session.get("messages", [])
-                        if messages:
-                            last_message = messages[-1]
-                            last_message_role = last_message.get("role", "")
-                            if last_message_role == "assistant":
-                                logger.info(f"[Proactive Nudge] {user_id}: Last message was from bot (skipping - user hasn't replied)")
-                                continue
+                        # No need to check who sent the last message
+                        # Just check if user has been inactive for 8+ hours
+                        # The 8 hour threshold is already checked above (line 2346)
+                        # If we reach here, user is eligible for nudge regardless of who sent last message
                         
 
                         # Get recent conversation for topic and language detection
