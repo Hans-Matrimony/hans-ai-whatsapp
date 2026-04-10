@@ -277,7 +277,6 @@ async def user_metadata_health():
         metadata_status["status"] = "error"
         metadata_status["error"] = str(e)
         return metadata_status
-    }
 
     # Check required WhatsApp Payments variables
     required_vars = {
