@@ -403,7 +403,13 @@ async def receive_webhook(request: Request):
                     if "button_reply" in interactive:
                         text_content = interactive["button_reply"].get("title", "")
                     elif "list_reply" in interactive:
-                        text_content = interactive["list_reply"].get("title", "")
+                        # For list replies, use the ID (which contains plan number) instead of title
+                        # This allows the existing digit check to work for plan selection
+                        list_reply = interactive.get("list_reply", {})
+                        text_content = list_reply.get("id", list_reply.get("title", ""))
+                        logger.info(f"List reply: ID={text_content}, Title={list_reply.get('title', '')}")
+                    else:
+                        text_content = interactive.get("type", "")
                     logger.info(f"Interactive click: {text_content}")
                 elif message_type == "image":
                     media_id = msg.get("image", {}).get("id")

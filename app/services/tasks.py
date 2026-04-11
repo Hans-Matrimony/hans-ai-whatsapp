@@ -594,6 +594,88 @@ async def _get_plans_message() -> str:
         return "Unable to fetch plans. Please contact support."
 
 
+async def _send_plans_interactive(phone: str) -> bool:
+    """
+    Send plans as a beautiful WhatsApp Interactive List message.
+    Returns True if successful, False otherwise.
+    """
+    if not SUBSCRIPTIONS_URL:
+        return False
+
+    try:
+        # Fetch plans
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                f"{SUBSCRIPTIONS_URL}/plans?active_only=true"
+            )
+            if response.status_code != 200:
+                logger.error(f"Failed to fetch plans: {response.status_code}")
+                return False
+
+            data = response.json()
+            plans = data.get("plans", [])
+
+            if not plans:
+                return False
+
+        # Build interactive list sections
+        rows = []
+        for idx, plan in enumerate(plans, 1):
+            price_rupees = plan.get("price", 0) / 100
+            duration = plan.get("durationDays", 30)
+
+            # Build description from features
+            features = plan.get("features", [])
+            if features and isinstance(features, list):
+                # Join first 2 features with bullet points
+                feature_text = " • ".join(features[:2])
+                if len(features) > 2:
+                    feature_text += f" +{len(features) - 2} more"
+            else:
+                feature_text = f"{duration} days validity"
+
+            rows.append({
+                "id": str(idx),  # Plan number as ID
+                "title": f"{plan.get('name', 'Plan')} - ₹{price_rupees}",
+                "description": feature_text
+            })
+
+        # Create section
+        section = {
+            "title": "Available Plans",
+            "rows": rows
+        }
+
+        # Import WhatsAppAPI
+        from app.services.whatsapp_api import WhatsAppAPI
+
+        whatsapp_api = WhatsAppAPI(
+            phone_id=WHATSAPP_PHONE_ID,
+            access_token=WHATSAPP_ACCESS_TOKEN
+        )
+
+        # Send interactive list
+        message_id = await whatsapp_api.send_interactive_list(
+            to=phone,
+            header="💫 Choose Your Plan",
+            body="Select a subscription plan to unlock personalized astrology guidance. Each plan includes unlimited chat, detailed kundli analysis, and more.",
+            footer="Powered by Astro Friend",
+            button_text="Select Plan",
+            sections=[section]
+        )
+
+        if message_id:
+            logger.info(f"[Plans] Sent interactive list to {phone}")
+            return True
+        else:
+            logger.error(f"[Plans] Failed to send interactive list")
+            return False
+
+    except Exception as e:
+        logger.error(f"Error sending plans interactive list: {e}")
+        return False
+
+
 async def _generate_payment_link(user_id: str, plan_number: int) -> str:
     """
     Generate Razorpay payment link for selected plan.
@@ -1268,12 +1350,20 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
 
     pay_command = message.strip().upper()
     if pay_command in ["PAY", "PAYMENT", "PLAN", "PLANS", "SUBSCRIBE"]:
-        # Fetch and send plan options
-        plans_message = await _get_plans_message()
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            await _send_whatsapp_message(client, phone, plans_message)
-        await _log_to_mongo(session_id, user_id, "assistant", plans_message, "whatsapp")
-        return {"status": "plans_sent"}
+        # Send beautiful interactive list with plans
+        success = await _send_plans_interactive(phone)
+        if success:
+            # Log a simple message (the actual list is sent via WhatsApp API)
+            log_message = "💫 Subscription plans sent - please select a plan from the list"
+            await _log_to_mongo(session_id, user_id, "assistant", log_message, "whatsapp")
+            return {"status": "plans_sent"}
+        else:
+            # Fallback to text message if interactive list fails
+            plans_message = await _get_plans_message()
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                await _send_whatsapp_message(client, phone, plans_message)
+            await _log_to_mongo(session_id, user_id, "assistant", plans_message, "whatsapp")
+            return {"status": "plans_sent"}
 
     # Check if user is selecting a plan (replying with number 1, 2, 3, etc.)
     if message.strip().isdigit():
