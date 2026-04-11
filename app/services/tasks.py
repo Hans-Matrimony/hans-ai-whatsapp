@@ -1811,6 +1811,8 @@ Copy your code and share! 💫"""
                 # Check if user has active subscription
                 access = await _check_subscription_access(phone)
 
+                logger.info(f"[Test Mode] DEBUG: access={access.get('access')}, total_messages={total_messages}, FREE_MESSAGE_LIMIT={FREE_MESSAGE_LIMIT}")
+
                 # Check if user has active FULL subscription (only full_access skips enforcement)
                 if access.get("access") == "full_access":
                     logger.info(f"[Test Mode] User has full subscription - skipping enforcement")
