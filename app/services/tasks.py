@@ -261,7 +261,7 @@ def detect_gender_from_name(name: str) -> Optional[str]:
     return None
 
 
-def get_user_gender(phone: str, message: str) -> str:
+async def get_user_gender(phone: str, message: str) -> str:
     """
     Get user gender from MongoDB, cache, or detect from message.
 
@@ -274,14 +274,13 @@ def get_user_gender(phone: str, message: str) -> str:
     Returns:
         "male", "female", or "unknown"
     """
-    import asyncio
 
     user_id = f"+{phone}"
 
     # PRIORITY 1: Check MongoDB first (FASTEST!)
     try:
-        # Run async function in sync context
-        user_data = asyncio.run(user_metadata.get_user_metadata(phone))
+        # Await the async function directly
+        user_data = await user_metadata.get_user_metadata(phone)
         if user_data and user_data.get("gender"):
             gender = user_data["gender"]
             logger.info(f"[Gender Detection] Found gender in MongoDB for {user_id}: {gender}")
@@ -1874,8 +1873,10 @@ Copy your code and share! 💫"""
     # Only applies if subscription check passed (user has access)
 
     try:
-        # Initialize MongoDB client for message limiter
-        mongo_client = MongoClient(MONGO_LOGGER_URL) if MONGO_LOGGER_URL else None
+        # Initialize MongoDB client for message limiter (only if MONGO_LOGGER_URL is a direct MongoDB connection)
+        mongo_client = None
+        if MONGO_LOGGER_URL and MONGO_LOGGER_URL.startswith(("mongodb://", "mongodb+srv://")):
+            mongo_client = MongoClient(MONGO_LOGGER_URL)
 
         if mongo_client:
             message_limiter = MessageLimiter(mongo_client)
@@ -1934,7 +1935,7 @@ Copy your code and share! 💫"""
             headers["Authorization"] = f"Bearer {OPENCLAW_GATEWAY_TOKEN}"
 
         # Detect user gender for personality adaptation
-        user_gender = get_user_gender(phone, message)
+        user_gender = await get_user_gender(phone, message)
 
         # DEBUG: Log gender detection
         logger.info(f"[GENDER DEBUG] User: +{phone}, Message: {message[:50]}, Detected Gender: {user_gender}")
@@ -2286,7 +2287,9 @@ Copy your code and share! 💫"""
         # ==================== INCREMENT MESSAGE COUNT ====================
         # Increment message count AFTER successful message processing
         try:
-            mongo_client = MongoClient(MONGO_LOGGER_URL) if MONGO_LOGGER_URL else None
+            mongo_client = None
+            if MONGO_LOGGER_URL and MONGO_LOGGER_URL.startswith(("mongodb://", "mongodb+srv://")):
+                mongo_client = MongoClient(MONGO_LOGGER_URL)
             if mongo_client:
                 message_limiter = MessageLimiter(mongo_client)
                 result = message_limiter.increment_message_count(user_id)
