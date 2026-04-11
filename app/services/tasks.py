@@ -1897,7 +1897,7 @@ Copy your code and share! 💫"""
                                 f"Mujhe bohot bura lag raha hai ki main aapki abhi madad nahi kar pa rahi. "
                                 f"System ki limitation hai yeh, main kar bhi kya sakti hoon?\n\n"
                                 f"Agar aapko raasta chahiye toh 'PAY' type karke ek choti si subscription le sakte ho (only ₹1 for testing). "
-                                f"Ya fir kal ka wait kar sakte ho.\n\n"
+                                f"Ya fir kal ka wait kar sakte ho - kal aapko 3 free messages mil jayengi.\n\n"
                                 f"Maf kijiya ga 🙏"
                             )
                         else:
@@ -1907,7 +1907,7 @@ Copy your code and share! 💫"""
                                 f"Mujhe bohot bura lag raha hai ki main aapki abhi madad nahi kar pa raha. "
                                 f"System ki limitation hai yeh, main kar bhi kya sakta hoon?\n\n"
                                 f"Agar aapko raasta chahiye toh 'PAY' type karke ek choti si subscription le sakti ho (only ₹1 for testing). "
-                                f"Ya fir kal ka wait kar sakti ho.\n\n"
+                                f"Ya fir kal ka wait kar sakte ho - kal aapko 3 free messages mil jayengi.\n\n"
                                 f"Maf kijiye ga 🙏"
                             )
                     else:
@@ -1917,8 +1917,8 @@ Copy your code and share! 💫"""
                             limit_message = (
                                 f"I'm really sorry, but your free messages and daily limit are done for today 😔\n\n"
                                 f"I feel bad that I can't help you right now. It's a system limitation, and I feel terrible about it.\n\n"
-                                f"If you'd like to continue, you can get a small subscription by typing 'PAY' (only ₹1 for testing). "
-                                f"Or you can wait until tomorrow.\n\n"
+                                f"If you'd like to continue, type 'PAY' to get a small subscription (only ₹1 for testing). "
+                                f"Or you can wait until tomorrow - you'll get 3 free messages tomorrow.\n\n"
                                 f"Really sorry about this 🙏"
                             )
                         else:
@@ -1926,8 +1926,8 @@ Copy your code and share! 💫"""
                             limit_message = (
                                 f"I'm really sorry, but your free messages and daily limit are done for today 😔\n\n"
                                 f"I feel bad that I can't help you right now. It's a system limitation, and I feel terrible about it.\n\n"
-                                f"If you'd like to continue, you can get a small subscription by typing 'PAY' (only ₹1 for testing). "
-                                f"Or you can wait until tomorrow.\n\n"
+                                f"If you'd like to continue, type 'PAY' to get a small subscription (only ₹1 for testing). "
+                                f"Or you can wait until tomorrow - you'll get 3 free messages tomorrow.\n\n"
                                 f"Really sorry about this 🙏"
                             )
 
