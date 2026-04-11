@@ -1877,11 +1877,15 @@ Copy your code and share! 💫"""
 
                     # Detect language of user's message
                     user_language = _detect_language(message)
+                    logger.info(f"[Test Mode] User language detected: {user_language}")
 
                     # Get user's gender for personalized astrologer response
                     user_gender = await get_user_gender(phone, message)
+                    logger.info(f"[Test Mode] User gender: {user_gender}")
+
                     astrologer = get_astrologer_personality(user_gender)
                     astrologer_name = astrologer["name"]
+                    logger.info(f"[Test Mode] Selected astrologer: {astrologer_name} (opposite gender)")
 
                     # Generate personalized message from astrologer
                     if user_language == "hindi":
@@ -1927,8 +1931,12 @@ Copy your code and share! 💫"""
                                 f"Really sorry about this 🙏"
                             )
 
+                    logger.info(f"[Test Mode] Generated enforcement message from {astrologer_name}:")
+                    logger.info(f"[Test Mode] Message preview: {limit_message[:200]}...")
+
                     async with httpx.AsyncClient(timeout=30.0) as client:
                         await _send_whatsapp_message(client, phone, limit_message)
+                        logger.info(f"[Test Mode] Enforcement message sent to {phone} via WhatsApp")
 
                     await _log_to_mongo(
                         session_id, user_id, "assistant", limit_message, "whatsapp", "text", None,
@@ -1969,8 +1977,11 @@ Copy your code and share! 💫"""
         # Trial activation removed - users now get automatic access with 25 free messages
         # Send payment nudge to subscribe - personalized by astrologer
         user_gender = await get_user_gender(phone, message)
-        astrologer = _get_astrologer_personality(user_gender)
+        logger.info(f"[Subscription] User gender: {user_gender}")
+
+        astrologer = get_astrologer_personality(user_gender)
         astrologer_name = astrologer["name"]
+        logger.info(f"[Subscription] Selected astrologer: {astrologer_name} for payment nudge")
 
         if astrologer_name == "Meera":
             # Female astrologer (Meera) talking to male user
@@ -1987,8 +1998,11 @@ Copy your code and share! 💫"""
                 f"Agar aapko chahiye toh 'PAY' type karke subscription le lo (only ₹1 for testing)."
             )
 
+        logger.info(f"[Subscription] Payment message from {astrologer_name}: {payment_message[:150]}...")
+
         async with httpx.AsyncClient(timeout=30.0) as client:
             await _send_whatsapp_message(client, phone, payment_message)
+            logger.info(f"[Subscription] Payment nudge sent to {phone}")
 
         # Log the payment nudge to MongoDB
         await _log_to_mongo(
