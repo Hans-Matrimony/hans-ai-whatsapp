@@ -1831,17 +1831,25 @@ Copy your code and share! 💫"""
                                             total_messages += 1
                                             # Check if message is from today (MongoDB logger uses 'timestamp' not 'createdAt')
                                             msg_time = msg.get("timestamp", "")
+                                            today_start = _get_today_start_ist()[:10]  # Get YYYY-MM-DD part
+
+                                            logger.info(f"[Test Mode] Checking message timestamp: {msg_time}, today_start: {today_start}")
+
                                             if msg_time and isinstance(msg_time, str):
-                                                if msg_time.startswith(_get_today_start_ist()[:10]):
+                                                # First try: check if timestamp starts with today's date
+                                                if msg_time.startswith(today_start):
+                                                    logger.info(f"[Test Mode] ✓ Message counted (starts with today)")
                                                     today_messages += 1
-                                            elif isinstance(msg_time, str):
-                                                # Try parsing ISO date string
-                                                try:
-                                                    msg_date = msg_time.split('T')[0] if 'T' in msg_time else msg_time.split(' ')[0]
-                                                    if msg_date == _get_today_start_ist()[:10]:
-                                                        today_messages += 1
-                                                except:
-                                                    pass
+                                                # Fallback: try parsing ISO date string
+                                                else:
+                                                    try:
+                                                        msg_date = msg_time.split('T')[0] if 'T' in msg_time else msg_time.split(' ')[0]
+                                                        logger.info(f"[Test Mode] Extracted date: {msg_date}")
+                                                        if msg_date == today_start:
+                                                            logger.info(f"[Test Mode] ✓ Message counted (parsed date matches)")
+                                                            today_messages += 1
+                                                    except Exception as parse_error:
+                                                        logger.warning(f"[Test Mode] Failed to parse timestamp {msg_time}: {parse_error}")
 
                                 logger.info(f"[Test Mode] Total messages for {user_id}: {total_messages}, Today: {today_messages}")
                             except Exception as e:
