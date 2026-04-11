@@ -1750,8 +1750,11 @@ Copy your code and share! 💫"""
 
                         if count_response.status_code == 200:
                             count_data = count_response.json()
+                            logger.info(f"[Test Mode] MongoDB Logger Raw Response: {count_data}")
                             # Count total user messages from response
                             users = count_data.get("users", [])
+                            logger.info(f"[Test Mode] Users found: {len(users)}")
+                            logger.info(f"[Test Mode] Response keys: {list(count_data.keys())}")
                             if users and users[0].get("sessions"):
                                 for session in users[0]["sessions"]:
                                     for msg in session.get("messages", []):
