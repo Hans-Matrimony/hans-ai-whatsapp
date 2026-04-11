@@ -1809,7 +1809,9 @@ Copy your code and share! 💫"""
                 logger.warning("[Test Mode] MONGO_LOGGER_URL not configured, cannot count messages")
 
                 # Check if user has active subscription
+                logger.info(f"[Test Mode] About to check subscription access...")
                 access = await _check_subscription_access(phone)
+                logger.info(f"[Test Mode] Subscription check completed: {access}")
 
                 logger.info(f"[Test Mode] DEBUG: access={access.get('access')}, total_messages={total_messages}, FREE_MESSAGE_LIMIT={FREE_MESSAGE_LIMIT}")
 
@@ -1863,6 +1865,8 @@ Copy your code and share! 💫"""
             logger.error(f"[Test Mode] Error checking message limits: {e}", exc_info=True)
             import traceback
             traceback.print_exc()
+            logger.error(f"[Test Mode] EXCEPTION TYPE: {type(e).__name__}")
+            logger.error(f"[Test Mode] EXCEPTION MESSAGE: {str(e)}")
             # On error, allow message to avoid blocking users
 
     # ===================================================================
