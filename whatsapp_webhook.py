@@ -401,7 +401,13 @@ async def receive_webhook(request: Request):
                     # Interactive Button or List Reply
                     interactive = msg.get("interactive", {})
                     if "button_reply" in interactive:
-                        text_content = interactive["button_reply"].get("title", "")
+                        button_reply = interactive.get("button_reply", {})
+                        text_content = button_reply.get("title", "")
+                        payload = button_reply.get("id", "")  # Get the payload (button ID)
+                        # For buy_plan buttons, use the payload as text_content
+                        if payload and payload.startswith("buy_plan_"):
+                            text_content = payload
+                        logger.info(f"Button click: {text_content} (payload: {payload})")
                     elif "list_reply" in interactive:
                         # For list replies, use the ID (which contains plan number) instead of title
                         # This allows the existing digit check to work for plan selection

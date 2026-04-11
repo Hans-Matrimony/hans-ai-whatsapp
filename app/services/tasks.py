@@ -596,7 +596,8 @@ async def _get_plans_message() -> str:
 
 async def _send_plans_interactive(phone: str) -> bool:
     """
-    Send plans as a beautiful WhatsApp Interactive List message.
+    Send plans as beautiful messages with individual Buy Now buttons.
+    Each plan is sent separately with its own purchase button.
     Returns True if successful, False otherwise.
     """
     if not SUBSCRIPTIONS_URL:
@@ -618,34 +619,6 @@ async def _send_plans_interactive(phone: str) -> bool:
             if not plans:
                 return False
 
-        # Build interactive list sections
-        rows = []
-        for idx, plan in enumerate(plans, 1):
-            price_rupees = plan.get("price", 0) / 100
-            duration = plan.get("durationDays", 30)
-
-            # Build description from features
-            features = plan.get("features", [])
-            if features and isinstance(features, list):
-                # Join first 2 features with bullet points
-                feature_text = " • ".join(features[:2])
-                if len(features) > 2:
-                    feature_text += f" +{len(features) - 2} more"
-            else:
-                feature_text = f"{duration} days validity"
-
-            rows.append({
-                "id": str(idx),  # Plan number as ID
-                "title": f"{plan.get('name', 'Plan')} - ₹{price_rupees}",
-                "description": feature_text
-            })
-
-        # Create section
-        section = {
-            "title": "Available Plans",
-            "rows": rows
-        }
-
         # Import WhatsAppAPI
         from app.services.whatsapp_api import WhatsAppAPI
 
@@ -654,56 +627,104 @@ async def _send_plans_interactive(phone: str) -> bool:
             access_token=WHATSAPP_ACCESS_TOKEN
         )
 
-        # Send interactive list
-        message_id = await whatsapp_api.send_interactive_list(
-            to=phone,
-            header="💫 Choose Your Plan",
-            body="Select a subscription plan to unlock personalized astrology guidance. Each plan includes unlimited chat, detailed kundli analysis, and more.",
-            footer="Powered by Astro Friend",
-            button_text="Select Plan",
-            sections=[section]
-        )
+        # Send header message first
+        header_msg = "💫 *Choose Your Subscription Plan*\n\nUnlock personalized astrology guidance with our affordable plans:"
+        await whatsapp_api.send_text(phone, header_msg)
 
-        if message_id:
-            logger.info(f"[Plans] Sent interactive list to {phone}")
-            return True
-        else:
-            logger.error(f"[Plans] Failed to send interactive list")
-            return False
+        # Send each plan as a separate message with Buy button
+        # WhatsApp allows max 3 buttons per message, so we send 1-3 plans per message
+        for idx, plan in enumerate(plans, 1):
+            price_rupees = plan.get("price", 0) / 100
+            duration = plan.get("durationDays", 30)
+            plan_id = plan.get("planId", "")
+
+            # Build beautiful plan message
+            message = f"*{plan.get('name', 'Plan')}*\n"
+            message += f"💰 *₹{price_rupees}* for {duration} days\n\n"
+
+            # Add features
+            features = plan.get("features", [])
+            if features and isinstance(features, list):
+                for feature in features:
+                    message += f"✓ {feature}\n"
+
+            # Send with Buy Now button
+            await whatsapp_api.send_interactive_buttons(
+                to=phone,
+                text=message,
+                buttons=[{
+                    "id": f"buy_plan_{idx}_{plan_id}",  # Format: buy_plan_1_plan_id
+                    "title": f"Buy Now - ₹{price_rupees}"
+                }]
+            )
+
+        # Send footer message
+        footer_msg = "✨ Tap the button above to purchase your plan instantly via Razorpay secure payment!"
+        await whatsapp_api.send_text(phone, footer_msg)
+
+        logger.info(f"[Plans] Sent {len(plans)} plans with buttons to {phone}")
+        return True
 
     except Exception as e:
-        logger.error(f"Error sending plans interactive list: {e}")
+        logger.error(f"Error sending plans with buttons: {e}")
         return False
 
 
-async def _generate_payment_link(user_id: str, plan_number: int) -> str:
+async def _generate_payment_link(user_id: str, plan_number: int = None, plan_id: str = None) -> str:
     """
     Generate Razorpay payment link for selected plan.
     Calls subscriptions service which creates Razorpay Payment Link.
     Returns direct Razorpay payment URL - no custom page needed!
+
+    Args:
+        user_id: User phone number
+        plan_number: Plan index (1-based) for backward compatibility
+        plan_id: Plan ID from subscriptions service
     """
     if not SUBSCRIPTIONS_URL:
         logger.error("SUBSCRIPTIONS_URL not configured")
         return None
 
     try:
-        # First, fetch all plans to find the selected one
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            plans_response = await client.get(
-                f"{SUBSCRIPTIONS_URL}/plans?active_only=true"
-            )
-            if plans_response.status_code != 200:
-                return None
+        selected_plan = None
 
-            plans_data = plans_response.json()
-            plans = plans_data.get("plans", [])
+        # If plan_id provided, find plan directly
+        if plan_id:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                plans_response = await client.get(
+                    f"{SUBSCRIPTIONS_URL}/plans?active_only=true"
+                )
+                if plans_response.status_code == 200:
+                    plans_data = plans_response.json()
+                    plans = plans_data.get("plans", [])
+                    for plan in plans:
+                        if plan.get("planId") == plan_id:
+                            selected_plan = plan
+                            break
 
-            # Validate plan number
-            if plan_number < 1 or plan_number > len(plans):
-                return None
+        # If plan_number provided, find plan by index
+        elif plan_number:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                plans_response = await client.get(
+                    f"{SUBSCRIPTIONS_URL}/plans?active_only=true"
+                )
+                if plans_response.status_code != 200:
+                    return None
 
-            selected_plan = plans[plan_number - 1]
-            plan_id = selected_plan.get("planId")
+                plans_data = plans_response.json()
+                plans = plans_data.get("plans", [])
+
+                # Validate plan number
+                if plan_number < 1 or plan_number > len(plans):
+                    return None
+
+                selected_plan = plans[plan_number - 1]
+
+        if not selected_plan:
+            logger.error(f"Plan not found: plan_id={plan_id}, plan_number={plan_number}")
+            return None
+
+        final_plan_id = selected_plan.get("planId")
 
             # Call subscriptions service to create Razorpay Payment Link
             # This endpoint will use Razorpay Payment Links API
@@ -1365,9 +1386,23 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
             await _log_to_mongo(session_id, user_id, "assistant", plans_message, "whatsapp")
             return {"status": "plans_sent"}
 
-    # Check if user is selecting a plan (replying with number 1, 2, 3, etc.)
-    if message.strip().isdigit():
+    # Check if user is selecting a plan via button click (buy_plan_1_planid) or digit (1, 2, 3)
+    plan_number = None
+    plan_id_from_button = None
+
+    if message.strip().startswith("buy_plan_"):
+        # Parse button click: buy_plan_1_monthly_basic
+        parts = message.strip().split("_")
+        if len(parts) >= 3:
+            try:
+                plan_number = int(parts[2])  # Extract plan number
+                plan_id_from_button = parts[3] if len(parts) > 3 else None
+            except ValueError:
+                pass
+    elif message.strip().isdigit():
         plan_number = int(message.strip())
+
+    if plan_number is not None:
 
         # First fetch plan details
         try:
@@ -1379,8 +1414,19 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
                     plans_data = plans_response.json()
                     plans = plans_data.get("plans", [])
 
-                    if 1 <= plan_number <= len(plans):
+                    # Find the selected plan
+                    selected_plan = None
+                    if plan_id_from_button:
+                        # Find plan by ID from button click
+                        for plan in plans:
+                            if plan.get("planId") == plan_id_from_button:
+                                selected_plan = plan
+                                break
+                    elif 1 <= plan_number <= len(plans):
+                        # Find plan by number (backward compatibility)
                         selected_plan = plans[plan_number - 1]
+
+                    if selected_plan:
                         plan_id = selected_plan.get("planId")
                         plan_name = selected_plan.get("name", "Plan")
                         amount = selected_plan.get("price", 0)
@@ -1407,7 +1453,11 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
                                 return {"status": "payment_flow_sent", "flow_id": flow_message_id}
 
                         # Fallback to payment link if Flow is not configured
-                        payment_link = await _generate_payment_link(user_id, plan_number)
+                        payment_link = await _generate_payment_link(
+                            user_id,
+                            plan_number=plan_number if not plan_id_from_button else None,
+                            plan_id=plan_id_from_button
+                        )
                         if payment_link:
                             link_message = (
                                 f"Great! You selected **{plan_name}**.\n\n"
