@@ -1508,7 +1508,6 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
                             end_date = subscription.get("end_date")
 
                             if start_date and end_date:
-                                from datetime import datetime
                                 start = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
                                 end = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
                                 status_message += f"📅 **Plan:** {plan_name}\n"
