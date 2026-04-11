@@ -1364,6 +1364,18 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
     session_id = f"whatsapp:+{phone}"
     user_id = f"+{phone}"
 
+    # SPAM DETECTION: Check for repetitive spam messages
+    # If message is > 1000 chars and contains highly repetitive content, truncate it
+    if len(message) > 1000:
+        # Check if message is highly repetitive (same phrase repeated > 50 times)
+        words = message.split()
+        unique_words = set(words)
+        if len(words) > 100 and len(unique_words) < 20:
+            logger.warning(f"[SPAM] Detected repetitive spam message, truncating. Original length: {len(message)}")
+            # Keep first 200 chars only
+            message = message[:200]
+            message = message + "... (message truncated due to spam detection)"
+
     # Download media file if present (image, audio, video, document)
     # This downloads the actual file content and converts to base64
     # because WhatsApp media URLs require authentication
