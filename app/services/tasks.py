@@ -2574,122 +2574,121 @@ async def _check_inactive_users():
 def _generate_nudge_message(user_id: str, detected_topic: str, hours_inactive: float, user_language: str = "en") -> str:
     """
     Generate personalized nudge message based on detected topic and user language.
-    Stage 1: Topic-based messages (Stage 2 will be more personalized with Mem0)
-
+    
     Args:
         user_id: User phone number
         detected_topic: Topic detected from conversation (marriage, career, health, education)
         hours_inactive: Hours since last message
-        user_language: User's language preference ("en" or "hi")
+        user_language: User's language ("en", "hi", or "hinglish")
     """
+    import random
 
-    # English message templates based on topic
-    topic_messages_en = {
+    # Hinglish message templates (casual Roman-script Hindi — DEFAULT for Indian users)
+    topic_messages_hinglish = {
         "marriage": [
-            "Hey! Was thinking about our shaadi discussion... Your 7th house lord is actually quite strong right now. Should we check what the planets say about your marriage timing?",
-
-            "Namaste! You know, we were talking about your vivah earlier - Jupiter's current position might bring some good news for your relationships. Want me to analyze your kundli for this?",
-
-            "Hi! Remember we discussed your shaadi? The transit of Venus is favorable right now. Shall I check your birth chart for the best period?",
+            "Suno, pichli baar shaadi ki baat hui thi na... chart mein kuch interesting dikh raha hai abhi. Dekhein kya?",
+            "Arre, yaad hai shaadi ki baat? Abhi stars kaafi positive dikh rahe hain. Batau kya chal raha hai?",
+            "Hey! Shaadi wali baat yaad hai? Chart mein timing ke baare mein kuch naya dikh raha hai. Check karein?",
         ],
         "career": [
-            "Hey! Was thinking about your career discussion... Your 10th house has some interesting planetary movements happening. Want me to check what this means for your job prospects?",
-
-            "Hi! Remember you asked about your career? Saturn's position suggests good things coming professionally. Should I analyze your kundli for the timing?",
-
-            "Namaste! Your career discussion has been on my mind... Mercury is favoring your profession house right now. Want to know what opportunities are coming?",
+            "Suno, career ki baat soch rahi thi... abhi chart mein kuch accha dikh raha hai professionally. Batau?",
+            "Arre yaar, job ki baat yaad hai? Stars kuch positive dikha rahe hain. Dekhein kya opportunities aa rahi hain?",
+            "Hey! Career ke baare mein kuch interesting dikh raha hai chart mein. Time achha chal raha hai. Batau?",
         ],
         "health": [
-            "Hey! How are you feeling now? We talked about your health earlier... There are some simple remedies that might really help based on your current planetary position. Want me to check?",
-
-            "Hi! Was thinking about your health... The 6th house lord is well-placed in your chart right now, which is good for recovery. Should I suggest some personalized remedies?",
-
-            "Namaste! Hope you're feeling better... Your health houses look stronger in your recent kundli analysis. Want me to suggest some astrological remedies?",
+            "Suno, pichli baar health ki baat hui thi... kaisa feel ho raha hai ab? Chart mein kuch remedies hain jo help kar sakte hain.",
+            "Arre, health ke baare mein soch rahi thi. Ab kaisa hai? Kuch simple upay hain jo fayda karenge.",
+            "Hey! Tabiyat kaisi hai ab? Chart mein kuch acchi energy dikh rahi hai recovery ke liye.",
         ],
         "education": [
-            "Hey! How are your studies going? We talked about your exams... Your 5th house is very strong right now - great time for students! Should I check what the stars say about your results?",
-
-            "Hi! Remember your education discussion? Jupiter is blessing your learning house this month. Want me to analyze your chart for exam success?",
-
-            "Namaste! Was thinking about your studies... Mercury's position is excellent for concentration right now. Should I check your kundli for favorable periods?",
+            "Suno, padhai ka kya scene hai? Chart mein abhi learning ke liye bohot accha time chal raha hai!",
+            "Arre yaar, exams ki tayyari kaisi chal rahi hai? Stars kuch positive dikha rahe hain. Batau?",
+            "Hey! Padhai ko lekar chart mein kuch interesting dikh raha hai. Check karein?",
         ]
     }
 
-    # Hindi message templates based on topic
-    topic_messages_hi = {
-        "marriage": [
-            "नमस्ते! आपकी शादी की बात सोच रहा था... आपकी सातवीं भाव का शास्त्री अभी काफी मजबूत है। क्या हम ग्रहों को देखें कि आपकी शादी का समय क्या है?",
-
-            "हाय! हमने आपकी विवाह की बात की थी ना... बृहस्पति की वर्तमान स्थिति आपके रिश्तों के लिए अच्छी खबर ला सकती है। क्या मैं आपकी कुंडली का विश्लेषण करूं?",
-
-            "नमस्ते! याद है न हमने आपकी शादी पर बात की थी? शुक्र का गोचर अनुकूल है। क्या हम आपकी जन्म कुंडली को देखें?",
-        ],
-        "career": [
-            "हाय! आपकी करियर की बात सोच रहा था... आपकी दसवीं भाव में कुछ दिलचस्प ग्रह गतिविधि हो रही है। क्या मैं देखूं कि इसका क्या मतलब है?",
-
-            "नमस्ते! याद है न आपने अपनी नौकरी के बारे में पूछा था? शनि की स्थिति व्यावसायिक रूप से अच्छी चीजें ला रही है। क्या मैं समय जानूं?",
-
-            "हाय! आपकी नौकरी की चर्चा मेरे दिमाग में है... बुध आपकी व्यावसायिक भाव का अनुकूलन कर रहा है। क्या आपको पता है क्या अवसर आ रहे हैं?",
-        ],
-        "health": [
-            "नमस्ते! आप अभी कैसे महसूस कर रहे हो? हमने आपकी सेहत की बात की थी... कुछ सरल उपचार मदद कर सकते हैं। क्या मैं बताऊं?",
-
-            "हाय! आपकी सेहत की बात सोच रहा था... छठा भाव का स्वामी अच्छी तरह से स्थित है, जो ठीक है। क्या मैं कुछ व्यक्तिगत उपचार सुझाऊं?",
-
-            "नमस्ते! आशा है आप ठीक महसूस कर रहे हों... आपकी सेहत की भावें कुंडली विश्लेषण में मजबूत दिख रही हैं। क्या मैं ज्योतिषीय उपचार सुझाऊं?",
-        ],
-        "education": [
-            "हाय! आपकी पढ़ाई कैसी चल रही है? हमने आपकी परीक्षा की बात की थी... आपकी पांचवीं भाव बहुत मजबूत है! क्या मैं देखूं कि तारे क्या कहते हैं?",
-
-            "नमस्ते! याद है न आपकी शिक्षा की चर्चा? बृहस्पति इस महीने आपकी शिक्षा भाव को आशीर्वाद दे रहा है। क्या मैं आपकी कुंडली का विश्लेषण करूं?",
-
-            "हाय! आपकी पढ़ाई की बात सोच रहा था... बुध की स्थिति एकाग्रता के लिए उत्कृष्ट है। क्या मैं अनुकूल समय के लिए जांच करूं?",
-        ]
-    }
-
-    # Kundli-based messages when no topic detected
-    kundli_messages_en = [
-        "Hey! It's been a while... Your kundli shows some interesting planetary movements this week. Should we check what the stars have in store for you?",
-
-        "Namaste! Your birth chart indicates this is a good time for new beginnings. The planets are aligned in your favor - want me to analyze what this means for you?",
-
-        "Hi! Your current dasha period looks quite favorable according to your kundli. The coming weeks might bring some important changes. Shall we check your predictions?",
-
-        "Hey! Your Moon sign's position suggests this is a good time to revisit your goals. Your kundli has some insights about your near future. Want to take a look?",
-
-        "Namaste! Was looking at your birth chart... Your ascendant lord is strong right now, which is excellent for overall growth. Should we explore what this means for you?",
+    kundli_messages_hinglish = [
+        "Suno, kaafi din ho gaye baat kiye... chart mein kuch interesting chal raha hai abhi. Dekhein kya?",
+        "Arre yaar, kaise ho? Stars mein kuch naya dikh raha hai tumhare liye. Batau?",
+        "Hey! Bohot din ho gaye. Chart mein abhi accha time chal raha hai tumhara. Baat karein?",
+        "Suno, tumhare chart mein aage ke liye kuch changes dikh rahe hain. Dekhna chahoge?",
+        "Arre, yaad aa gaye tum! Chart mein kuch positive energy dikh rahi hai. Batau kya hai?",
     ]
 
+    # English message templates
+    topic_messages_en = {
+        "marriage": [
+            "Hey! Was thinking about our marriage discussion... Your chart shows some really positive energy right now. Should we check the timing?",
+            "Hi! Remember we talked about marriage? The stars are looking favorable. Want me to take a look?",
+            "Hey! Your chart has something interesting about relationships right now. Want to check?",
+        ],
+        "career": [
+            "Hey! Was thinking about your career... Your chart shows some interesting movements professionally. Want me to check?",
+            "Hi! Remember your career question? The timing looks good for progress. Should I analyze?",
+            "Hey! Some positive career energy showing up in your chart right now. Want to take a look?",
+        ],
+        "health": [
+            "Hey! How are you feeling now? Was thinking about your health... There are some simple remedies that might help. Want me to check?",
+            "Hi! Hope you're feeling better. Your chart shows good recovery energy. Should I suggest some remedies?",
+            "Hey! Your health sector looks stronger now. Want me to share some helpful insights?",
+        ],
+        "education": [
+            "Hey! How are your studies going? Your chart shows this is a great time for learning! Want me to check?",
+            "Hi! Remember your education discussion? The stars are favoring students right now. Should I analyze?",
+            "Hey! Your chart shows excellent learning potential right now. Want to take a look?",
+        ]
+    }
+
+    kundli_messages_en = [
+        "Hey! It's been a while... Your chart shows some interesting movements this week. Should we check?",
+        "Hi! Your chart indicates this is a good time for new beginnings. Want me to analyze?",
+        "Hey! Some positive shifts happening in your chart right now. Want to take a look?",
+        "Hi! Was looking at your chart... Some changes coming up ahead. Want to check?",
+        "Hey! Your chart has some insights about your near future. Want to take a look?",
+    ]
+
+    # Pure Hindi (Devanagari) message templates
+    topic_messages_hi = {
+        "marriage": [
+            "नमस्ते! शादी की बात याद है? चार्ट में कुछ positive दिख रहा है अभी। देखें क्या?",
+            "सुनो, शादी के बारे में सोच रही थी... stars काफी अच्छे दिख रहे हैं। बताऊं?",
+        ],
+        "career": [
+            "नमस्ते! करियर के बारे में सोच रही थी... चार्ट में कुछ अच्छा दिख रहा है। देखें?",
+            "सुनो, नौकरी वाली बात याद है? अभी timing अच्छी दिख रही है। बताऊं?",
+        ],
+        "health": [
+            "नमस्ते! तबियत कैसी है अब? कुछ उपाय हैं जो मदद कर सकते हैं।",
+            "सुनो, सेहत के बारे में सोच रही थी। कैसा feel हो रहा है?",
+        ],
+        "education": [
+            "नमस्ते! पढ़ाई कैसी चल रही है? चार्ट में अभी बहुत अच्छा time है!",
+            "सुनो, exams की तैयारी कैसी है? Stars positive दिख रहे हैं।",
+        ]
+    }
+
     kundli_messages_hi = [
-        "नमस्ते! काफी दिन हो गए... आपकी कुंडली कुछ दिलचस्प ग्रह गतिविधि दिखा रही है। क्या हम देखें कि तारे क्या कहते हैं?",
-
-        "हाय! आपकी जन्म कुंडली बताती है कि यह नई शुरुआत के लिए अच्छा समय है। ग्रह आपके पक्ष में हैं - क्या मैं विश्लेषण करूं?",
-
-        "नमस्ते! आपकी वर्तमान दशा आपकी कुंडली के अनुसार काफी अनुकूल दिख रही है। आने वाले हफ्तों में कुछ महत्वपूर्ण बदलाव आ सकते हैं। क्या हम जांचें?",
-
-        "हाय! आपकी चंद्र राशि की स्थिति बताती है कि यह अपने लक्ष्यों को दोबारा देखने का अच्छा समय है। आपकी कुंडली में आपके नज़दीक भविष्य के बारे में कुछ जानकारी है। क्या देखना चाहते हैं?",
-
-        "नमस्ते! आपकी जन्म कुंडली देख रहा था... आपका लग्न भाव का स्वामी अभी मजबूत है, जो समग्र विकास के लिए उत्कृष्ट है। क्या हम इसका अर्थ समझें?",
+        "नमस्ते! कैसे हो? चार्ट में कुछ interesting दिख रहा है। बात करें?",
+        "सुनो, काफी दिन हो गए... stars में कुछ नया है तुम्हारे लिए। बताऊं?",
+        "नमस्ते! चार्ट में अभी अच्छा time चल रहा है। देखना चाहोगे?",
     ]
 
     # Select message based on language and topic
-    if user_language == "hi":
-        # Hindi messages
-        if detected_topic and detected_topic in topic_messages_hi:
-            import random
-            messages = topic_messages_hi[detected_topic]
-            return random.choice(messages)
+    if user_language == "hinglish":
+        if detected_topic and detected_topic in topic_messages_hinglish:
+            return random.choice(topic_messages_hinglish[detected_topic])
         else:
-            import random
+            return random.choice(kundli_messages_hinglish)
+    elif user_language == "hi":
+        if detected_topic and detected_topic in topic_messages_hi:
+            return random.choice(topic_messages_hi[detected_topic])
+        else:
             return random.choice(kundli_messages_hi)
     else:
         # English messages (default)
         if detected_topic and detected_topic in topic_messages_en:
-            import random
-            messages = topic_messages_en[detected_topic]
-            return random.choice(messages)
+            return random.choice(topic_messages_en[detected_topic])
         else:
-            import random
             return random.choice(kundli_messages_en)
 
 
@@ -2739,41 +2738,69 @@ async def _get_recent_conversation_from_mongo(user_id: str, session_data: dict =
         logger.info(f"[Proactive Nudge] Total questions: {len(user_questions)}, analyzing last 5 for recent context")
         logger.debug(f"[Proactive Nudge] Recent questions: {[q[:50]+'...' if len(q)>50 else q for q in recent_questions]}")
 
-        # Language detection: Hindi vs English
-        # Detect Hindi by checking for Devanagari characters or common Hindi words
+        # Language detection: Prioritize LAST message for current language preference
         def detect_language(texts):
-            hindi_indicators = [
-                # Common Hindi words
-                "है", "हूं", "क्या", "कैसे", "कहां", "कब", "किस", "कितना",
-                "मेरा", "मेरी", "आपकी", "आप", "हम", "मुझे", "मुझे",
-                "चाहिए", "सकता", "सकती", "होगा", "होगी", "होती",
-                "जाना", "आना", "बताओ", "बताएं", "करूं", "करें",
-                # Hinglish words
-                "kya", "kaise", "kab", "kidhar", "kiska", "kitna",
-                "mera", "meri", "apka", "apki", "hum", "mujhe",
-                "chahiye", "sakta", "sakti", "hoga", "hogi",
-                "jana", "aana", "batao", "batayen", "karo", "kar"
+            """Detect language from user messages. Prioritizes the LAST message.
+            Returns: 'hi' (Devanagari Hindi), 'hinglish' (Roman-script Hindi), or 'en' (English)
+            """
+            # Expanded Hinglish word list (Roman-script Hindi/Hinglish)
+            hinglish_words = [
+                # Common conversational words
+                "kya", "kaise", "kab", "kahan", "kidhar", "kiska", "kitna", "kaisa",
+                "mera", "meri", "apka", "apki", "hum", "mujhe", "tumhe", "tumhare",
+                "chahiye", "sakta", "sakti", "hoga", "hogi", "hota", "hoti",
+                "batao", "batayen", "batana", "karo", "karna", "kar", "dekho", "dekh",
+                "acha", "achha", "theek", "thik", "nahi", "nhi", "haan", "ji",
+                "shaadi", "shadi", "kundli", "kundali", "dasha", "upay",
+                "suno", "arre", "yaar", "bhai", "dost", "log",
+                "hai", "hain", "tha", "thi", "raha", "rahi", "wala", "wali",
+                "abhi", "aaj", "kal", "parso", "pehle", "baad",
+                "bohot", "bahut", "bohut", "zyada", "kam", "thoda", "thodi",
+                "kuch", "sab", "bilkul", "pakka", "zarur", "zaroor",
+                "aana", "jana", "lena", "dena", "milna", "bolna", "sunna",
+                "matlab", "isliye", "kyunki", "lekin", "par", "magar",
+                "karunga", "karungi", "karenge", "rahega", "rahegi",
+                "tension", "problem", "pareshani", "dikkat",
+                "pata", "samajh", "jaanta", "jaanti",
+                "ghar", "office", "kaam", "naukri", "padhai",
+                "namaste", "namaskar",
+                # Question forms
+                "hogi", "hoga", "milega", "milegi", "lagega", "lagegi",
+                "chahiye", "chahte", "chahti",
+                # Greetings & fillers
+                "hello", "hey", "hi",  # These alone don't count - need Hindi context
             ]
 
-            hindi_score = 0
-            total_chars = 0
+            # Check the LAST message first (most recent language preference)
+            last_text = texts[-1] if texts else ""
+            last_text_lower = last_text.lower()
 
-            for text in texts:
-                total_chars += len(text)
-                text_lower = text.lower()
-
-                # Check for Devanagari characters (Unicode range)
-                if any('\u0900' <= char <= '\u097F' for char in text):
-                    hindi_score += len(text)
-
-                # Check for Hindi words
-                for word in hindi_indicators:
-                    if word in text_lower:
-                        hindi_score += 5  # Weight more for words
-
-            # If more than 20% Hindi content, classify as Hindi
-            if total_chars > 0 and (hindi_score / total_chars) > 0.2:
+            # Check for Devanagari in last message → Pure Hindi
+            if any('\u0900' <= char <= '\u097F' for char in last_text):
                 return "hi"
+
+            # Count Hinglish words in the LAST message
+            last_msg_words = set(re.split(r'\s+', last_text_lower))
+            hinglish_matches = last_msg_words.intersection(set(hinglish_words))
+
+            # If last message has 2+ Hinglish words or is short with 1+ Hinglish word → Hinglish
+            if len(hinglish_matches) >= 2 or (len(last_msg_words) <= 5 and len(hinglish_matches) >= 1):
+                return "hinglish"
+
+            # Fallback: check across all recent messages
+            all_text = " ".join(texts).lower()
+
+            # Check for Devanagari across all messages
+            if any('\u0900' <= char <= '\u097F' for char in all_text):
+                return "hi"
+
+            # Check Hinglish word density across all messages
+            all_words = set(re.split(r'\s+', all_text))
+            all_hinglish_matches = all_words.intersection(set(hinglish_words))
+
+            if len(all_hinglish_matches) >= 3:
+                return "hinglish"
+
             return "en"
 
         detected_language = detect_language(recent_questions)
