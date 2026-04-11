@@ -1762,7 +1762,6 @@ Copy your code and share! 💫"""
 
     def _get_today_start_ist() -> str:
         """Get today's start time in IST (UTC+5:30)."""
-        from datetime import datetime, timedelta
         import pytz
         ist = pytz.timezone('Asia/Kolkata')
         now_ist = datetime.now(ist)
@@ -1881,7 +1880,7 @@ Copy your code and share! 💫"""
                     user_language = _detect_language(message)
 
                     # Get user's gender for personalized astrologer response
-                    user_gender = await _get_user_gender(user_id)
+                    user_gender = await get_user_gender(phone, message)
                     astrologer = _get_astrologer_personality(user_gender)
                     astrologer_name = astrologer["name"]
 
@@ -1970,7 +1969,7 @@ Copy your code and share! 💫"""
 
         # Trial activation removed - users now get automatic access with 25 free messages
         # Send payment nudge to subscribe - personalized by astrologer
-        user_gender = await _get_user_gender(user_id)
+        user_gender = await get_user_gender(phone, message)
         astrologer = _get_astrologer_personality(user_gender)
         astrologer_name = astrologer["name"]
 
