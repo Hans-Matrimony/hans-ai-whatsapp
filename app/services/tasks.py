@@ -459,6 +459,57 @@ Remember: You're that friend she can actually count on 💪"""
 Friend first, astrologer second. Keep it short (15-20 words per bubble), ask how they're doing first, then help. No jargon, just real talk."""
 
 
+async def _check_and_apply_referral_code(phone: str, message: str) -> Optional[Dict]:
+    """
+    Check if message contains a referral code and apply it.
+
+    Args:
+        phone: User's phone number
+        message: User's message
+
+    Returns:
+        Dict with referral info if code found and applied, None otherwise
+    """
+    if not SUBSCRIPTIONS_URL:
+        return None
+
+    try:
+        # Pattern to match referral code (HANS + 4 digits + 3 letters, case-insensitive)
+        referral_pattern = r'\bHANS\d{4}[A-Z]{3}\b'
+
+        match = re.search(referral_pattern, message, re.IGNORECASE)
+
+        if match:
+            referral_code = match.group(0).upper()  # Normalize to uppercase
+            user_id = f"+{phone.replace('+', '')}"
+
+            logger.info(f"Referral code found: {referral_code} for user {user_id}")
+
+            # Apply referral code via subscriptions service
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                referral_response = await client.post(
+                    f"{SUBSCRIPTIONS_URL}/referrals/apply",
+                    json={
+                        "userId": user_id,
+                        "referralCode": referral_code
+                    }
+                )
+
+                if referral_response.status_code == 200:
+                    result = referral_response.json()
+                    logger.info(f"Referral code applied successfully: {result}")
+                    return result
+                else:
+                    logger.error(f"Failed to apply referral code: {referral_response.status_code}")
+                    return None
+
+        return None
+
+    except Exception as e:
+        logger.error(f"Error checking/apply referral code: {e}")
+        return None
+
+
 async def _extract_and_save_birth_details(phone: str, message: str) -> Optional[Dict]:
     """
     Extract birth details from user message and save to MongoDB.
@@ -1359,6 +1410,19 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
     except Exception as e:
         logger.warning(f"[Birth Details] Extraction failed: {e}")
 
+    # Check for and apply referral code in message
+    # This runs in background and doesn't block message processing
+    try:
+        referral_result = await _check_and_apply_referral_code(phone, message)
+        if referral_result and referral_result.get("success"):
+            logger.info(f"[Referral] Referral code applied for {phone}: {referral_result}")
+            # Send confirmation message to user
+            referral_confirm_msg = referral_result.get("message", "Referral code applied! You'll get 1 month FREE premium when you subscribe.")
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                await _send_whatsapp_message(client, phone, referral_confirm_msg)
+    except Exception as e:
+        logger.warning(f"[Referral] Referral code check failed: {e}")
+
     # Update user stats in MongoDB (increment question count, update last_seen)
     # This runs in background and doesn't block message processing
     try:
@@ -1425,6 +1489,57 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
                 await _send_whatsapp_message(client, phone, plans_message)
             await _log_to_mongo(session_id, user_id, "assistant", plans_message, "whatsapp")
             return {"status": "plans_sent"}
+
+    # ==================== REFERRAL COMMAND (GLOBAL) ====================
+    # Check for REFER command - share with friends
+    referral_command = message.strip().upper()
+    if referral_command in ["REFER", "REFERRAL", "REFERRALS", "SHARE", "INVITE"]:
+        # Get referral link for user
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                referral_response = await client.get(
+                    f"{SUBSCRIPTIONS_URL}/referrals/my-link/{user_id}"
+                )
+
+                if referral_response.status_code == 200:
+                    referral_data = referral_response.json()
+
+                    # Format beautiful referral message
+                    referral_msg = f"""🎁 *Share your Astrofriend!*
+
+Your referral code: *{referral_data.get('referralCode', 'N/A')}*
+
+Share this with friends who need guidance. When they subscribe:
+✓ You get 1 month FREE premium
+✓ They also get 1 month FREE premium
+
+📊 *Your Stats:*
+Total referrals: {referral_data.get('totalReferrals', 0)}
+Free months earned: {referral_data.get('freeMonthsEarned', 0)}
+
+*Share link:*
+{referral_data.get('referralLink', 'N/A')}
+
+Copy your code and share! 💫"""
+
+                    async with httpx.AsyncClient(timeout=30.0) as client2:
+                        await _send_whatsapp_message(client2, phone, referral_msg)
+                    await _log_to_mongo(session_id, user_id, "assistant", referral_msg, "whatsapp")
+                    return {"status": "referral_sent"}
+                else:
+                    error_msg = "Unable to generate referral link. Please try again later."
+                    async with httpx.AsyncClient(timeout=30.0) as client:
+                        await _send_whatsapp_message(client, phone, error_msg)
+                    await _log_to_mongo(session_id, user_id, "assistant", error_msg, "whatsapp")
+                    return {"status": "referral_error"}
+
+        except Exception as e:
+            logger.error(f"Error generating referral link: {e}")
+            error_msg = "Sorry, something went wrong. Please try again later."
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                await _send_whatsapp_message(client, phone, error_msg)
+            await _log_to_mongo(session_id, user_id, "assistant", error_msg, "whatsapp")
+            return {"status": "referral_error"}
 
     # Check if user is selecting a plan via button click (buy_plan_1_planid) or digit (1, 2, 3)
     plan_number = None
