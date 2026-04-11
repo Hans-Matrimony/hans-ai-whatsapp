@@ -1474,24 +1474,50 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
 
     # ==================== PAY COMMAND CHECK (GLOBAL) ====================
     # Check for PAY command FIRST, before subscription check
-    # This allows ANY user to request plan options
+    # This allows ANY user to request plan options OR check their subscription
 
     pay_command = message.strip().upper()
     if pay_command in ["PAY", "PAYMENT", "PLAN", "PLANS", "SUBSCRIBE"]:
-        # Send beautiful interactive list with plans
-        success = await _send_plans_interactive(phone)
-        if success:
-            # Log a simple message (the actual list is sent via WhatsApp API)
-            log_message = "💫 Subscription plans sent - please select a plan from the list"
-            await _log_to_mongo(session_id, user_id, "assistant", log_message, "whatsapp")
-            return {"status": "plans_sent"}
-        else:
-            # Fallback to text message if interactive list fails
-            plans_message = await _get_plans_message()
+        # Check if user already has an active subscription
+        access = await _check_subscription_access(phone)
+
+        if access.get("access") == "active":
+            # User already has an active subscription - show details
+            subscription = access.get("subscription", {})
+            end_date = subscription.get("endDate", "N/A")
+
+            # Format date nicely
+            try:
+                from datetime import datetime
+                if isinstance(end_date, str):
+                    dt = datetime.fromisoformat(end_date)
+                    end_date_str = dt.strftime("%d %B %Y")
+                else:
+                    end_date_str = str(end_date)
+            except:
+                end_date_str = str(end_date)
+
+            active_message = f"✨ You already have an **active subscription**!\n\n📅 Valid till: {end_date_str}\n\nEnjoy unlimited access to all features! 🎉"
             async with httpx.AsyncClient(timeout=30.0) as client:
-                await _send_whatsapp_message(client, phone, plans_message)
-            await _log_to_mongo(session_id, user_id, "assistant", plans_message, "whatsapp")
-            return {"status": "plans_sent"}
+                await _send_whatsapp_message(client, phone, active_message)
+            await _log_to_mongo(session_id, user_id, "assistant", active_message, "whatsapp")
+            return {"status": "subscription_active", "end_date": end_date}
+
+        else:
+            # No active subscription - show plans
+            success = await _send_plans_interactive(phone)
+            if success:
+                # Log a simple message (the actual list is sent via WhatsApp API)
+                log_message = "💫 Subscription plans sent - please select a plan from the list"
+                await _log_to_mongo(session_id, user_id, "assistant", log_message, "whatsapp")
+                return {"status": "plans_sent"}
+            else:
+                # Fallback to text message if interactive list fails
+                plans_message = await _get_plans_message()
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    await _send_whatsapp_message(client, phone, plans_message)
+                await _log_to_mongo(session_id, user_id, "assistant", plans_message, "whatsapp")
+                return {"status": "plans_sent"}
 
     # ==================== REFERRAL COMMAND (GLOBAL) ====================
     # Check for REFER command - share with friends
@@ -1721,18 +1747,13 @@ Copy your code and share! 💫"""
 
     # ===================================================================
 
-    # ==================== MESSAGE LIMIT CHECK (TEST MODE) ====================
+    # ==================== MESSAGE LIMIT CHECK (PRODUCTION) ====================
 
-    # TEST MODE: Only enforce for 9760347653 (your number)
-    # TODO: Roll out to all users after testing
-    TEST_PHONE_NUMBER = "919760347653"  # Your number with country code
     FREE_MESSAGE_LIMIT = 40
     DAILY_MESSAGE_LIMIT = 3
 
-    # Check if this is the test number
-    if phone == TEST_PHONE_NUMBER or phone == "+919760347653":
-        logger.info(f"[Test Mode] CHECK: Entered test mode! phone={phone}, TEST_PHONE_NUMBER={TEST_PHONE_NUMBER}")
-        logger.info(f"[Test Mode] Checking message limits for {phone}")
+    # Apply enforcement to ALL users (not just test number)
+    logger.info(f"[Enforcement] Checking message limits for {phone}")
 
         try:
             # Try to count total user messages from MongoDB logger
@@ -1751,7 +1772,7 @@ Copy your code and share! 💫"""
 
                         if count_response.status_code == 200:
                             count_data = count_response.json()
-                            logger.info(f"[Test Mode] MongoDB Logger Raw Response keys: {list(count_data.keys())}")
+                            logger.info(f"[Enforcement] MongoDB Logger Raw Response keys: {list(count_data.keys())}")
 
                             try:
                                 # When userId is provided, API returns user doc directly
@@ -1759,21 +1780,21 @@ Copy your code and share! 💫"""
                                 if "sessions" in count_data:
                                     # Single user document returned
                                     sessions = count_data.get("sessions", [])
-                                    logger.info(f"[Test Mode] Single user doc with {len(sessions)} sessions")
+                                    logger.info(f"[Enforcement] Single user doc with {len(sessions)} sessions")
                                 elif "users" in count_data:
                                     # Multiple users returned
                                     users_list = count_data.get("users", [])
                                     if users_list and users_list[0].get("sessions"):
                                         sessions = users_list[0]["sessions"]
-                                        logger.info(f"[Test Mode] Multiple users, first has {len(sessions)} sessions")
+                                        logger.info(f"[Enforcement] Multiple users, first has {len(sessions)} sessions")
                                     else:
                                         sessions = []
-                                        logger.info(f"[Test Mode] Multiple users but no sessions found")
+                                        logger.info(f"[Enforcement] Multiple users but no sessions found")
                                 else:
                                     sessions = []
-                                    logger.info(f"[Test Mode] No sessions or users key in response")
+                                    logger.info(f"[Enforcement] No sessions or users key in response")
 
-                                logger.info(f"[Test Mode] Total sessions to process: {len(sessions)}")
+                                logger.info(f"[Enforcement] Total sessions to process: {len(sessions)}")
 
                                 # Count messages from all sessions
                                 for session in sessions:
@@ -1795,37 +1816,37 @@ Copy your code and share! 💫"""
                                                 except:
                                                     pass
 
-                                logger.info(f"[Test Mode] Total messages for {user_id}: {total_messages}, Today: {today_messages}")
+                                logger.info(f"[Enforcement] Total messages for {user_id}: {total_messages}, Today: {today_messages}")
                             except Exception as e:
-                                logger.error(f"[Test Mode] Error parsing MongoDB response: {e}")
+                                logger.error(f"[Enforcement] Error parsing MongoDB response: {e}")
                                 import traceback
                                 traceback.print_exc()
                         else:
-                            logger.warning(f"[Test Mode] Failed to count messages: {count_response.status_code}")
+                            logger.warning(f"[Enforcement] Failed to count messages: {count_response.status_code}")
                 except Exception as e:
-                    logger.warning(f"[Test Mode] Error counting messages: {e}")
+                    logger.warning(f"[Enforcement] Error counting messages: {e}")
                     # Default to allowing the message if counting fails
                     total_messages = 0
             else:
-                logger.warning("[Test Mode] MONGO_LOGGER_URL not configured, cannot count messages")
+                logger.warning("[Enforcement] MONGO_LOGGER_URL not configured, cannot count messages")
 
             # Check if user has active subscription (OUTSIDE if/else blocks)
-            logger.info(f"[Test Mode] About to check subscription access...")
+            logger.info(f"[Enforcement] About to check subscription access...")
             access = await _check_subscription_access(phone)
-            logger.info(f"[Test Mode] Subscription check completed: {access}")
+            logger.info(f"[Enforcement] Subscription check completed: {access}")
 
-            logger.info(f"[Test Mode] DEBUG: access={access.get('access')}, total_messages={total_messages}, FREE_MESSAGE_LIMIT={FREE_MESSAGE_LIMIT}")
+            logger.info(f"[Enforcement] DEBUG: access={access.get('access')}, total_messages={total_messages}, FREE_MESSAGE_LIMIT={FREE_MESSAGE_LIMIT}")
 
             # Check if user has active subscription (full_access or active skips enforcement)
             if access.get("access") in ["full_access", "active"]:
-                logger.info(f"[Test Mode] User has active subscription ({access.get('access')}) - skipping enforcement")
+                logger.info(f"[Enforcement] User has active subscription ({access.get('access')}) - skipping enforcement")
             # User has trial, trial_ending_soon, or no subscription - enforce limits
             elif total_messages >= FREE_MESSAGE_LIMIT:
-                logger.info(f"[Test Mode] User exhausted {FREE_MESSAGE_LIMIT} free messages (total: {total_messages}, access: {access.get('access')})")
+                logger.info(f"[Enforcement] User exhausted {FREE_MESSAGE_LIMIT} free messages (total: {total_messages}, access: {access.get('access')})")
 
                 # Check if daily limit reached
                 if today_messages >= DAILY_MESSAGE_LIMIT:
-                    logger.warning(f"[Test Mode] Daily limit reached ({today_messages}/{DAILY_MESSAGE_LIMIT}) - SENDING SOFT PAYWALL")
+                    logger.warning(f"[Enforcement] Daily limit reached ({today_messages}/{DAILY_MESSAGE_LIMIT}) - SENDING SOFT PAYWALL")
 
                     # Detect language of user's message
                     user_language = _detect_language(message)
@@ -1855,27 +1876,27 @@ Copy your code and share! 💫"""
                     return {"status": "daily_limit_reached", "total_messages": total_messages, "today_messages": today_messages}
                 else:
                     remaining = DAILY_MESSAGE_LIMIT - today_messages
-                    logger.info(f"[Test Mode] Daily limit not reached ({today_messages}/{DAILY_MESSAGE_LIMIT}), {remaining} remaining")
+                    logger.info(f"[Enforcement] Daily limit not reached ({today_messages}/{DAILY_MESSAGE_LIMIT}), {remaining} remaining")
                     # Continue processing message
 
             else:
                 remaining_free = FREE_MESSAGE_LIMIT - total_messages
-                logger.info(f"[Test Mode] User has {remaining_free} free messages remaining")
+                logger.info(f"[Enforcement] User has {remaining_free} free messages remaining")
 
         except Exception as e:
-            logger.error(f"[Test Mode] Error checking message limits: {e}", exc_info=True)
+            logger.error(f"[Enforcement] Error checking message limits: {e}", exc_info=True)
             import traceback
             traceback.print_exc()
-            logger.error(f"[Test Mode] EXCEPTION TYPE: {type(e).__name__}")
-            logger.error(f"[Test Mode] EXCEPTION MESSAGE: {str(e)}")
+            logger.error(f"[Enforcement] EXCEPTION TYPE: {type(e).__name__}")
+            logger.error(f"[Enforcement] EXCEPTION MESSAGE: {str(e)}")
             # On error, allow message to avoid blocking users
 
     # ===================================================================
 
-    # ==================== SUBSCRIPTION CHECK ====================
+    # ==================== SUBSCRIPTION ACCESS CHECK ====================
 
     # Check if user has valid subscription (trial or active)
-    # Only enforced for SUBSCRIPTION_TEST_NUMBER in testing mode
+    # This is a second check - enforcement above handles trial users with limits
     access = await _check_subscription_access(phone)
 
     if access.get("access") == "no_access":
