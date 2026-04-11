@@ -1883,15 +1883,17 @@ Copy your code and share! 💫"""
                     # Send soft enforcement message based on language
                     if user_language == "hindi":
                         limit_message = (
-                            "🙏 Sorry, lekin aapki 40 free messages khatam ho gayi hain aur aaj ki 3 messages limit bhi puri ho gayi hai.\n\n"
-                            "Main aapko jawab dena chahta hoon, lekin mujhe subscription lena padega taaki main aapki madad kar sakun.\n\n"
-                            "Please 'PAY' type karein aur subscription lein (only ₹1 for testing)."
+                            "Bhai, bas ho gayi yaar free messages 😅\n\n"
+                            "Main toh jawab deta hi lekin system ne limit laga diya hai. "
+                            "Agar continue karna hai toh choti si subscription le lo (only ₹1 testing ke liye).\n\n"
+                            "'PAY' type kar ke dekho options."
                         )
                     else:
                         limit_message = (
-                            "🙏 I'm really sorry but you've used your 40 free messages and today's 3 message limit.\n\n"
-                            "I want to answer you but I need a subscription to continue helping you.\n\n"
-                            "Please type 'PAY' to get subscription (only ₹1 for testing)."
+                            "Hey, free messages are done for today 😅\n\n"
+                            "I'd love to help but there's a limit on free messages now. "
+                            "If you want to continue, just get a small subscription (only ₹1 for testing).\n\n"
+                            "Type 'PAY' to see options."
                         )
 
                     async with httpx.AsyncClient(timeout=30.0) as client:
@@ -1936,9 +1938,8 @@ Copy your code and share! 💫"""
         # Trial activation removed - users now get automatic access with 40 free messages
         # Send payment nudge to subscribe
         payment_message = (
-            "Your free messages have ended. To continue using Astrofriend services, "
-            "please subscribe to a plan.\n\n"
-            "Reply *PAY* to see subscription options."
+            "Free messages khatam ho gayi yaar 😅\n\n"
+            "Agar continue karna hai toh 'PAY' type kar ke subscription le lo (only ₹1 for testing)."
         )
 
         async with httpx.AsyncClient(timeout=30.0) as client:
