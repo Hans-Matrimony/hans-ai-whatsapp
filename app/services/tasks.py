@@ -1478,6 +1478,56 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
 
     pay_command = message.strip().upper()
     if pay_command in ["PAY", "PAYMENT", "PLAN", "PLANS", "SUBSCRIBE"]:
+        # Check if user already has an active subscription
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                access_response = await client.get(
+                    f"{SUBSCRIPTIONS_URL}/users/{user_id}/access-check"
+                )
+                if access_response.status_code == 200:
+                    access_data = access_response.json()
+                    access_status = access_data.get("access")
+
+                    # If user has active subscription, show status instead of plans
+                    if access_status in ["full_access", "active"]:
+                        logger.info(f"[PAY Command] User {user_id} has active subscription: {access_status}")
+
+                        # Get subscription details
+                        sub_response = await client.get(
+                            f"{SUBSCRIPTIONS_URL}/subscriptions/{user_id}"
+                        )
+
+                        status_message = "✅ **You already have an active subscription!**\n\n"
+
+                        if sub_response.status_code == 200:
+                            sub_data = sub_response.json()
+                            subscription = sub_data.get("subscription", {})
+
+                            plan_name = subscription.get("plan_name", "Premium Plan")
+                            start_date = subscription.get("start_date")
+                            end_date = subscription.get("end_date")
+
+                            if start_date and end_date:
+                                from datetime import datetime
+                                start = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
+                                end = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
+                                status_message += f"📅 **Plan:** {plan_name}\n"
+                                status_message += f"🗓️ **Started:** {start.strftime('%d %b %Y')}\n"
+                                status_message += f"⏰ **Expires:** {end.strftime('%d %b %Y')}\n\n"
+                                status_message += "Enjoy unlimited access to all features! 💫"
+                            else:
+                                status_message += f"📅 **Plan:** {plan_name}\n\n"
+                                status_message += "Your subscription is active. Enjoy unlimited access! 💫"
+                        else:
+                            status_message += "Your subscription is active. Enjoy unlimited access! 💫"
+
+                        async with httpx.AsyncClient(timeout=30.0) as msg_client:
+                            await _send_whatsapp_message(msg_client, phone, status_message)
+                        await _log_to_mongo(session_id, user_id, "assistant", status_message, "whatsapp")
+                        return {"status": "subscription_shown"}
+        except Exception as e:
+            logger.warning(f"[PAY Command] Failed to check subscription status: {e}")
+
         # Send beautiful interactive list with plans
         success = await _send_plans_interactive(phone)
         if success:
@@ -2916,7 +2966,7 @@ async def _generate_kundli_pdf_async(phone: str, user_id: str, dob: str, tob: st
             access_token=WHATSAPP_ACCESS_TOKEN
         )
 
-        caption = f"Namaste {user_data.get('name', 'User')}! 🙏 Here's your detailed Janam Kundli PDF."
+        caption = "Yeh rahi aapki Kundli PDF! 📄✨"
 
         message_id = await whatsapp_api.send_document(
             to=phone,
