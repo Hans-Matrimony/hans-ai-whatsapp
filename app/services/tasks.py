@@ -777,10 +777,12 @@ async def _generate_payment_link(user_id: str, plan_number: int = None, plan_id:
         return None
 
     try:
+        logger.info(f"[Payment Link] Generating link for user={user_id}, plan_number={plan_number}, plan_id={plan_id}")
         selected_plan = None
 
         # If plan_id provided, find plan directly
         if plan_id:
+            logger.info(f"[Payment Link] Searching for plan with ID: {plan_id}")
             async with httpx.AsyncClient(timeout=10.0) as client:
                 plans_response = await client.get(
                     f"{SUBSCRIPTIONS_URL}/plans?active_only=true"
@@ -788,9 +790,11 @@ async def _generate_payment_link(user_id: str, plan_number: int = None, plan_id:
                 if plans_response.status_code == 200:
                     plans_data = plans_response.json()
                     plans = plans_data.get("plans", [])
+                    logger.info(f"[Payment Link] Available plans: {[p.get('planId') for p in plans]}")
                     for plan in plans:
                         if plan.get("planId") == plan_id:
                             selected_plan = plan
+                            logger.info(f"[Payment Link] Found plan: {plan.get('name')}")
                             break
 
         # If plan_number provided, find plan by index
@@ -816,18 +820,24 @@ async def _generate_payment_link(user_id: str, plan_number: int = None, plan_id:
             return None
 
         final_plan_id = selected_plan.get("planId")
+        logger.info(f"[Payment Link] Selected plan: {selected_plan.get('name')}, final_plan_id={final_plan_id}")
 
         # Call subscriptions service to create Razorpay Payment Link
         # This endpoint will use Razorpay Payment Links API
+        request_body = {
+            "userId": user_id,
+            "planId": final_plan_id,  # Use the correctly extracted plan ID
+            "currency": "INR"
+        }
+        logger.info(f"[Payment Link] Calling subscriptions API with: {request_body}")
+
         async with httpx.AsyncClient(timeout=30.0) as client:
             payment_link_response = await client.post(
                 f"{SUBSCRIPTIONS_URL}/payments/create-payment-link",
-                json={
-                    "userId": user_id,
-                    "planId": plan_id,
-                    "currency": "INR"
-                }
+                json=request_body
             )
+
+            logger.info(f"[Payment Link] API Response status: {payment_link_response.status_code}")
 
             if payment_link_response.status_code == 200:
                 link_data = payment_link_response.json()
@@ -1513,11 +1523,14 @@ Copy your code and share! 💫"""
     if message.strip().startswith("buy_plan_"):
         # Parse button click: buy_plan_1_monthly_basic
         parts = message.strip().split("_")
+        logger.info(f"[Button Parse] Button message parts: {parts}")
         if len(parts) >= 3:
             try:
                 plan_number = int(parts[2])  # Extract plan number
                 plan_id_from_button = parts[3] if len(parts) > 3 else None
+                logger.info(f"[Button Parse] Parsed plan_number={plan_number}, plan_id={plan_id_from_button}")
             except ValueError:
+                logger.error(f"[Button Parse] Failed to parse plan number from: {parts[2]}")
                 pass
     elif message.strip().isdigit():
         plan_number = int(message.strip())
@@ -1565,24 +1578,35 @@ Copy your code and share! 💫"""
                 if plans_response.status_code == 200:
                     plans_data = plans_response.json()
                     plans = plans_data.get("plans", [])
+                    logger.info(f"[Plan Selection] Total plans available: {len(plans)}")
+                    logger.info(f"[Plan Selection] Looking for: plan_number={plan_number}, plan_id_from_button={plan_id_from_button}, plan_id_from_name={plan_id_from_name}")
 
                     # Find the selected plan
                     selected_plan = None
                     if plan_id_from_name:
                         # Find plan by ID from name match
+                        logger.info(f"[Plan Selection] Searching by plan_id_from_name: {plan_id_from_name}")
                         for plan in plans:
                             if plan.get("planId") == plan_id_from_name:
                                 selected_plan = plan
+                                logger.info(f"[Plan Selection] Found plan by name match: {plan.get('name')}")
                                 break
                     elif plan_id_from_button:
                         # Find plan by ID from button click
+                        logger.info(f"[Plan Selection] Searching by plan_id_from_button: {plan_id_from_button}")
                         for plan in plans:
                             if plan.get("planId") == plan_id_from_button:
                                 selected_plan = plan
+                                logger.info(f"[Plan Selection] Found plan by button ID: {plan.get('name')}")
                                 break
                     elif 1 <= plan_number <= len(plans):
                         # Find plan by number (backward compatibility)
+                        logger.info(f"[Plan Selection] Searching by plan_number: {plan_number}")
                         selected_plan = plans[plan_number - 1]
+                        logger.info(f"[Plan Selection] Found plan by number: {selected_plan.get('name')}")
+
+                    if not selected_plan:
+                        logger.error(f"[Plan Selection] No plan found! Available plans: {[p.get('planId') for p in plans]}")
 
                     if selected_plan:
                         plan_id = selected_plan.get("planId")
