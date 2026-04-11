@@ -817,16 +817,16 @@ async def _generate_payment_link(user_id: str, plan_number: int = None, plan_id:
 
         final_plan_id = selected_plan.get("planId")
 
-            # Call subscriptions service to create Razorpay Payment Link
-            # This endpoint will use Razorpay Payment Links API
+        # Call subscriptions service to create Razorpay Payment Link
+        # This endpoint will use Razorpay Payment Links API
+        async with httpx.AsyncClient(timeout=30.0) as client:
             payment_link_response = await client.post(
                 f"{SUBSCRIPTIONS_URL}/payments/create-payment-link",
                 json={
                     "userId": user_id,
                     "planId": plan_id,
                     "currency": "INR"
-                },
-                timeout=30.0
+                }
             )
 
             if payment_link_response.status_code == 200:
@@ -2667,129 +2667,6 @@ def proactive_nudge_task():
         logger.error(f"[Proactive Nudge] ===== TASK FAILED =====", exc_info=True)
         logger.error(f"[Proactive Nudge] Error: {e}")
         return {"error": str(e)}
-
-
-@celery_app.task
-def send_inactive_template_task():
-    """
-    Send approved WhatsApp template to users inactive for 22+ hours.
-    Can be run manually for one-time re-engagement campaigns.
-    Only sends messages between 9 AM - 10 PM IST.
-    """
-    import asyncio
-    from datetime import datetime
-    import pytz
-
-    try:
-        logger.info("[Inactive Template] ===== TASK STARTED =====")
-
-        # Check IST time window (9 AM - 10 PM)
-        ist = pytz.timezone('Asia/Kolkata')
-        now_ist = datetime.now(ist)
-        current_hour = now_ist.hour
-
-        if not (9 <= current_hour < 22):
-            logger.info(f"[Inactive Template] Outside active hours ({current_hour}:00 IST), skipping")
-            return {"status": "outside_active_hours", "current_hour": current_hour}
-
-        # Run async logic
-        result = asyncio.run(_check_inactive_users_for_template())
-
-        logger.info("[Inactive Template] ===== TASK COMPLETED =====")
-        return result
-
-    except Exception as e:
-        logger.error(f"[Inactive Template] ===== TASK FAILED =====", exc_info=True)
-        return {"error": str(e)}
-
-
-async def _check_inactive_users_for_template():
-    """Logic to find inactive users and send the intro template."""
-    if not MONGO_LOGGER_URL:
-        return {"error": "Mongo Logger URL missing"}
-
-    import httpx
-    from datetime import datetime, timezone, timedelta
-    from app.services.whatsapp_api import WhatsAppAPI
-
-    now = datetime.now(timezone.utc)
-    threshold = now - timedelta(hours=22)
-    
-    whatsapp_api = WhatsAppAPI(
-        phone_id=WHATSAPP_PHONE_ID,
-        access_token=WHATSAPP_ACCESS_TOKEN
-    )
-
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        try:
-            response = await client.get(f"{MONGO_LOGGER_URL}/messages")
-            if response.status_code != 200:
-                return {"error": f"Mongo Logger error: {response.status_code}"}
-            
-            users = response.json().get("users", [])
-            logger.info(f"[Inactive Template] Scanning {len(users)} users")
-        except Exception as e:
-            return {"error": f"Fetch failed: {e}"}
-
-        sent_count = 0
-        for user in users:
-            user_id = user.get("userId", "")
-            if not user_id or not user_id.startswith("+"):
-                continue
-
-            # Filtering for 22+ hours inactive
-            is_eligible = False
-            for session in user.get("sessions", []):
-                if "whatsapp" not in session.get("channel", "").lower():
-                    continue
-                
-                last_msg_str = session.get("lastMessageTime", "")
-                if not last_msg_str: continue
-
-                try:
-                    if last_msg_str.endswith('Z'):
-                        last_msg_time = datetime.fromisoformat(last_msg_str.replace('Z', '+00:00'))
-                    else:
-                        last_msg_time = datetime.fromisoformat(last_msg_str)
-                    
-                    if (now - last_msg_time).total_seconds() / 3600 >= 22:
-                        is_eligible = True
-                        break
-                except: continue
-
-            if not is_eligible:
-                continue
-
-            # DEDUP: Skip if sent in last 24 hours
-            redis_key = f"inactive_template_sent:{user_id}"
-            if _nudge_redis:
-                try:
-                    if _nudge_redis.exists(redis_key):
-                        continue
-                except: pass
-
-            # Send Template
-            phone = user_id.replace("+", "")
-            try:
-                msg_id = await whatsapp_api.send_template(
-                    to=phone,
-                    template_name="astrofriend_intro_template",
-                    language_code="en_IN"
-                )
-                if msg_id:
-                    sent_count += 1
-                    logger.info(f"[Inactive Template] ✓ Sent to {user_id}")
-                    if _nudge_redis:
-                        try:
-                            _nudge_redis.setex(redis_key, 86400, "1") # 24h TTL
-                        except: pass
-            except Exception as e:
-                logger.error(f"[Inactive Template] ✗ Error sending to {user_id}: {e}")
-
-            # Small delay
-            await asyncio.sleep(0.5)
-
-    return {"status": "success", "templates_sent": sent_count}
 
 
 async def _check_inactive_users():
