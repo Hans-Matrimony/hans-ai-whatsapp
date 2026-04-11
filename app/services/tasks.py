@@ -1768,59 +1768,54 @@ Copy your code and share! 💫"""
 
     # ===================================================================
 
-    # ==================== MESSAGE LIMIT CHECK (TEST MODE) ====================
+    # ==================== MESSAGE LIMIT ENFORCEMENT (PRODUCTION) ====================
 
-    # TEST MODE: Only enforce for 9760347653 (your number)
-    # TODO: Roll out to all users after testing
-    TEST_PHONE_NUMBER = "919760347653"  # Your number with country code
+    # Message limits for all users
     FREE_MESSAGE_LIMIT = 25
     DAILY_MESSAGE_LIMIT = 3
 
-    # Check if this is the test number
-    if phone == TEST_PHONE_NUMBER or phone == "+919760347653":
-        logger.info(f"[Test Mode] CHECK: Entered test mode! phone={phone}, TEST_PHONE_NUMBER={TEST_PHONE_NUMBER}")
-        logger.info(f"[Test Mode] Checking message limits for {phone}")
+    logger.info(f"[Enforcement] Checking message limits for {phone}")
 
-        try:
-            # Try to count total user messages from MongoDB logger
-            # NOTE: /messages/aggregation endpoint may not exist, so we'll use /messages with filtering
-            total_messages = 0
-            today_messages = 0
+    try:
+        # Try to count total user messages from MongoDB logger
+        # NOTE: /messages/aggregation endpoint may not exist, so we'll use /messages with filtering
+        total_messages = 0
+        today_messages = 0
 
-            if MONGO_LOGGER_URL:
-                try:
-                    async with httpx.AsyncClient(timeout=10.0) as count_client:
-                        # Use regular /messages endpoint with limit
-                        count_response = await count_client.get(
-                            f"{MONGO_LOGGER_URL}/messages",
-                            params={"userId": user_id, "role": "user", "limit": 1000}
-                        )
+        if MONGO_LOGGER_URL:
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as count_client:
+                    # Use regular /messages endpoint with limit
+                    count_response = await count_client.get(
+                        f"{MONGO_LOGGER_URL}/messages",
+                        params={"userId": user_id, "role": "user", "limit": 1000}
+                    )
 
-                        if count_response.status_code == 200:
-                            count_data = count_response.json()
-                            logger.info(f"[Test Mode] MongoDB Logger Raw Response keys: {list(count_data.keys())}")
+                    if count_response.status_code == 200:
+                        count_data = count_response.json()
+                        logger.info(f"[Enforcement] MongoDB Logger Raw Response keys: {list(count_data.keys())}")
 
-                            try:
-                                # When userId is provided, API returns user doc directly
+                        try:
+                            # When userId is provided, API returns user doc directly
                                 # When no userId, API returns {count, users: [...]}
                                 if "sessions" in count_data:
                                     # Single user document returned
                                     sessions = count_data.get("sessions", [])
-                                    logger.info(f"[Test Mode] Single user doc with {len(sessions)} sessions")
+                                    logger.info(f"[Enforcement] Single user doc with {len(sessions)} sessions")
                                 elif "users" in count_data:
                                     # Multiple users returned
                                     users_list = count_data.get("users", [])
                                     if users_list and users_list[0].get("sessions"):
                                         sessions = users_list[0]["sessions"]
-                                        logger.info(f"[Test Mode] Multiple users, first has {len(sessions)} sessions")
+                                        logger.info(f"[Enforcement] Multiple users, first has {len(sessions)} sessions")
                                     else:
                                         sessions = []
-                                        logger.info(f"[Test Mode] Multiple users but no sessions found")
+                                        logger.info(f"[Enforcement] Multiple users but no sessions found")
                                 else:
                                     sessions = []
-                                    logger.info(f"[Test Mode] No sessions or users key in response")
+                                    logger.info(f"[Enforcement] No sessions or users key in response")
 
-                                logger.info(f"[Test Mode] Total sessions to process: {len(sessions)}")
+                                logger.info(f"[Enforcement] Total sessions to process: {len(sessions)}")
 
                                 # Count messages from all sessions
                                 for session in sessions:
@@ -1832,67 +1827,67 @@ Copy your code and share! 💫"""
                                             msg_time = msg.get("timestamp", "")
                                             today_start = _get_today_start_ist()[:10]  # Get YYYY-MM-DD part
 
-                                            logger.info(f"[Test Mode] Checking message timestamp: {msg_time}, today_start: {today_start}")
+                                            logger.info(f"[Enforcement] Checking message timestamp: {msg_time}, today_start: {today_start}")
 
                                             if msg_time and isinstance(msg_time, str):
                                                 # First try: check if timestamp starts with today's date
                                                 if msg_time.startswith(today_start):
-                                                    logger.info(f"[Test Mode] ✓ Message counted (starts with today)")
+                                                    logger.info(f"[Enforcement] ✓ Message counted (starts with today)")
                                                     today_messages += 1
                                                 # Fallback: try parsing ISO date string
                                                 else:
                                                     try:
                                                         msg_date = msg_time.split('T')[0] if 'T' in msg_time else msg_time.split(' ')[0]
-                                                        logger.info(f"[Test Mode] Extracted date: {msg_date}")
+                                                        logger.info(f"[Enforcement] Extracted date: {msg_date}")
                                                         if msg_date == today_start:
-                                                            logger.info(f"[Test Mode] ✓ Message counted (parsed date matches)")
+                                                            logger.info(f"[Enforcement] ✓ Message counted (parsed date matches)")
                                                             today_messages += 1
                                                     except Exception as parse_error:
-                                                        logger.warning(f"[Test Mode] Failed to parse timestamp {msg_time}: {parse_error}")
+                                                        logger.warning(f"[Enforcement] Failed to parse timestamp {msg_time}: {parse_error}")
 
-                                logger.info(f"[Test Mode] Total messages for {user_id}: {total_messages}, Today: {today_messages}")
+                                logger.info(f"[Enforcement] Total messages for {user_id}: {total_messages}, Today: {today_messages}")
                             except Exception as e:
-                                logger.error(f"[Test Mode] Error parsing MongoDB response: {e}")
+                                logger.error(f"[Enforcement] Error parsing MongoDB response: {e}")
                                 import traceback
                                 traceback.print_exc()
                         else:
-                            logger.warning(f"[Test Mode] Failed to count messages: {count_response.status_code}")
+                            logger.warning(f"[Enforcement] Failed to count messages: {count_response.status_code}")
                 except Exception as e:
-                    logger.warning(f"[Test Mode] Error counting messages: {e}")
+                    logger.warning(f"[Enforcement] Error counting messages: {e}")
                     # Default to allowing the message if counting fails
                     total_messages = 0
             else:
-                logger.warning("[Test Mode] MONGO_LOGGER_URL not configured, cannot count messages")
+                logger.warning("[Enforcement] MONGO_LOGGER_URL not configured, cannot count messages")
 
             # Check if user has active subscription (OUTSIDE if/else blocks)
-            logger.info(f"[Test Mode] About to check subscription access...")
+            logger.info(f"[Enforcement] About to check subscription access...")
             access = await _check_subscription_access(phone)
-            logger.info(f"[Test Mode] Subscription check completed: {access}")
+            logger.info(f"[Enforcement] Subscription check completed: {access}")
 
-            logger.info(f"[Test Mode] DEBUG: access={access.get('access')}, total_messages={total_messages}, FREE_MESSAGE_LIMIT={FREE_MESSAGE_LIMIT}")
+            logger.info(f"[Enforcement] DEBUG: access={access.get('access')}, total_messages={total_messages}, FREE_MESSAGE_LIMIT={FREE_MESSAGE_LIMIT}")
 
             # Check if user has active subscription (full_access or active skips enforcement)
             if access.get("access") in ["full_access", "active"]:
-                logger.info(f"[Test Mode] User has active subscription ({access.get('access')}) - skipping enforcement")
+                logger.info(f"[Enforcement] User has active subscription ({access.get('access')}) - skipping enforcement")
             # User has trial, trial_ending_soon, or no subscription - enforce limits
             elif total_messages >= FREE_MESSAGE_LIMIT:
-                logger.info(f"[Test Mode] User exhausted {FREE_MESSAGE_LIMIT} free messages (total: {total_messages}, access: {access.get('access')})")
+                logger.info(f"[Enforcement] User exhausted {FREE_MESSAGE_LIMIT} free messages (total: {total_messages}, access: {access.get('access')})")
 
                 # Check if daily limit reached
                 if today_messages >= DAILY_MESSAGE_LIMIT:
-                    logger.warning(f"[Test Mode] Daily limit reached ({today_messages}/{DAILY_MESSAGE_LIMIT}) - SENDING SOFT PAYWALL")
+                    logger.warning(f"[Enforcement] Daily limit reached ({today_messages}/{DAILY_MESSAGE_LIMIT}) - SENDING SOFT PAYWALL")
 
                     # Detect language of user's message
                     user_language = _detect_language(message)
-                    logger.info(f"[Test Mode] User language detected: {user_language}")
+                    logger.info(f"[Enforcement] User language detected: {user_language}")
 
                     # Get user's gender for personalized astrologer response
                     user_gender = await get_user_gender(phone, message)
-                    logger.info(f"[Test Mode] User gender: {user_gender}")
+                    logger.info(f"[Enforcement] User gender: {user_gender}")
 
                     astrologer = get_astrologer_personality(user_gender)
                     astrologer_name = astrologer["name"]
-                    logger.info(f"[Test Mode] Selected astrologer: {astrologer_name} (opposite gender)")
+                    logger.info(f"[Enforcement] Selected astrologer: {astrologer_name} (opposite gender)")
 
                     # Generate personalized message from astrologer
                     if user_language == "hindi":
@@ -1903,7 +1898,7 @@ Copy your code and share! 💫"""
                                 f"Main bilkul maafi chahti hoon ki aaj aur aapke free messages khatam ho gaye 😔\n\n"
                                 f"Mujhe bohot bura lag raha hai ki main aapki abhi madad nahi kar pa rahi. "
                                 f"System ki limitation hai yeh, main kar bhi kya sakti hoon?\n\n"
-                                f"Agar aapko raasta chahiye toh 'PAY' type karke ek choti si subscription le sakte ho (only ₹1 for testing). "
+                                f"Agar aapko raasta chahiye toh 'PAY' type karke subscription le sakte ho. "
                                 f"Ya fir kal ka wait kar sakte ho - kal aapko 3 free messages mil jayengi.\n\n"
                                 f"Maf kijiya ga 🙏"
                             )
@@ -1913,7 +1908,7 @@ Copy your code and share! 💫"""
                                 f"Main bilkul maafi chahta hoon ki aaj aur aapke free messages khatam ho gaye 😔\n\n"
                                 f"Mujhe bohot bura lag raha hai ki main aapki abhi madad nahi kar pa raha. "
                                 f"System ki limitation hai yeh, main kar bhi kya sakta hoon?\n\n"
-                                f"Agar aapko raasta chahiye toh 'PAY' type karke ek choti si subscription le sakti ho (only ₹1 for testing). "
+                                f"Agar aapko raasta chahiye toh 'PAY' type karke subscription le sakti ho. "
                                 f"Ya fir kal ka wait kar sakte ho - kal aapko 3 free messages mil jayengi.\n\n"
                                 f"Maf kijiye ga 🙏"
                             )
@@ -1924,7 +1919,7 @@ Copy your code and share! 💫"""
                             limit_message = (
                                 f"I'm really sorry, but your free messages and daily limit are done for today 😔\n\n"
                                 f"I feel bad that I can't help you right now. It's a system limitation, and I feel terrible about it.\n\n"
-                                f"If you'd like to continue, type 'PAY' to get a small subscription (only ₹1 for testing). "
+                                f"If you'd like to continue, type 'PAY' to get a subscription. "
                                 f"Or you can wait until tomorrow - you'll get 3 free messages tomorrow.\n\n"
                                 f"Really sorry about this 🙏"
                             )
@@ -1933,17 +1928,17 @@ Copy your code and share! 💫"""
                             limit_message = (
                                 f"I'm really sorry, but your free messages and daily limit are done for today 😔\n\n"
                                 f"I feel bad that I can't help you right now. It's a system limitation, and I feel terrible about it.\n\n"
-                                f"If you'd like to continue, type 'PAY' to get a small subscription (only ₹1 for testing). "
+                                f"If you'd like to continue, type 'PAY' to get a subscription. "
                                 f"Or you can wait until tomorrow - you'll get 3 free messages tomorrow.\n\n"
                                 f"Really sorry about this 🙏"
                             )
 
-                    logger.info(f"[Test Mode] Generated enforcement message from {astrologer_name}:")
-                    logger.info(f"[Test Mode] Message preview: {limit_message[:200]}...")
+                    logger.info(f"[Enforcement] Generated enforcement message from {astrologer_name}:")
+                    logger.info(f"[Enforcement] Message preview: {limit_message[:200]}...")
 
                     async with httpx.AsyncClient(timeout=30.0) as client:
                         await _send_whatsapp_message(client, phone, limit_message)
-                        logger.info(f"[Test Mode] Enforcement message sent to {phone} via WhatsApp")
+                        logger.info(f"[Enforcement] Enforcement message sent to {phone} via WhatsApp")
 
                     await _log_to_mongo(
                         session_id, user_id, "assistant", limit_message, "whatsapp", "text", None,
@@ -1953,19 +1948,19 @@ Copy your code and share! 💫"""
                     return {"status": "daily_limit_reached", "total_messages": total_messages, "today_messages": today_messages}
                 else:
                     remaining = DAILY_MESSAGE_LIMIT - today_messages
-                    logger.info(f"[Test Mode] Daily limit not reached ({today_messages}/{DAILY_MESSAGE_LIMIT}), {remaining} remaining")
+                    logger.info(f"[Enforcement] Daily limit not reached ({today_messages}/{DAILY_MESSAGE_LIMIT}), {remaining} remaining")
                     # Continue processing message
 
             else:
                 remaining_free = FREE_MESSAGE_LIMIT - total_messages
-                logger.info(f"[Test Mode] User has {remaining_free} free messages remaining")
+                logger.info(f"[Enforcement] User has {remaining_free} free messages remaining")
 
         except Exception as e:
-            logger.error(f"[Test Mode] Error checking message limits: {e}", exc_info=True)
+            logger.error(f"[Enforcement] Error checking message limits: {e}", exc_info=True)
             import traceback
             traceback.print_exc()
-            logger.error(f"[Test Mode] EXCEPTION TYPE: {type(e).__name__}")
-            logger.error(f"[Test Mode] EXCEPTION MESSAGE: {str(e)}")
+            logger.error(f"[Enforcement] EXCEPTION TYPE: {type(e).__name__}")
+            logger.error(f"[Enforcement] EXCEPTION MESSAGE: {str(e)}")
             # On error, allow message to avoid blocking users
 
     # ===================================================================
@@ -1995,14 +1990,14 @@ Copy your code and share! 💫"""
             payment_message = (
                 f"Hi! Aapke free messages khatam ho gaye hain 😔\n\n"
                 f"Main continue kar na chahti hoon lekin system ne limit laga di hai. "
-                f"Agar aapko chahiye toh 'PAY' type karke subscription le lo (only ₹1 for testing)."
+                f"Agar aapko chahiye toh 'PAY' type karke subscription le lo."
             )
         else:
             # Male astrologer (Aarav) talking to female user
             payment_message = (
                 f"Hi! Aapke free messages khatam ho gaye hain 😔\n\n"
                 f"Main continue kar na chahta hoon lekin system ne limit laga di hai. "
-                f"Agar aapko chahiye toh 'PAY' type karke subscription le lo (only ₹1 for testing)."
+                f"Agar aapko chahiye toh 'PAY' type karke subscription le lo."
             )
 
         logger.info(f"[Subscription] Payment message from {astrologer_name}: {payment_message[:150]}...")
