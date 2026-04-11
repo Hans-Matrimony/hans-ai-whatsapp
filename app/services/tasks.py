@@ -1811,16 +1811,16 @@ Copy your code and share! 💫"""
                 # Check if user has active subscription
                 access = await _check_subscription_access(phone)
 
-                # Check if user has active subscription
+                # Check if user has active FULL subscription (only full_access skips enforcement)
                 if access.get("access") == "full_access":
-                    logger.info(f"[Test Mode] User has active subscription - full access granted")
-                # User has no subscription, enforce limits
+                    logger.info(f"[Test Mode] User has full subscription - skipping enforcement")
+                # User has trial, trial_ending_soon, or no subscription - enforce limits
                 elif total_messages >= FREE_MESSAGE_LIMIT:
-                    logger.info(f"[Test Mode] User exhausted {FREE_MESSAGE_LIMIT} free messages")
+                    logger.info(f"[Test Mode] User exhausted {FREE_MESSAGE_LIMIT} free messages (total: {total_messages}, access: {access.get('access')})")
 
                     # Check if daily limit reached
                     if today_messages >= DAILY_MESSAGE_LIMIT:
-                        logger.warning(f"[Test Mode] Daily limit reached ({today_messages}/{DAILY_MESSAGE_LIMIT})")
+                        logger.warning(f"[Test Mode] Daily limit reached ({today_messages}/{DAILY_MESSAGE_LIMIT}) - SENDING SOFT PAYWALL")
 
                         # Detect language of user's message
                         user_language = _detect_language(message)
