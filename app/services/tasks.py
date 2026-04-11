@@ -1505,9 +1505,10 @@ Copy your code and share! 💫"""
             await _log_to_mongo(session_id, user_id, "assistant", error_msg, "whatsapp")
             return {"status": "referral_error"}
 
-    # Check if user is selecting a plan via button click (buy_plan_1_planid) or digit (1, 2, 3)
+    # Check if user is selecting a plan via button click (buy_plan_1_planid), digit (1, 2, 3), or plan name
     plan_number = None
     plan_id_from_button = None
+    plan_id_from_name = None
 
     if message.strip().startswith("buy_plan_"):
         # Parse button click: buy_plan_1_monthly_basic
@@ -1520,6 +1521,38 @@ Copy your code and share! 💫"""
                 pass
     elif message.strip().isdigit():
         plan_number = int(message.strip())
+    else:
+        # Try to match plan name from user message
+        # Fetch plans to match against
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as fetch_client:
+                plans_response = await fetch_client.get(
+                    f"{SUBSCRIPTIONS_URL}/plans?active_only=true"
+                )
+                if plans_response.status_code == 200:
+                    plans_data = plans_response.json()
+                    plans = plans_data.get("plans", [])
+
+                    # Normalize user message for matching
+                    user_message_lower = message.strip().lower()
+
+                    # Try to match plan name (case-insensitive, partial match)
+                    for idx, plan in enumerate(plans):
+                        plan_name = plan.get("name", "").lower()
+                        plan_id = plan.get("planId", "").lower()
+
+                        # Check if user message contains plan name or plan ID
+                        if (user_message_lower in plan_name or
+                            plan_name in user_message_lower or
+                            user_message_lower in plan_id or
+                            plan_id in user_message_lower):
+                            plan_number = idx + 1  # Convert to 1-based index
+                            plan_id_from_name = plan.get("planId")
+                            logger.info(f"Matched plan by name: {plan.get('name')} (plan_number={plan_number})")
+                            break
+        except Exception as e:
+            logger.error(f"Error matching plan by name: {e}")
+            # Continue to plan_number check below
 
     if plan_number is not None:
 
@@ -1535,7 +1568,13 @@ Copy your code and share! 💫"""
 
                     # Find the selected plan
                     selected_plan = None
-                    if plan_id_from_button:
+                    if plan_id_from_name:
+                        # Find plan by ID from name match
+                        for plan in plans:
+                            if plan.get("planId") == plan_id_from_name:
+                                selected_plan = plan
+                                break
+                    elif plan_id_from_button:
                         # Find plan by ID from button click
                         for plan in plans:
                             if plan.get("planId") == plan_id_from_button:
@@ -1574,8 +1613,8 @@ Copy your code and share! 💫"""
                         # Fallback to payment link if Flow is not configured
                         payment_link = await _generate_payment_link(
                             user_id,
-                            plan_number=plan_number if not plan_id_from_button else None,
-                            plan_id=plan_id_from_button
+                            plan_number=plan_number if not (plan_id_from_button or plan_id_from_name) else None,
+                            plan_id=plan_id_from_button or plan_id_from_name
                         )
                         if payment_link:
                             link_message = (
