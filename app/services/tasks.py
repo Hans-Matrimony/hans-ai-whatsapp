@@ -1880,7 +1880,7 @@ Copy your code and share! 💫"""
 
                     # Get user's gender for personalized astrologer response
                     user_gender = await get_user_gender(phone, message)
-                    astrologer = _get_astrologer_personality(user_gender)
+                    astrologer = get_astrologer_personality(user_gender)
                     astrologer_name = astrologer["name"]
 
                     # Generate personalized message from astrologer
