@@ -1707,12 +1707,12 @@ Copy your code and share! 💫"""
 
     # TEST MODE: Only enforce for 9760347653 (your number)
     # TODO: Roll out to all users after testing
-    TEST_PHONE_NUMBER = "9160347653"  # Your number with country code
+    TEST_PHONE_NUMBER = "919760347653"  # Your number with country code
     FREE_MESSAGE_LIMIT = 40
     DAILY_MESSAGE_LIMIT = 3
 
     # Check if this is the test number
-    if phone == TEST_PHONE_NUMBER or phone == "+9160347653":
+    if phone == TEST_PHONE_NUMBER or phone == "+919760347653":
         logger.info(f"[Test Mode] Checking message limits for {phone}")
 
         try:
