@@ -1676,6 +1676,158 @@ Copy your code and share! 💫"""
 
     # ===================================================================
 
+    # ==================== HELPER FUNCTIONS ====================
+
+    def _detect_language(text: str) -> str:
+        """Detect if text is primarily Hindi or English."""
+        if not text:
+            return "english"
+
+        # Count Hindi characters (Devanagari script)
+        hindi_chars = set('अआइईउऊऋएऐओऔकखगघङचछजझञटडणतथदधनपफबभमयरलवशषसह')
+        hindi_count = sum(1 for char in text if char in hindi_chars)
+
+        # If more than 20% Hindi characters, consider it Hindi
+        if hindi_count > len(text) * 0.2:
+            return "hindi"
+        return "english"
+
+    def _get_today_start_ist() -> str:
+        """Get today's start time in IST (UTC+5:30)."""
+        from datetime import datetime, timedelta
+        import pytz
+        ist = pytz.timezone('Asia/Kolkata')
+        now_ist = datetime.now(ist)
+        today_start = now_ist.replace(hour=0, minute=0, second=0, microsecond=0)
+        return today_start.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    # ===================================================================
+
+    # ==================== MESSAGE LIMIT CHECK (TEST MODE) ====================
+
+    # TEST MODE: Only enforce for 9760347653 (your number)
+    # TODO: Roll out to all users after testing
+    TEST_PHONE_NUMBER = "9160347653"  # Your number with country code
+    FREE_MESSAGE_LIMIT = 40
+    DAILY_MESSAGE_LIMIT = 3
+
+    # Check if this is the test number
+    if phone == TEST_PHONE_NUMBER or phone == "+9160347653":
+        logger.info(f"[Test Mode] Checking message limits for {phone}")
+
+        try:
+            # Count total user messages from MongoDB logger
+            async with httpx.AsyncClient(timeout=10.0) as count_client:
+                count_response = await count_client.post(
+                    f"{MONGO_LOGGER_URL}/messages/aggregation",
+                    json={
+                        "pipeline": [
+                            {
+                                "$match": {
+                                    "userId": user_id,
+                                    "role": "user"
+                                }
+                            },
+                            {
+                                "$count": "total"
+                            }
+                        ]
+                    },
+                    headers={"Content-Type": "application/json"}
+                )
+
+                total_messages = 0
+                if count_response.status_code == 200:
+                    count_data = count_response.json()
+                    total_messages = count_data.get("total", 0)
+                    logger.info(f"[Test Mode] Total messages for {user_id}: {total_messages}")
+                else:
+                    logger.warning(f"[Test Mode] Failed to count messages: {count_response.status_code}")
+
+                # Check if user has active subscription
+                access = await _check_subscription_access(phone)
+
+                # If user has active subscription, allow unlimited messages
+                if access.get("access") == "full_access":
+                    logger.info(f"[Test Mode] User has active subscription - full access granted")
+                # User has no subscription, enforce limits
+                elif total_messages >= FREE_MESSAGE_LIMIT:
+                    logger.info(f"[Test Mode] User exhausted {FREE_MESSAGE_LIMIT} free messages")
+
+                    # Check today's message count
+                    today_start = _get_today_start_ist()
+                    daily_count_response = await count_client.post(
+                        f"{MONGO_LOGGER_URL}/messages/aggregation",
+                        json={
+                            "pipeline": [
+                                {
+                                    "$match": {
+                                        "userId": user_id,
+                                        "role": "user",
+                                        "timestamp": {"$gte": today_start}
+                                    }
+                                },
+                                {
+                                    "$count": "today"
+                                }
+                            ]
+                        },
+                        headers={"Content-Type": "application/json"}
+                    )
+
+                    today_messages = 0
+                    if daily_count_response.status_code == 200:
+                        daily_data = daily_count_response.json()
+                        today_messages = daily_data.get("today", 0)
+                        logger.info(f"[Test Mode] Messages today: {today_messages}")
+
+                    # Check if daily limit reached
+                    if today_messages >= DAILY_MESSAGE_LIMIT:
+                        logger.warning(f"[Test Mode] Daily limit reached ({today_messages}/{DAILY_MESSAGE_LIMIT})")
+
+                        # Detect language of user's message
+                        user_language = _detect_language(message)
+
+                        # Send soft enforcement message based on language
+                        if user_language == "hindi":
+                            limit_message = (
+                                "🙏 Sorry, lekin aapki 40 free messages khatam ho gayi hain aur aaj ki 3 messages limit bhi puri ho gayi hai.\n\n"
+                                "Main aapko jawab dena chahta hoon, lekin mujhe subscription lena padega taaki main aapki madad kar sakun.\n\n"
+                                "Please 'PAY' type karein aur subscription lein (only ₹1 for testing)."
+                            )
+                        else:
+                            limit_message = (
+                                "🙏 I'm really sorry but you've used your 40 free messages and today's 3 message limit.\n\n"
+                                "I want to answer you but I need a subscription to continue helping you.\n\n"
+                                "Please type 'PAY' to get subscription (only ₹1 for testing)."
+                            )
+
+                        async with httpx.AsyncClient(timeout=30.0) as client:
+                            await _send_whatsapp_message(client, phone, limit_message)
+
+                        await _log_to_mongo(
+                            session_id, user_id, "assistant", limit_message, "whatsapp", "text", None,
+                            nudge_level=1
+                        )
+
+                        return {"status": "daily_limit_reached", "total_messages": total_messages, "today_messages": today_messages}
+                    else:
+                        remaining = DAILY_MESSAGE_LIMIT - today_messages
+                        logger.info(f"[Test Mode] Daily limit not reached ({today_messages}/{DAILY_MESSAGE_LIMIT}), {remaining} remaining")
+                        # Continue processing message
+
+                else:
+                    remaining_free = FREE_MESSAGE_LIMIT - total_messages
+                    logger.info(f"[Test Mode] User has {remaining_free} free messages remaining")
+
+        except Exception as e:
+            logger.error(f"[Test Mode] Error checking message limits: {e}", exc_info=True)
+            import traceback
+            traceback.print_exc()
+            # On error, allow message to avoid blocking users
+
+    # ===================================================================
+
     # ==================== SUBSCRIPTION CHECK ====================
 
     # Check if user has valid subscription (trial or active)
