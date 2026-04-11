@@ -848,45 +848,9 @@ async def _generate_payment_link(user_id: str, plan_number: int = None, plan_id:
         return None
 
 
-async def _generate_trial_activation_link(user_id: str) -> str:
-    """
-    Generate ₹1 trial activation payment link.
-    Creates a Razorpay Payment Link for the trial_activation plan.
-    Returns direct Razorpay payment URL.
-    """
-    if not SUBSCRIPTIONS_URL:
-        logger.error("SUBSCRIPTIONS_URL not configured")
-        return None
+# Trial activation removed - users now get automatic access with 40 free messages
+# _generate_trial_activation_link function removed
 
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            # Call subscriptions service to create Razorpay Payment Link for trial activation
-            payment_link_response = await client.post(
-                f"{SUBSCRIPTIONS_URL}/payments/create-payment-link",
-                json={
-                    "userId": user_id,
-                    "planId": "trial_activation",
-                    "currency": "INR"
-                }
-            )
-
-            if payment_link_response.status_code == 200:
-                link_data = payment_link_response.json()
-                razorpay_link = link_data.get("short_url") or link_data.get("payment_link")
-
-                if razorpay_link:
-                    logger.info(f"Generated ₹1 trial activation link for {user_id}: {razorpay_link}")
-                    return razorpay_link
-                else:
-                    logger.error("No payment_link in trial activation response")
-                    return None
-            else:
-                logger.error(f"Failed to create trial activation link: {payment_link_response.status_code}")
-                return None
-
-    except Exception as e:
-        logger.error(f"Error generating trial activation link: {e}")
-        return None
 
 
 async def _send_whatsapp_payment_flow(
@@ -1645,51 +1609,10 @@ Copy your code and share! 💫"""
         # OR New user who hasn't paid ₹1 yet
         logger.info(f"[Subscription] Access denied for {phone}")
 
-        # Check if this is a new user who needs to pay ₹1 to activate trial
-        if access.get("require_payment"):
-            # New user - Needs to pay ₹1 to activate 7-day trial
-            logger.info(f"[Subscription] New user - requires ₹1 trial activation: {phone}")
-
-            # Try to send WhatsApp Flow for trial activation (in-WhatsApp payment)
-            if WHATSAPP_FLOW_ID and WHATSAPP_PAYMENT_CONFIG_ID:
-                flow_message_id = await _send_whatsapp_payment_flow(
-                    phone=phone,
-                    user_id=user_id,
-                    plan_id="trial_activation",
-                    amount=100,  # ₹1 in paise
-                    plan_name="7-Day Trial Activation"
-                )
-
-                if flow_message_id:
-                    trial_message = (
-                        "👋 Welcome to Astrofriend!\n\n"
-                        "To activate your **7-day FREE trial**, please pay ₹1 (verification fee).\n\n"
-                        "Complete the payment securely within WhatsApp. 💫\n\n"
-                        "After payment, send me a message to start!"
-                    )
-                    async with httpx.AsyncClient(timeout=30.0) as client:
-                        await _send_whatsapp_message(client, phone, trial_message)
-                    await _log_to_mongo(session_id, user_id, "assistant", trial_message, "whatsapp", "text", None, nudge_level=1)
-                    return {"status": "trial_activation_flow_sent", "flow_id": flow_message_id}
-
-            # Fallback to payment link if Flow is not configured
-            trial_activation_link = await _generate_trial_activation_link(user_id)
-
-            if trial_activation_link:
-                trial_message = (
-                    "👋 Welcome to Astrofriend!\n\n"
-                    "To activate your **7-day FREE trial**, please pay ₹1 (verification fee).\n\n"
-                    f"Click here: {trial_activation_link}\n\n"
-                    "After payment, send me a message to start! 💫"
-                )
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    await _send_whatsapp_message(client, phone, trial_message)
-                await _log_to_mongo(session_id, user_id, "assistant", trial_message, "whatsapp", "text", None, nudge_level=1)
-                return {"status": "trial_activation_required", "trial_activation_link": trial_activation_link}
-
-        # Default payment nudge message (trial expired)
+        # Trial activation removed - users now get automatic access with 40 free messages
+        # Send payment nudge to subscribe
         payment_message = (
-            "Your 7-day free trial has ended. To continue using Astrofriend services, "
+            "Your free messages have ended. To continue using Astrofriend services, "
             "please subscribe to a plan.\n\n"
             "Reply *PAY* to see subscription options."
         )
@@ -2744,6 +2667,129 @@ def proactive_nudge_task():
         logger.error(f"[Proactive Nudge] ===== TASK FAILED =====", exc_info=True)
         logger.error(f"[Proactive Nudge] Error: {e}")
         return {"error": str(e)}
+
+
+@celery_app.task
+def send_inactive_template_task():
+    """
+    Send approved WhatsApp template to users inactive for 22+ hours.
+    Can be run manually for one-time re-engagement campaigns.
+    Only sends messages between 9 AM - 10 PM IST.
+    """
+    import asyncio
+    from datetime import datetime
+    import pytz
+
+    try:
+        logger.info("[Inactive Template] ===== TASK STARTED =====")
+
+        # Check IST time window (9 AM - 10 PM)
+        ist = pytz.timezone('Asia/Kolkata')
+        now_ist = datetime.now(ist)
+        current_hour = now_ist.hour
+
+        if not (9 <= current_hour < 22):
+            logger.info(f"[Inactive Template] Outside active hours ({current_hour}:00 IST), skipping")
+            return {"status": "outside_active_hours", "current_hour": current_hour}
+
+        # Run async logic
+        result = asyncio.run(_check_inactive_users_for_template())
+
+        logger.info("[Inactive Template] ===== TASK COMPLETED =====")
+        return result
+
+    except Exception as e:
+        logger.error(f"[Inactive Template] ===== TASK FAILED =====", exc_info=True)
+        return {"error": str(e)}
+
+
+async def _check_inactive_users_for_template():
+    """Logic to find inactive users and send the intro template."""
+    if not MONGO_LOGGER_URL:
+        return {"error": "Mongo Logger URL missing"}
+
+    import httpx
+    from datetime import datetime, timezone, timedelta
+    from app.services.whatsapp_api import WhatsAppAPI
+
+    now = datetime.now(timezone.utc)
+    threshold = now - timedelta(hours=22)
+    
+    whatsapp_api = WhatsAppAPI(
+        phone_id=WHATSAPP_PHONE_ID,
+        access_token=WHATSAPP_ACCESS_TOKEN
+    )
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            response = await client.get(f"{MONGO_LOGGER_URL}/messages")
+            if response.status_code != 200:
+                return {"error": f"Mongo Logger error: {response.status_code}"}
+            
+            users = response.json().get("users", [])
+            logger.info(f"[Inactive Template] Scanning {len(users)} users")
+        except Exception as e:
+            return {"error": f"Fetch failed: {e}"}
+
+        sent_count = 0
+        for user in users:
+            user_id = user.get("userId", "")
+            if not user_id or not user_id.startswith("+"):
+                continue
+
+            # Filtering for 22+ hours inactive
+            is_eligible = False
+            for session in user.get("sessions", []):
+                if "whatsapp" not in session.get("channel", "").lower():
+                    continue
+                
+                last_msg_str = session.get("lastMessageTime", "")
+                if not last_msg_str: continue
+
+                try:
+                    if last_msg_str.endswith('Z'):
+                        last_msg_time = datetime.fromisoformat(last_msg_str.replace('Z', '+00:00'))
+                    else:
+                        last_msg_time = datetime.fromisoformat(last_msg_str)
+                    
+                    if (now - last_msg_time).total_seconds() / 3600 >= 22:
+                        is_eligible = True
+                        break
+                except: continue
+
+            if not is_eligible:
+                continue
+
+            # DEDUP: Skip if sent in last 24 hours
+            redis_key = f"inactive_template_sent:{user_id}"
+            if _nudge_redis:
+                try:
+                    if _nudge_redis.exists(redis_key):
+                        continue
+                except: pass
+
+            # Send Template
+            phone = user_id.replace("+", "")
+            try:
+                msg_id = await whatsapp_api.send_template(
+                    to=phone,
+                    template_name="astrofriend_intro_template",
+                    language_code="en_IN"
+                )
+                if msg_id:
+                    sent_count += 1
+                    logger.info(f"[Inactive Template] ✓ Sent to {user_id}")
+                    if _nudge_redis:
+                        try:
+                            _nudge_redis.setex(redis_key, 86400, "1") # 24h TTL
+                        except: pass
+            except Exception as e:
+                logger.error(f"[Inactive Template] ✗ Error sending to {user_id}: {e}")
+
+            # Small delay
+            await asyncio.sleep(0.5)
+
+    return {"status": "success", "templates_sent": sent_count}
 
 
 async def _check_inactive_users():
