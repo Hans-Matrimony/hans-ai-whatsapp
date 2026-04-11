@@ -57,7 +57,7 @@ else:
 
 # Subscription Service Configuration
 SUBSCRIPTIONS_URL = os.getenv("SUBSCRIPTIONS_URL")
-SUBSCRIPTION_TEST_NUMBER = os.getenv("SUBSCRIPTION_TEST_NUMBER", "9760347653")
+SUBSCRIPTION_TEST_NUMBER = os.getenv("SUBSCRIPTION_TEST_NUMBER", "919760347653")  # Your number WITH country code
 
 # WhatsApp Payments Configuration (Flows API)
 WHATSAPP_WABA_ID = os.getenv("WHATSAPP_WABA_ID")
@@ -959,8 +959,15 @@ async def _check_subscription_access(phone: str) -> dict:
 
     # Skip subscription check if not the test number (testing mode)
     clean_phone = phone.replace("+", "").replace(" ", "")
-    if clean_phone != SUBSCRIPTION_TEST_NUMBER:
-        logger.debug(f"[Subscription] Not test number ({clean_phone} != {SUBSCRIPTION_TEST_NUMBER}), skipping check")
+
+    # Handle both formats: with country code (919760347653) and without (9760347653)
+    test_numbers = [SUBSCRIPTION_TEST_NUMBER]
+    if SUBSCRIPTION_TEST_NUMBER.startswith("91"):
+        # Also check without country code
+        test_numbers.append(SUBSCRIPTION_TEST_NUMBER[2:])
+
+    if clean_phone not in test_numbers:
+        logger.debug(f"[Subscription] Not test number ({clean_phone} not in {test_numbers}), skipping check")
         return {"access": "trial", "skip_reason": "not_test_number"}
 
     # Check subscription status
