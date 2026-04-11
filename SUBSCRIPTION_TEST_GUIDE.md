@@ -2,7 +2,7 @@
 
 ## ✨ NEW: Razorpay Payment Links - Direct from WhatsApp!
 
-**NO custom payment page needed!** Users pay directly on Razorpay's hosted page.
+**NO custom payment page needed!** Users pay directly on Razorpay's hosted page with "Astro Friend" branding.
 
 ---
 
@@ -13,17 +13,50 @@
     ↓
 User: "PAY"
     ↓
-Bot: Shows 3 plans
+Bot: Shows ALL plans beautifully with individual Buy buttons
     ↓
-User: "1"
+Each plan has:
+  - Plan name, price, features
+  - "Buy Now - ₹99" button
     ↓
-Bot: "Click: https://rzp.io/abc123" (Direct Razorpay link!)
+User taps "Buy Now" button
     ↓
-User clicks → Pays on Razorpay page → Auto webhook
+Bot: Sends payment link or WhatsApp Flow
     ↓
-Subscription activated!
+User clicks → Pays on Razorpay page ("Astro Friend" branding)
+    ↓
+Subscription activated! ✅
     ↓
 User: "Hello" → Bot responds normally ✅
+```
+
+---
+
+## UI Preview
+
+When user types "PAY", they receive:
+
+**Header Message:**
+```
+💫 Choose Your Subscription Plan
+
+Unlock personalized astrology guidance with our affordable plans:
+```
+
+**Each Plan (separate message):**
+```
+*Basic Plan*
+💰 ₹99 for 30 days
+✓ Unlimited chat
+✓ Detailed kundli analysis
+✓ Gemstone recommendations
+
+[Button: Buy Now - ₹99]
+```
+
+**Footer Message:**
+```
+✨ Tap the button above to purchase your plan instantly via Razorpay secure payment!
 ```
 
 ---
