@@ -1734,70 +1734,53 @@ Copy your code and share! 💫"""
         logger.info(f"[Test Mode] Checking message limits for {phone}")
 
         try:
-            # Count total user messages from MongoDB logger
-            async with httpx.AsyncClient(timeout=10.0) as count_client:
-                count_response = await count_client.post(
-                    f"{MONGO_LOGGER_URL}/messages/aggregation",
-                    json={
-                        "pipeline": [
-                            {
-                                "$match": {
-                                    "userId": user_id,
-                                    "role": "user"
-                                }
-                            },
-                            {
-                                "$count": "total"
-                            }
-                        ]
-                    },
-                    headers={"Content-Type": "application/json"}
-                )
+            # Try to count total user messages from MongoDB logger
+            # NOTE: /messages/aggregation endpoint may not exist, so we'll use /messages with filtering
+            total_messages = 0
+            today_messages = 0
 
-                total_messages = 0
-                if count_response.status_code == 200:
-                    count_data = count_response.json()
-                    total_messages = count_data.get("total", 0)
-                    logger.info(f"[Test Mode] Total messages for {user_id}: {total_messages}")
-                else:
-                    logger.warning(f"[Test Mode] Failed to count messages: {count_response.status_code}")
+            if MONGO_LOGGER_URL:
+                try:
+                    async with httpx.AsyncClient(timeout=10.0) as count_client:
+                        # Use regular /messages endpoint with limit
+                        count_response = await count_client.get(
+                            f"{MONGO_LOGGER_URL}/messages",
+                            params={"userId": user_id, "role": "user", "limit": 1000}
+                        )
+
+                        if count_response.status_code == 200:
+                            count_data = count_response.json()
+                            # Count total user messages from response
+                            users = count_data.get("users", [])
+                            if users and users[0].get("sessions"):
+                                for session in users[0]["sessions"]:
+                                    for msg in session.get("messages", []):
+                                        if msg.get("role") == "user":
+                                            total_messages += 1
+                                            # Check if message is from today
+                                            msg_time = msg.get("createdAt", "")
+                                            if msg_time.startswith(_get_today_start_ist()[:10]):
+                                                today_messages += 1
+
+                            logger.info(f"[Test Mode] Total messages for {user_id}: {total_messages}, Today: {today_messages}")
+                        else:
+                            logger.warning(f"[Test Mode] Failed to count messages: {count_response.status_code}")
+                except Exception as e:
+                    logger.warning(f"[Test Mode] Error counting messages: {e}")
+                    # Default to allowing the message if counting fails
+                    total_messages = 0
+            else:
+                logger.warning("[Test Mode] MONGO_LOGGER_URL not configured, cannot count messages")
 
                 # Check if user has active subscription
                 access = await _check_subscription_access(phone)
 
-                # If user has active subscription, allow unlimited messages
+                # Check if user has active subscription
                 if access.get("access") == "full_access":
                     logger.info(f"[Test Mode] User has active subscription - full access granted")
                 # User has no subscription, enforce limits
                 elif total_messages >= FREE_MESSAGE_LIMIT:
                     logger.info(f"[Test Mode] User exhausted {FREE_MESSAGE_LIMIT} free messages")
-
-                    # Check today's message count
-                    today_start = _get_today_start_ist()
-                    daily_count_response = await count_client.post(
-                        f"{MONGO_LOGGER_URL}/messages/aggregation",
-                        json={
-                            "pipeline": [
-                                {
-                                    "$match": {
-                                        "userId": user_id,
-                                        "role": "user",
-                                        "timestamp": {"$gte": today_start}
-                                    }
-                                },
-                                {
-                                    "$count": "today"
-                                }
-                            ]
-                        },
-                        headers={"Content-Type": "application/json"}
-                    )
-
-                    today_messages = 0
-                    if daily_count_response.status_code == 200:
-                        daily_data = daily_count_response.json()
-                        today_messages = daily_data.get("today", 0)
-                        logger.info(f"[Test Mode] Messages today: {today_messages}")
 
                     # Check if daily limit reached
                     if today_messages >= DAILY_MESSAGE_LIMIT:
