@@ -1528,13 +1528,14 @@ Copy your code and share! 💫"""
     plan_id_from_name = None
 
     if message.strip().startswith("buy_plan_"):
-        # Parse button click: buy_plan_1_monthly_basic
+        # Parse button click: buy_plan_1_monthly_299 (plan_id can contain underscores)
         parts = message.strip().split("_")
         logger.info(f"[Button Parse] Button message parts: {parts}")
         if len(parts) >= 3:
             try:
                 plan_number = int(parts[2])  # Extract plan number
-                plan_id_from_button = parts[3] if len(parts) > 3 else None
+                # Join all parts after index 2 to get the full plan_id (may contain underscores)
+                plan_id_from_button = "_".join(parts[3:]) if len(parts) > 3 else None
                 logger.info(f"[Button Parse] Parsed plan_number={plan_number}, plan_id={plan_id_from_button}")
             except ValueError:
                 logger.error(f"[Button Parse] Failed to parse plan number from: {parts[2]}")
