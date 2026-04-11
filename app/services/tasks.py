@@ -841,16 +841,23 @@ async def _generate_payment_link(user_id: str, plan_number: int = None, plan_id:
 
             if payment_link_response.status_code == 200:
                 link_data = payment_link_response.json()
+                logger.info(f"[Payment Link] API Response data: {link_data}")
+
                 razorpay_link = link_data.get("short_url") or link_data.get("payment_link")
 
                 if razorpay_link:
-                    logger.info(f"Generated Razorpay payment link for plan {plan_number}: {razorpay_link}")
+                    logger.info(f"[Payment Link] ✓ Generated Razorpay link: {razorpay_link}")
                     return razorpay_link
                 else:
-                    logger.error("No payment_link in response")
+                    logger.error(f"[Payment Link] ✗ No payment_link in response. Keys: {list(link_data.keys())}")
                     return None
             else:
-                logger.error(f"Failed to create payment link: {payment_link_response.status_code}")
+                logger.error(f"[Payment Link] ✗ API failed with status {payment_link_response.status_code}")
+                try:
+                    error_data = payment_link_response.json()
+                    logger.error(f"[Payment Link] Error response: {error_data}")
+                except:
+                    logger.error(f"[Payment Link] Error text: {payment_link_response.text}")
                 return None
 
     except Exception as e:
@@ -1613,28 +1620,29 @@ Copy your code and share! 💫"""
                         plan_name = selected_plan.get("name", "Plan")
                         amount = selected_plan.get("price", 0)
 
-                        # Try to send WhatsApp Flow (in-WhatsApp payment)
-                        if WHATSAPP_FLOW_ID and WHATSAPP_PAYMENT_CONFIG_ID:
-                            flow_message_id = await _send_whatsapp_payment_flow(
-                                phone=phone,
-                                user_id=user_id,
-                                plan_id=plan_id,
-                                amount=amount,
-                                plan_name=plan_name
-                            )
+                        # DISABLED: WhatsApp Flow (in-WhatsApp payment)
+                        # Direct payment link is used instead for better reliability
+                        # if WHATSAPP_FLOW_ID and WHATSAPP_PAYMENT_CONFIG_ID:
+                        #     flow_message_id = await _send_whatsapp_payment_flow(
+                        #         phone=phone,
+                        #         user_id=user_id,
+                        #         plan_id=plan_id,
+                        #         amount=amount,
+                        #         plan_name=plan_name
+                        #     )
+                        #
+                        #     if flow_message_id:
+                        #         flow_message = (
+                        #             f"Great! You selected **{plan_name}**.\n\n"
+                        #             f"Please complete the payment securely within WhatsApp. 💫\n\n"
+                        #             f"After payment, send me a message to start!"
+                        #         )
+                        #         async with httpx.AsyncClient(timeout=30.0) as client:
+                        #             await _send_whatsapp_message(client, phone, flow_message)
+                        #         await _log_to_mongo(session_id, user_id, "assistant", flow_message, "whatsapp")
+                        #         return {"status": "payment_flow_sent", "flow_id": flow_message_id}
 
-                            if flow_message_id:
-                                flow_message = (
-                                    f"Great! You selected **{plan_name}**.\n\n"
-                                    f"Please complete the payment securely within WhatsApp. 💫\n\n"
-                                    f"After payment, send me a message to start!"
-                                )
-                                async with httpx.AsyncClient(timeout=30.0) as client:
-                                    await _send_whatsapp_message(client, phone, flow_message)
-                                await _log_to_mongo(session_id, user_id, "assistant", flow_message, "whatsapp")
-                                return {"status": "payment_flow_sent", "flow_id": flow_message_id}
-
-                        # Fallback to payment link if Flow is not configured
+                        # Generate Razorpay payment link (PRIMARY METHOD)
                         payment_link = await _generate_payment_link(
                             user_id,
                             plan_number=plan_number if not (plan_id_from_button or plan_id_from_name) else None,
@@ -1652,7 +1660,9 @@ Copy your code and share! 💫"""
                             return {"status": "payment_link_sent", "payment_link": payment_link}
 
         except Exception as e:
-            logger.error(f"Error processing plan selection: {e}")
+            logger.error(f"Error processing plan selection: {e}", exc_info=True)
+            import traceback
+            traceback.print_exc()
 
         # Invalid plan number
         async with httpx.AsyncClient(timeout=30.0) as client:
