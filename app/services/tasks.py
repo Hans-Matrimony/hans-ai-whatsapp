@@ -1760,11 +1760,10 @@ Copy your code and share! 💫"""
         return "english"
 
     def _get_today_start_ist() -> str:
-        """Get today's start time in IST (UTC+5:30)."""
-        import pytz
-        ist = pytz.timezone('Asia/Kolkata')
-        now_ist = datetime.now(ist)
-        today_start = now_ist.replace(hour=0, minute=0, second=0, microsecond=0)
+        """Get today's start time in UTC."""
+        # Use UTC to match MongoDB logger timestamps (which are in UTC)
+        now_utc = datetime.utcnow()
+        today_start = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
         return today_start.strftime("%Y-%m-%dT%H:%M:%SZ")
 
     # ===================================================================
