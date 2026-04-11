@@ -1751,19 +1751,42 @@ Copy your code and share! 💫"""
                         if count_response.status_code == 200:
                             count_data = count_response.json()
                             logger.info(f"[Test Mode] MongoDB Logger Raw Response: {count_data}")
-                            # Count total user messages from response
-                            users = count_data.get("users", [])
-                            logger.info(f"[Test Mode] Users found: {len(users)}")
-                            logger.info(f"[Test Mode] Response keys: {list(count_data.keys())}")
-                            if users and users[0].get("sessions"):
-                                for session in users[0]["sessions"]:
-                                    for msg in session.get("messages", []):
-                                        if msg.get("role") == "user":
-                                            total_messages += 1
-                                            # Check if message is from today
-                                            msg_time = msg.get("createdAt", "")
+
+                            # When userId is provided, API returns user doc directly
+                            # When no userId, API returns {count, users: [...]}
+                            if "sessions" in count_data:
+                                # Single user document returned
+                                sessions = count_data.get("sessions", [])
+                            elif "users" in count_data:
+                                # Multiple users returned
+                                users_list = count_data.get("users", [])
+                                if users_list and users_list[0].get("sessions"):
+                                    sessions = users_list[0]["sessions"]
+                                else:
+                                    sessions = []
+                            else:
+                                sessions = []
+
+                            logger.info(f"[Test Mode] Found {len(sessions)} sessions")
+
+                            # Count messages from all sessions
+                            for session in sessions:
+                                for msg in session.get("messages", []):
+                                    if msg.get("role") == "user":
+                                        total_messages += 1
+                                        # Check if message is from today (MongoDB logger uses 'timestamp' not 'createdAt')
+                                        msg_time = msg.get("timestamp", "")
+                                        if msg_time and isinstance(msg_time, str):
                                             if msg_time.startswith(_get_today_start_ist()[:10]):
                                                 today_messages += 1
+                                        elif isinstance(msg_time, str):
+                                            # Try parsing ISO date string
+                                            try:
+                                                msg_date = msg_time.split('T')[0] if 'T' in msg_time else msg_time.split(' ')[0]
+                                                if msg_date == _get_today_start_ist()[:10]:
+                                                    today_messages += 1
+                                            except:
+                                                pass
 
                             logger.info(f"[Test Mode] Total messages for {user_id}: {total_messages}, Today: {today_messages}")
                         else:
