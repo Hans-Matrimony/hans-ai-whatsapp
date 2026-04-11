@@ -1731,6 +1731,7 @@ Copy your code and share! 💫"""
 
     # Check if this is the test number
     if phone == TEST_PHONE_NUMBER or phone == "+919760347653":
+        logger.info(f"[Test Mode] CHECK: Entered test mode! phone={phone}, TEST_PHONE_NUMBER={TEST_PHONE_NUMBER}")
         logger.info(f"[Test Mode] Checking message limits for {phone}")
 
         try:
