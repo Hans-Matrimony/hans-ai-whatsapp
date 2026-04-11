@@ -1816,9 +1816,9 @@ Copy your code and share! 💫"""
 
             logger.info(f"[Test Mode] DEBUG: access={access.get('access')}, total_messages={total_messages}, FREE_MESSAGE_LIMIT={FREE_MESSAGE_LIMIT}")
 
-            # Check if user has active FULL subscription (only full_access skips enforcement)
-            if access.get("access") == "full_access":
-                logger.info(f"[Test Mode] User has full subscription - skipping enforcement")
+            # Check if user has active subscription (full_access or active skips enforcement)
+            if access.get("access") in ["full_access", "active"]:
+                logger.info(f"[Test Mode] User has active subscription ({access.get('access')}) - skipping enforcement")
             # User has trial, trial_ending_soon, or no subscription - enforce limits
             elif total_messages >= FREE_MESSAGE_LIMIT:
                 logger.info(f"[Test Mode] User exhausted {FREE_MESSAGE_LIMIT} free messages (total: {total_messages}, access: {access.get('access')})")
