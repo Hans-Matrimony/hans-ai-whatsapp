@@ -1795,67 +1795,62 @@ Copy your code and share! 💫"""
                         count_data = count_response.json()
                         logger.info(f"[Enforcement] MongoDB Logger Raw Response keys: {list(count_data.keys())}")
 
-                        try:
-                            # When userId is provided, API returns user doc directly
-                                # When no userId, API returns {count, users: [...]}
-                                if "sessions" in count_data:
-                                    # Single user document returned
-                                    sessions = count_data.get("sessions", [])
-                                    logger.info(f"[Enforcement] Single user doc with {len(sessions)} sessions")
-                                elif "users" in count_data:
-                                    # Multiple users returned
-                                    users_list = count_data.get("users", [])
-                                    if users_list and users_list[0].get("sessions"):
-                                        sessions = users_list[0]["sessions"]
-                                        logger.info(f"[Enforcement] Multiple users, first has {len(sessions)} sessions")
-                                    else:
-                                        sessions = []
-                                        logger.info(f"[Enforcement] Multiple users but no sessions found")
-                                else:
-                                    sessions = []
-                                    logger.info(f"[Enforcement] No sessions or users key in response")
-
-                                logger.info(f"[Enforcement] Total sessions to process: {len(sessions)}")
-
-                                # Count messages from all sessions
-                                for session in sessions:
-                                    messages = session.get("messages", [])
-                                    for msg in messages:
-                                        if msg.get("role") == "user":
-                                            total_messages += 1
-                                            # Check if message is from today (MongoDB logger uses 'timestamp' not 'createdAt')
-                                            msg_time = msg.get("timestamp", "")
-                                            today_start = _get_today_start_ist()[:10]  # Get YYYY-MM-DD part
-
-                                            logger.info(f"[Enforcement] Checking message timestamp: {msg_time}, today_start: {today_start}")
-
-                                            if msg_time and isinstance(msg_time, str):
-                                                # First try: check if timestamp starts with today's date
-                                                if msg_time.startswith(today_start):
-                                                    logger.info(f"[Enforcement] ✓ Message counted (starts with today)")
-                                                    today_messages += 1
-                                                # Fallback: try parsing ISO date string
-                                                else:
-                                                    try:
-                                                        msg_date = msg_time.split('T')[0] if 'T' in msg_time else msg_time.split(' ')[0]
-                                                        logger.info(f"[Enforcement] Extracted date: {msg_date}")
-                                                        if msg_date == today_start:
-                                                            logger.info(f"[Enforcement] ✓ Message counted (parsed date matches)")
-                                                            today_messages += 1
-                                                    except Exception as parse_error:
-                                                        logger.warning(f"[Enforcement] Failed to parse timestamp {msg_time}: {parse_error}")
-
-                                logger.info(f"[Enforcement] Total messages for {user_id}: {total_messages}, Today: {today_messages}")
-                            except Exception as e:
-                                logger.error(f"[Enforcement] Error parsing MongoDB response: {e}")
-                                import traceback
-                                traceback.print_exc()
+                        # When userId is provided, API returns user doc directly
+                        # When no userId, API returns {count, users: [...]}
+                        if "sessions" in count_data:
+                            # Single user document returned
+                            sessions = count_data.get("sessions", [])
+                            logger.info(f"[Enforcement] Single user doc with {len(sessions)} sessions")
+                        elif "users" in count_data:
+                            # Multiple users returned
+                            users_list = count_data.get("users", [])
+                            if users_list and users_list[0].get("sessions"):
+                                sessions = users_list[0]["sessions"]
+                                logger.info(f"[Enforcement] Multiple users, first has {len(sessions)} sessions")
+                            else:
+                                sessions = []
+                                logger.info(f"[Enforcement] Multiple users but no sessions found")
                         else:
-                            logger.warning(f"[Enforcement] Failed to count messages: {count_response.status_code}")
-                except Exception as e:
-                    logger.warning(f"[Enforcement] Error counting messages: {e}")
-                    # Default to allowing the message if counting fails
-                    total_messages = 0
+                            sessions = []
+                            logger.info(f"[Enforcement] No sessions or users key in response")
+
+                        logger.info(f"[Enforcement] Total sessions to process: {len(sessions)}")
+
+                        # Count messages from all sessions
+                        for session in sessions:
+                            messages = session.get("messages", [])
+                            for msg in messages:
+                                if msg.get("role") == "user":
+                                    total_messages += 1
+                                    # Check if message is from today (MongoDB logger uses 'timestamp' not 'createdAt')
+                                    msg_time = msg.get("timestamp", "")
+                                    today_start = _get_today_start_ist()[:10]  # Get YYYY-MM-DD part
+
+                                    logger.info(f"[Enforcement] Checking message timestamp: {msg_time}, today_start: {today_start}")
+
+                                    if msg_time and isinstance(msg_time, str):
+                                        # First try: check if timestamp starts with today's date
+                                        if msg_time.startswith(today_start):
+                                            logger.info(f"[Enforcement] ✓ Message counted (starts with today)")
+                                            today_messages += 1
+                                        # Fallback: try parsing ISO date string
+                                        else:
+                                            try:
+                                                msg_date = msg_time.split('T')[0] if 'T' in msg_time else msg_time.split(' ')[0]
+                                                logger.info(f"[Enforcement] Extracted date: {msg_date}")
+                                                if msg_date == today_start:
+                                                    logger.info(f"[Enforcement] ✓ Message counted (parsed date matches)")
+                                                    today_messages += 1
+                                            except Exception as parse_error:
+                                                logger.warning(f"[Enforcement] Failed to parse timestamp {msg_time}: {parse_error}")
+
+                        logger.info(f"[Enforcement] Total messages for {user_id}: {total_messages}, Today: {today_messages}")
+                    else:
+                        logger.warning(f"[Enforcement] Failed to count messages: {count_response.status_code}")
+            except Exception as e:
+                logger.warning(f"[Enforcement] Error counting messages: {e}")
+                # Default to allowing the message if counting fails
+                total_messages = 0
             else:
                 logger.warning("[Enforcement] MONGO_LOGGER_URL not configured, cannot count messages")
 
@@ -1955,13 +1950,9 @@ Copy your code and share! 💫"""
                 remaining_free = FREE_MESSAGE_LIMIT - total_messages
                 logger.info(f"[Enforcement] User has {remaining_free} free messages remaining")
 
-        except Exception as e:
-            logger.error(f"[Enforcement] Error checking message limits: {e}", exc_info=True)
-            import traceback
-            traceback.print_exc()
-            logger.error(f"[Enforcement] EXCEPTION TYPE: {type(e).__name__}")
-            logger.error(f"[Enforcement] EXCEPTION MESSAGE: {str(e)}")
-            # On error, allow message to avoid blocking users
+    except Exception as e:
+        logger.error(f"[Enforcement] Error checking message limits: {e}", exc_info=True)
+        # On error, allow message to avoid blocking users
 
     # ===================================================================
 
