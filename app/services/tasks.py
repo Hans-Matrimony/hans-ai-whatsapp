@@ -35,6 +35,10 @@ WHATSAPP_ACCESS_TOKEN = os.getenv("WHATSAPP_ACCESS_TOKEN")
 FB_API_URL = "https://graph.facebook.com/v18.0"
 MEM0_URL = os.getenv("MEM0_URL", "https://rg4g0gkk0wwkk4cc00g4sg0c.api.hansastro.com")
 
+# Rate limiting configuration
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+MAX_MESSAGES_PER_MINUTE_PER_USER = 10  # WhatsApp's actual limit is around 20-60/min per user
+
 # Initialize user metadata service if MongoDB URL is available and is a direct connection
 if MONGO_LOGGER_URL and MONGO_LOGGER_URL.startswith(("mongodb://", "mongodb+srv://")):
     try:
@@ -2201,6 +2205,39 @@ def send_message_task(phone: str, message: str) -> dict:
         return {"error": str(e)}
 
 
+# Simple rate limiter to prevent hitting WhatsApp's rate limits
+_user_message_counts = {}  # In-memory tracking (will reset on restart)
+
+def _check_rate_limit(phone: str) -> bool:
+    """
+    Check if we're sending too many messages to a user.
+    Returns True if rate limit is OK, False if we should wait.
+    """
+    import time
+    current_time = int(time.time())
+    minute_key = current_time // 60  # Current minute bucket
+
+    if phone not in _user_message_counts:
+        _user_message_counts[phone] = {}
+
+    # Clean old entries (older than 1 minute)
+    _user_message_counts[phone] = {
+        k: v for k, v in _user_message_counts[phone].items()
+        if current_time - k < 60
+    }
+
+    # Count messages in current minute
+    count = sum(1 for t in _user_message_counts[phone].keys() if t // 60 == minute_key)
+
+    if count >= MAX_MESSAGES_PER_MINUTE_PER_USER:
+        logger.warning(f"[Rate Limit] {phone} has sent {count} messages in current minute, limiting")
+        return False
+
+    # Record this message
+    _user_message_counts[phone][current_time] = True
+    return True
+
+
 async def _send_whatsapp_message_async(phone: str, message: str):
     """Async implementation of sending WhatsApp message."""
     async with httpx.AsyncClient(timeout=30.0) as client:
@@ -2212,6 +2249,11 @@ async def _send_whatsapp_message(client: httpx.AsyncClient, phone: str, message:
     if not WHATSAPP_PHONE_ID or not WHATSAPP_ACCESS_TOKEN:
         logger.error("WhatsApp credentials missing")
         return {"error": "Credentials missing"}
+
+    # Check rate limit before sending
+    if not _check_rate_limit(phone):
+        logger.warning(f"[Rate Limit] Skipping message to {phone} due to rate limit")
+        return {"error": "rate_limited", "message": "Too many messages to this user"}
 
     url = f"{FB_API_URL}/{WHATSAPP_PHONE_ID}/messages"
 
