@@ -1809,58 +1809,58 @@ Copy your code and share! 💫"""
             else:
                 logger.warning("[Test Mode] MONGO_LOGGER_URL not configured, cannot count messages")
 
-                # Check if user has active subscription
-                logger.info(f"[Test Mode] About to check subscription access...")
-                access = await _check_subscription_access(phone)
-                logger.info(f"[Test Mode] Subscription check completed: {access}")
+            # Check if user has active subscription (OUTSIDE if/else blocks)
+            logger.info(f"[Test Mode] About to check subscription access...")
+            access = await _check_subscription_access(phone)
+            logger.info(f"[Test Mode] Subscription check completed: {access}")
 
-                logger.info(f"[Test Mode] DEBUG: access={access.get('access')}, total_messages={total_messages}, FREE_MESSAGE_LIMIT={FREE_MESSAGE_LIMIT}")
+            logger.info(f"[Test Mode] DEBUG: access={access.get('access')}, total_messages={total_messages}, FREE_MESSAGE_LIMIT={FREE_MESSAGE_LIMIT}")
 
-                # Check if user has active FULL subscription (only full_access skips enforcement)
-                if access.get("access") == "full_access":
-                    logger.info(f"[Test Mode] User has full subscription - skipping enforcement")
-                # User has trial, trial_ending_soon, or no subscription - enforce limits
-                elif total_messages >= FREE_MESSAGE_LIMIT:
-                    logger.info(f"[Test Mode] User exhausted {FREE_MESSAGE_LIMIT} free messages (total: {total_messages}, access: {access.get('access')})")
+            # Check if user has active FULL subscription (only full_access skips enforcement)
+            if access.get("access") == "full_access":
+                logger.info(f"[Test Mode] User has full subscription - skipping enforcement")
+            # User has trial, trial_ending_soon, or no subscription - enforce limits
+            elif total_messages >= FREE_MESSAGE_LIMIT:
+                logger.info(f"[Test Mode] User exhausted {FREE_MESSAGE_LIMIT} free messages (total: {total_messages}, access: {access.get('access')})")
 
-                    # Check if daily limit reached
-                    if today_messages >= DAILY_MESSAGE_LIMIT:
-                        logger.warning(f"[Test Mode] Daily limit reached ({today_messages}/{DAILY_MESSAGE_LIMIT}) - SENDING SOFT PAYWALL")
+                # Check if daily limit reached
+                if today_messages >= DAILY_MESSAGE_LIMIT:
+                    logger.warning(f"[Test Mode] Daily limit reached ({today_messages}/{DAILY_MESSAGE_LIMIT}) - SENDING SOFT PAYWALL")
 
-                        # Detect language of user's message
-                        user_language = _detect_language(message)
+                    # Detect language of user's message
+                    user_language = _detect_language(message)
 
-                        # Send soft enforcement message based on language
-                        if user_language == "hindi":
-                            limit_message = (
-                                "🙏 Sorry, lekin aapki 40 free messages khatam ho gayi hain aur aaj ki 3 messages limit bhi puri ho gayi hai.\n\n"
-                                "Main aapko jawab dena chahta hoon, lekin mujhe subscription lena padega taaki main aapki madad kar sakun.\n\n"
-                                "Please 'PAY' type karein aur subscription lein (only ₹1 for testing)."
-                            )
-                        else:
-                            limit_message = (
-                                "🙏 I'm really sorry but you've used your 40 free messages and today's 3 message limit.\n\n"
-                                "I want to answer you but I need a subscription to continue helping you.\n\n"
-                                "Please type 'PAY' to get subscription (only ₹1 for testing)."
-                            )
-
-                        async with httpx.AsyncClient(timeout=30.0) as client:
-                            await _send_whatsapp_message(client, phone, limit_message)
-
-                        await _log_to_mongo(
-                            session_id, user_id, "assistant", limit_message, "whatsapp", "text", None,
-                            nudge_level=1
+                    # Send soft enforcement message based on language
+                    if user_language == "hindi":
+                        limit_message = (
+                            "🙏 Sorry, lekin aapki 40 free messages khatam ho gayi hain aur aaj ki 3 messages limit bhi puri ho gayi hai.\n\n"
+                            "Main aapko jawab dena chahta hoon, lekin mujhe subscription lena padega taaki main aapki madad kar sakun.\n\n"
+                            "Please 'PAY' type karein aur subscription lein (only ₹1 for testing)."
+                        )
+                    else:
+                        limit_message = (
+                            "🙏 I'm really sorry but you've used your 40 free messages and today's 3 message limit.\n\n"
+                            "I want to answer you but I need a subscription to continue helping you.\n\n"
+                            "Please type 'PAY' to get subscription (only ₹1 for testing)."
                         )
 
-                        return {"status": "daily_limit_reached", "total_messages": total_messages, "today_messages": today_messages}
-                    else:
-                        remaining = DAILY_MESSAGE_LIMIT - today_messages
-                        logger.info(f"[Test Mode] Daily limit not reached ({today_messages}/{DAILY_MESSAGE_LIMIT}), {remaining} remaining")
-                        # Continue processing message
+                    async with httpx.AsyncClient(timeout=30.0) as client:
+                        await _send_whatsapp_message(client, phone, limit_message)
 
+                    await _log_to_mongo(
+                        session_id, user_id, "assistant", limit_message, "whatsapp", "text", None,
+                        nudge_level=1
+                    )
+
+                    return {"status": "daily_limit_reached", "total_messages": total_messages, "today_messages": today_messages}
                 else:
-                    remaining_free = FREE_MESSAGE_LIMIT - total_messages
-                    logger.info(f"[Test Mode] User has {remaining_free} free messages remaining")
+                    remaining = DAILY_MESSAGE_LIMIT - today_messages
+                    logger.info(f"[Test Mode] Daily limit not reached ({today_messages}/{DAILY_MESSAGE_LIMIT}), {remaining} remaining")
+                    # Continue processing message
+
+            else:
+                remaining_free = FREE_MESSAGE_LIMIT - total_messages
+                logger.info(f"[Test Mode] User has {remaining_free} free messages remaining")
 
         except Exception as e:
             logger.error(f"[Test Mode] Error checking message limits: {e}", exc_info=True)
