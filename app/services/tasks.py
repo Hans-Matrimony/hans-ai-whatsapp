@@ -13,6 +13,7 @@ from typing import Optional, Tuple, List, Dict
 from pathlib import Path
 
 import httpx
+import redis
 from pymongo import MongoClient
 from app.services.celery_app import celery_app
 from app.services.message_limiter import MessageLimiter
@@ -62,6 +63,16 @@ WHATSAPP_FLOW_ID = os.getenv("WHATSAPP_FLOW_ID")  # Flow ID from Meta Business M
 
 # Testing mode: Only send proactive nudges to this number (None = send to all users)
 PROACTIVE_NUDGE_TEST_NUMBER = os.getenv("PROACTIVE_NUDGE_TEST_NUMBER", "+919760347653")
+
+# Redis connection for nudge deduplication
+_redis_url = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
+try:
+    _nudge_redis = redis.from_url(_redis_url, decode_responses=True)
+    _nudge_redis.ping()
+    logger.info("[Proactive Nudge] Redis connected for nudge dedup")
+except Exception as _redis_err:
+    logger.warning(f"[Proactive Nudge] Redis connection failed for dedup: {_redis_err}")
+    _nudge_redis = None
 
 # Gender-based Astrologer Personality Configuration
 ASTROLOGER_PERSONALITIES = {
@@ -2505,11 +2516,15 @@ async def _check_inactive_users():
                         hours_inactive = inactive_minutes / 60
                         logger.info(f"[Proactive Nudge] ELIGIBLE: {user_id} inactive for {hours_inactive:.1f} hours")
 
-                        # No need to check who sent the last message
-                        # Just check if user has been inactive for 8+ hours
-                        # The 8 hour threshold is already checked above (line 2346)
-                        # If we reach here, user is eligible for nudge regardless of who sent last message
-                        
+                        # DEDUP CHECK: Skip if nudge was already sent within the last 8 hours
+                        nudge_redis_key = f"proactive_nudge_sent:{user_id}"
+                        if _nudge_redis:
+                            try:
+                                if _nudge_redis.exists(nudge_redis_key):
+                                    logger.debug(f"[Proactive Nudge] {user_id}: already nudged recently, skipping")
+                                    continue
+                            except Exception as redis_err:
+                                logger.warning(f"[Proactive Nudge] Redis check failed for {user_id}: {redis_err}")
 
                         # Get recent conversation for topic and language detection
                         recent_conversation = await _get_recent_conversation_from_mongo(user_id, session)
@@ -2525,6 +2540,14 @@ async def _check_inactive_users():
                         phone = user_id.replace("+", "")
                         await _send_whatsapp_message(client, phone, nudge_message)
                         nudges_sent += 1
+
+                        # DEDUP SET: Mark this user as nudged with 8-hour expiry
+                        if _nudge_redis:
+                            try:
+                                _nudge_redis.setex(nudge_redis_key, 8 * 3600, "1")  # 8 hours TTL
+                                logger.info(f"[Proactive Nudge] Set dedup key for {user_id} (expires in 8h)")
+                            except Exception as redis_err:
+                                logger.warning(f"[Proactive Nudge] Redis set failed for {user_id}: {redis_err}")
 
 
                         logger.info(f"[Proactive Nudge] ✓ Nudge sent to {user_id} (topic: {detected_topic}, language: {detected_language})")
