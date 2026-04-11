@@ -1776,7 +1776,7 @@ Copy your code and share! 💫"""
     # TEST MODE: Only enforce for 9760347653 (your number)
     # TODO: Roll out to all users after testing
     TEST_PHONE_NUMBER = "919760347653"  # Your number with country code
-    FREE_MESSAGE_LIMIT = 40
+    FREE_MESSAGE_LIMIT = 25
     DAILY_MESSAGE_LIMIT = 3
 
     # Check if this is the test number
@@ -1880,21 +1880,54 @@ Copy your code and share! 💫"""
                     # Detect language of user's message
                     user_language = _detect_language(message)
 
-                    # Send soft enforcement message based on language
+                    # Get user's gender for personalized astrologer response
+                    user_gender = await _get_user_gender(user_id)
+                    astrologer = _get_astrologer_personality(user_gender)
+                    astrologer_name = astrologer["name"]
+
+                    # Generate personalized message from astrologer
                     if user_language == "hindi":
-                        limit_message = (
-                            "Bhai, bas ho gayi yaar free messages 😅\n\n"
-                            "Main toh jawab deta hi lekin system ne limit laga diya hai. "
-                            "Agar continue karna hai toh choti si subscription le lo (only ₹1 testing ke liye).\n\n"
-                            "'PAY' type kar ke dekho options."
-                        )
+                        # Hinglish - personalized by astrologer
+                        if astrologer_name == "Meera":
+                            # Female astrologer (Meera) talking to male user
+                            limit_message = (
+                                f"Main bilkul maafi chahti hoon ki aaj aur aapke free messages khatam ho gaye 😔\n\n"
+                                f"Mujhe bohot bura lag raha hai ki main aapki abhi madad nahi kar pa rahi. "
+                                f"System ki limitation hai yeh, main kar bhi kya sakti hoon?\n\n"
+                                f"Agar aapko raasta chahiye toh 'PAY' type karke ek choti si subscription le sakte ho (only ₹1 for testing). "
+                                f"Ya fir kal ka wait kar sakte ho.\n\n"
+                                f"Maf kijiya ga 🙏"
+                            )
+                        else:
+                            # Male astrologer (Aarav) talking to female user
+                            limit_message = (
+                                f"Main bilkul maafi chahta hoon ki aaj aur aapke free messages khatam ho gaye 😔\n\n"
+                                f"Mujhe bohot bura lag raha hai ki main aapki abhi madad nahi kar pa raha. "
+                                f"System ki limitation hai yeh, main kar bhi kya sakta hoon?\n\n"
+                                f"Agar aapko raasta chahiye toh 'PAY' type karke ek choti si subscription le sakti ho (only ₹1 for testing). "
+                                f"Ya fir kal ka wait kar sakti ho.\n\n"
+                                f"Maf kijiye ga 🙏"
+                            )
                     else:
-                        limit_message = (
-                            "Hey, free messages are done for today 😅\n\n"
-                            "I'd love to help but there's a limit on free messages now. "
-                            "If you want to continue, just get a small subscription (only ₹1 for testing).\n\n"
-                            "Type 'PAY' to see options."
-                        )
+                        # English - personalized by astrologer
+                        if astrologer_name == "Meera":
+                            # Female astrologer (Meera) talking to male user
+                            limit_message = (
+                                f"I'm really sorry, but your free messages and daily limit are done for today 😔\n\n"
+                                f"I feel bad that I can't help you right now. It's a system limitation, and I feel terrible about it.\n\n"
+                                f"If you'd like to continue, you can get a small subscription by typing 'PAY' (only ₹1 for testing). "
+                                f"Or you can wait until tomorrow.\n\n"
+                                f"Really sorry about this 🙏"
+                            )
+                        else:
+                            # Male astrologer (Aarav) talking to female user
+                            limit_message = (
+                                f"I'm really sorry, but your free messages and daily limit are done for today 😔\n\n"
+                                f"I feel bad that I can't help you right now. It's a system limitation, and I feel terrible about it.\n\n"
+                                f"If you'd like to continue, you can get a small subscription by typing 'PAY' (only ₹1 for testing). "
+                                f"Or you can wait until tomorrow.\n\n"
+                                f"Really sorry about this 🙏"
+                            )
 
                     async with httpx.AsyncClient(timeout=30.0) as client:
                         await _send_whatsapp_message(client, phone, limit_message)
@@ -1935,12 +1968,26 @@ Copy your code and share! 💫"""
         # OR New user who hasn't paid ₹1 yet
         logger.info(f"[Subscription] Access denied for {phone}")
 
-        # Trial activation removed - users now get automatic access with 40 free messages
-        # Send payment nudge to subscribe
-        payment_message = (
-            "Free messages khatam ho gayi yaar 😅\n\n"
-            "Agar continue karna hai toh 'PAY' type kar ke subscription le lo (only ₹1 for testing)."
-        )
+        # Trial activation removed - users now get automatic access with 25 free messages
+        # Send payment nudge to subscribe - personalized by astrologer
+        user_gender = await _get_user_gender(user_id)
+        astrologer = _get_astrologer_personality(user_gender)
+        astrologer_name = astrologer["name"]
+
+        if astrologer_name == "Meera":
+            # Female astrologer (Meera) talking to male user
+            payment_message = (
+                f"Hi! Aapke free messages khatam ho gaye hain 😔\n\n"
+                f"Main continue kar na chahti hoon lekin system ne limit laga di hai. "
+                f"Agar aapko chahiye toh 'PAY' type karke subscription le lo (only ₹1 for testing)."
+            )
+        else:
+            # Male astrologer (Aarav) talking to female user
+            payment_message = (
+                f"Hi! Aapke free messages khatam ho gaye hain 😔\n\n"
+                f"Main continue kar na chahta hoon lekin system ne limit laga di hai. "
+                f"Agar aapko chahiye toh 'PAY' type karke subscription le lo (only ₹1 for testing)."
+            )
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             await _send_whatsapp_message(client, phone, payment_message)
