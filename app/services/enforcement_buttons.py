@@ -446,15 +446,16 @@ class RazorpayWhatsAppPaymentSender:
         }
 
         # WhatsApp CTA URL button payload
+        # NOTE: header is REQUIRED for cta_url type
         payload = {
             "messaging_product": "whatsapp",
-            "to": phone if phone.startswith('+') else f"+{phone}",  # Ensure E.164 format
+            "to": phone if phone.startswith('+') else f"+{phone}",
             "type": "interactive",
             "interactive": {
                 "type": "cta_url",
                 "header": {
                     "type": "text",
-                    "text": "Choose Plan"  # Optional header
+                    "text": "Choose Your Plan"
                 },
                 "body": {
                     "text": text
@@ -463,7 +464,7 @@ class RazorpayWhatsAppPaymentSender:
                     "name": "cta_url",
                     "parameters": {
                         "url": razorpay_link,
-                        "title": "Buy Now"  # Button label
+                        "title": "Buy Now"
                     }
                 }
             }
