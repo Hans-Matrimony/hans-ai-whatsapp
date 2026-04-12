@@ -1892,11 +1892,39 @@ Copy your code and share! 💫"""
         return "english"
 
     def _get_today_start_ist() -> str:
-        """Get today's start time in UTC."""
-        # Use UTC to match MongoDB logger timestamps (which are in UTC)
-        now_utc = datetime.utcnow()
-        today_start = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
-        return today_start.strftime("%Y-%m-%dT%H:%M:%SZ")
+        """Get today's start date in IST (Indian Standard Time = UTC+5:30)."""
+        from datetime import timedelta, timezone
+
+        # Get current time in UTC
+        utc_now = datetime.now(timezone.utc)
+        # Convert to IST (UTC+5:30)
+        ist_offset = timedelta(hours=5, minutes=30)
+        ist_now = utc_now + ist_offset
+        # Return just the date part (YYYY-MM-DD)
+        return ist_now.strftime("%Y-%m-%d")
+
+    def _convert_utc_to_ist_date(utc_timestamp: str) -> str:
+        """Convert UTC timestamp to IST date string (YYYY-MM-DD)."""
+        from datetime import timedelta, timezone
+
+        try:
+            # Parse UTC timestamp (formats: 2026-04-12T19:01:42.856Z or 2026-04-12T19:01:42Z)
+            ts = utc_timestamp.replace('Z', '')
+            if '.' in ts:
+                # Remove microseconds for parsing
+                ts = ts.split('.')[0]
+
+            utc_time = datetime.fromisoformat(ts)
+            utc_time = utc_time.replace(tzinfo=timezone.utc)
+
+            # Convert to IST (UTC+5:30)
+            ist_offset = timedelta(hours=5, minutes=30)
+            ist_time = utc_time + ist_offset
+
+            return ist_time.strftime("%Y-%m-%d")
+        except Exception as e:
+            logger.warning(f"[Enforcement] Failed to convert {utc_timestamp} to IST: {e}")
+            return ""
 
     # ===================================================================
 
@@ -1954,27 +1982,20 @@ Copy your code and share! 💫"""
                             for msg in messages:
                                 if msg.get("role") == "user":
                                     total_messages += 1
-                                    # Check if message is from today (MongoDB logger uses 'timestamp' not 'createdAt')
+                                    # Check if message is from today (MongoDB logger uses 'timestamp')
                                     msg_time = msg.get("timestamp", "")
-                                    today_start = _get_today_start_ist()[:10]  # Get YYYY-MM-DD part
+                                    today_ist = _get_today_start_ist()  # Get today's date in IST
 
-                                    logger.info(f"[Enforcement] Checking message timestamp: {msg_time}, today_start: {today_start}")
+                                    # Convert message UTC timestamp to IST date
+                                    msg_ist_date = _convert_utc_to_ist_date(msg_time)
 
-                                    if msg_time and isinstance(msg_time, str):
-                                        # First try: check if timestamp starts with today's date
-                                        if msg_time.startswith(today_start):
-                                            logger.info(f"[Enforcement] ✓ Message counted (starts with today)")
-                                            today_messages += 1
-                                        # Fallback: try parsing ISO date string
-                                        else:
-                                            try:
-                                                msg_date = msg_time.split('T')[0] if 'T' in msg_time else msg_time.split(' ')[0]
-                                                logger.info(f"[Enforcement] Extracted date: {msg_date}")
-                                                if msg_date == today_start:
-                                                    logger.info(f"[Enforcement] ✓ Message counted (parsed date matches)")
-                                                    today_messages += 1
-                                            except Exception as parse_error:
-                                                logger.warning(f"[Enforcement] Failed to parse timestamp {msg_time}: {parse_error}")
+                                    logger.info(f"[Enforcement] Checking msg: {msg_time} (UTC) → {msg_ist_date} (IST), today: {today_ist}")
+
+                                    if msg_ist_date and msg_ist_date == today_ist:
+                                        logger.info(f"[Enforcement] ✓ Message counted (today in IST)")
+                                        today_messages += 1
+                                    else:
+                                        logger.info(f"[Enforcement] ✗ Message NOT from today (IST date: {msg_ist_date})")
 
                         logger.info(f"[Enforcement] Total messages for {user_id}: {total_messages}, Today: {today_messages}")
                     else:
