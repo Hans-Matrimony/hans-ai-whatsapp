@@ -2130,11 +2130,16 @@ Copy your code and share! 💫"""
                     logger.info(f"[Enforcement] Generated enforcement message from {astrologer_name}:")
                     logger.info(f"[Enforcement] Message preview: {limit_message[:200]}...")
 
-                    # STEP 2: Send the AI/hardcoded contextual message
-                    async with httpx.AsyncClient(timeout=30.0) as client:
-                        await _send_whatsapp_message(client, phone, limit_message)
-                        logger.info(f"[Enforcement] ✅ Enforcement message sent to {phone} via WhatsApp")
+                    # STEP 2: Send the AI/hardcoded contextual message (split into multiple bubbles)
+                    # Split message by double newlines to create multiple bubbles
+                    message_parts = [part.strip() for part in limit_message.split('\n\n') if part.strip()]
 
+                    async with httpx.AsyncClient(timeout=30.0) as client:
+                        for idx, part in enumerate(message_parts, 1):
+                            await _send_whatsapp_message(client, phone, part)
+                            logger.info(f"[Enforcement] ✅ Sent message bubble {idx}/{len(message_parts)} to {phone}")
+
+                    # Log the full message to MongoDB
                     await _log_to_mongo(
                         session_id, user_id, "assistant", limit_message, "whatsapp", "text", None,
                         nudge_level=1
@@ -2152,7 +2157,8 @@ Copy your code and share! 💫"""
                                 astrologer_name=astrologer_name,
                                 language=user_language,
                                 enforcement_type="daily_limit",
-                                mongo_logger_url=MONGO_LOGGER_URL
+                                mongo_logger_url=MONGO_LOGGER_URL,
+                                send_intro_message=False  # Only send plan/button, no extra messages
                             )
                             if success:
                                 logger.info(f"[Enforcement] ✅ Sent Razorpay payment button")
@@ -2216,15 +2222,11 @@ Copy your code and share! 💫"""
                 success = await _razorpay_whatsapp_payment.send_enforcement_with_razorpay_buttons(
                     phone=phone,
                     user_id=user_id,
-                    session_id=session_id,
                     astrologer_name=astrologer_name,
-                    user_gender=user_gender,
                     language=user_language,
-                    message_count=total_messages,
-                    today_messages=today_messages,
+                    enforcement_type="payment_nudge",
                     mongo_logger_url=MONGO_LOGGER_URL,
-                    client=client,
-                    enforcement_type="payment_nudge"
+                    send_intro_message=False  # Only send plan/button, no extra messages
                 )
 
                 if success:
@@ -2365,15 +2367,11 @@ Copy your code and share! 💫"""
                                     success = await _razorpay_whatsapp_payment.send_enforcement_with_razorpay_buttons(
                                         phone=phone,
                                         user_id=user_id,
-                                        session_id=session_id,
                                         astrologer_name=astrologer_name,
-                                        user_gender=user_gender,
                                         language=user_language,
-                                        message_count=limit_check.get("messageCount", 40),
-                                        today_messages=0,
+                                        enforcement_type="soft_paywall",
                                         mongo_logger_url=MONGO_LOGGER_URL,
-                                        client=button_client,
-                                        enforcement_type="soft_paywall"
+                                        send_intro_message=False  # Only send plan/button, no extra messages
                                     )
 
                                     if success:

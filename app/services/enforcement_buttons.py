@@ -78,7 +78,8 @@ class RazorpayWhatsAppPaymentSender:
         astrologer_name: str,
         language: str,
         enforcement_type: str = "soft_paywall",
-        mongo_logger_url: str = None
+        mongo_logger_url: str = None,
+        send_intro_message: bool = False
     ) -> bool:
         """
         Send enforcement message with Razorpay payment buttons
@@ -90,6 +91,7 @@ class RazorpayWhatsAppPaymentSender:
             language: english or hinglish
             enforcement_type: soft_paywall, daily_limit, payment_nudge
             mongo_logger_url: MongoDB URL for context
+            send_intro_message: If False, only sends plan/button (no intro/footer)
 
         Returns:
             True if successful, False otherwise
@@ -101,17 +103,16 @@ class RazorpayWhatsAppPaymentSender:
                 logger.warning("[Razorpay WhatsApp] No plans available")
                 return False
 
-            # Build personalized message based on language
-            message = await self._build_message(
-                astrologer_name=astrologer_name,
-                language=language,
-                enforcement_type=enforcement_type,
-                phone=phone,
-                mongo_logger_url=mongo_logger_url
-            )
-
-            # Send main message
-            await self._send_text_message(phone, message)
+            # Send intro message only if requested (for standalone use)
+            if send_intro_message:
+                message = await self._build_message(
+                    astrologer_name=astrologer_name,
+                    language=language,
+                    enforcement_type=enforcement_type,
+                    phone=phone,
+                    mongo_logger_url=mongo_logger_url
+                )
+                await self._send_text_message(phone, message)
 
             # Send each plan with Razorpay payment button
             for idx, plan in enumerate(plans, 1):
@@ -123,9 +124,10 @@ class RazorpayWhatsAppPaymentSender:
                     language=language
                 )
 
-            # Send footer message
-            footer = await self._build_footer(language)
-            await self._send_text_message(phone, footer)
+            # Send footer message only if intro was sent (for standalone use)
+            if send_intro_message:
+                footer = await self._build_footer(language)
+                await self._send_text_message(phone, footer)
 
             logger.info(
                 f"[Razorpay WhatsApp] Sent {enforcement_type} with {len(plans)} Razorpay buttons to {phone}"

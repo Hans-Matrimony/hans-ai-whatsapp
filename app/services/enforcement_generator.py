@@ -424,6 +424,18 @@ You must follow strict language segregation based on the user's '{language.upper
 ## OUTPUT FORMAT
 Return ONLY the final message text, no explanations, no prefixes.
 
+**CRITICAL: Format your message in 2-3 short paragraphs separated by DOUBLE newlines (press Enter twice).**
+Each paragraph should be 1-2 sentences only. This creates multiple WhatsApp message bubbles.
+
+Example format:
+```
+First paragraph with warm greeting and context.
+
+Second paragraph with the limit explanation.
+
+Third paragraph with next steps.
+```
+
 Generate the message now:"""
 
         logger.debug(
