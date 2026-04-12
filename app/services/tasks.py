@@ -2121,7 +2121,37 @@ Copy your code and share! 💫"""
         astrologer_name = astrologer["name"]
         logger.info(f"[Subscription] Selected astrologer: {astrologer_name} for payment nudge")
 
-        # Try AI-generated message first
+        # LAYER 1: Try WhatsApp payment buttons first (NEW)
+        if _razorpay_whatsapp_payment:
+            try:
+                user_language = _detect_language(message)
+                user_gender = await get_user_gender(phone, message)
+
+                success = await _razorpay_whatsapp_payment.send_enforcement_with_razorpay_buttons(
+                    phone=phone,
+                    user_id=user_id,
+                    session_id=session_id,
+                    astrologer_name=astrologer_name,
+                    user_gender=user_gender,
+                    language=user_language,
+                    message_count=total_messages,
+                    today_messages=today_messages,
+                    mongo_logger_url=MONGO_LOGGER_URL,
+                    client=client,
+                    enforcement_type="payment_nudge"
+                )
+
+                if success:
+                    logger.info(f"[Subscription] ✅ Sent WhatsApp payment buttons for payment nudge")
+                    return {"status": "payment_required", "method": "whatsapp_button"}
+                else:
+                    logger.warning(f"[Subscription] ⚠️ WhatsApp buttons returned False, trying fallback")
+
+            except Exception as e:
+                logger.warning(f"[Subscription] ⚠️ WhatsApp payment buttons failed: {e}")
+                # Continue to fallback...
+
+        # LAYER 2: Try AI-generated message
         payment_message = None
         if _enforcement_generator and ENABLE_AI_ENFORCEMENT:
             try:
@@ -2143,7 +2173,7 @@ Copy your code and share! 💫"""
             except Exception as e:
                 logger.warning(f"[Subscription] AI generation failed: {e}")
 
-        # Fallback to hardcoded messages
+        # LAYER 3: Fallback to hardcoded messages
         if not payment_message and AI_ENFORCEMENT_FALLBACK:
             logger.info(f"[Subscription] Using hardcoded payment nudge message")
             if astrologer_name == "Meera":
@@ -2227,8 +2257,43 @@ Copy your code and share! 💫"""
                         paywall_message = limit_check.get("message")
                         message_limiter.mark_paywall_shown(user_id)
 
-                        # Try to generate AI-powered soft paywall message
-                        if _enforcement_generator and ENABLE_AI_ENFORCEMENT:
+                        # LAYER 1: Try WhatsApp payment buttons first (NEW)
+                        buttons_sent = False
+                        if _razorpay_whatsapp_payment:
+                            try:
+                                user_gender = await get_user_gender(phone, message)
+                                user_language = _detect_language(message)
+                                astrologer = get_astrologer_personality(user_gender)
+                                astrologer_name = astrologer["name"]
+
+                                # Create httpx client for button sending
+                                async with httpx.AsyncClient(timeout=30.0) as button_client:
+                                    success = await _razorpay_whatsapp_payment.send_enforcement_with_razorpay_buttons(
+                                        phone=phone,
+                                        user_id=user_id,
+                                        session_id=session_id,
+                                        astrologer_name=astrologer_name,
+                                        user_gender=user_gender,
+                                        language=user_language,
+                                        message_count=limit_check.get("messageCount", 40),
+                                        today_messages=0,
+                                        mongo_logger_url=MONGO_LOGGER_URL,
+                                        client=button_client,
+                                        enforcement_type="soft_paywall"
+                                    )
+
+                                    if success:
+                                        logger.info(f"[Message Limiter] ✅ Sent WhatsApp buttons for soft paywall")
+                                        buttons_sent = True
+                                        paywall_message = None  # Don't send additional message
+                                    else:
+                                        logger.warning(f"[Message Limiter] ⚠️ WhatsApp buttons returned False")
+
+                            except Exception as e:
+                                logger.warning(f"[Message Limiter] ⚠️ WhatsApp buttons failed: {e}")
+
+                        # LAYER 2: Try to generate AI-powered soft paywall message (if buttons not sent)
+                        if not buttons_sent and _enforcement_generator and ENABLE_AI_ENFORCEMENT:
                             try:
                                 user_gender = await get_user_gender(phone, message)
                                 user_language = _detect_language(message)
@@ -2256,11 +2321,15 @@ Copy your code and share! 💫"""
                             except Exception as e:
                                 logger.warning(f"[Message Limiter] AI soft paywall generation failed: {e}")
 
-                        # Send paywall message first, then continue to process normally
-                        async with httpx.AsyncClient(timeout=30.0) as client:
-                            await _send_whatsapp_message(client, phone, paywall_message)
-                        await _log_to_mongo(session_id, user_id, "assistant", paywall_message, "whatsapp", "text", None, nudge_level=1)
-                        logger.info(f"[Message Limiter] Soft paywall shown to user {user_id}, continuing message processing")
+                        # Send paywall message first (if buttons weren't sent), then continue to process normally
+                        if paywall_message:
+                            async with httpx.AsyncClient(timeout=30.0) as client:
+                                await _send_whatsapp_message(client, phone, paywall_message)
+                            await _log_to_mongo(session_id, user_id, "assistant", paywall_message, "whatsapp", "text", None, nudge_level=1)
+                            logger.info(f"[Message Limiter] Soft paywall shown to user {user_id}, continuing message processing")
+                        elif not buttons_sent:
+                            logger.info(f"[Message Limiter] No paywall message sent, continuing message processing")
+
                         # Continue to process the actual message below...
 
     except Exception as e:
