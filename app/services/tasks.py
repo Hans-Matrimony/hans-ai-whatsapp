@@ -87,10 +87,18 @@ AI_ENFORCEMENT_CACHE_TTL = int(os.getenv("AI_ENFORCEMENT_CACHE_TTL", "86400"))  
 AI_ENFORCEMENT_TIMEOUT = float(os.getenv("AI_ENFORCEMENT_TIMEOUT", "10.0"))
 AI_ENFORCEMENT_FALLBACK = os.getenv("AI_ENFORCEMENT_FALLBACK", "true").lower() == "true"
 
+logger.info(f"[Enforcement Generator] 🔍 Initialization check:")
+logger.info(f"[Enforcement Generator] - ENABLE_AI_ENFORCEMENT: {ENABLE_AI_ENFORCEMENT}")
+logger.info(f"[Enforcement Generator] - OPENCLAW_URL: {'SET' if OPENCLAW_URL else 'NOT SET'}")
+logger.info(f"[Enforcement Generator] - OPENCLAW_GATEWAY_TOKEN: {'SET' if OPENCLAW_GATEWAY_TOKEN else 'NOT SET'}")
+
 if ENABLE_AI_ENFORCEMENT and OPENCLAW_URL and OPENCLAW_GATEWAY_TOKEN:
     try:
+        logger.info("[Enforcement Generator] 🎯 All prerequisites present, attempting to initialize...")
         from app.services.enforcement_generator import create_enforcement_generator
+        logger.info("[Enforcement Generator] ✅ Import successful")
         _enforcement_redis = redis.from_url(_redis_url, decode_responses=True)
+        logger.info("[Enforcement Generator] ✅ Redis connection successful")
         _enforcement_generator = create_enforcement_generator(
             openclaw_url=OPENCLAW_URL,
             openclaw_token=OPENCLAW_GATEWAY_TOKEN,
@@ -99,11 +107,17 @@ if ENABLE_AI_ENFORCEMENT and OPENCLAW_URL and OPENCLAW_GATEWAY_TOKEN:
             timeout=AI_ENFORCEMENT_TIMEOUT
         )
         if _enforcement_generator:
-            logger.info("[Enforcement Generator] Successfully initialized AI enforcement generator")
+            logger.info("[Enforcement Generator] ✅ Successfully initialized AI enforcement generator")
         else:
-            logger.warning("[Enforcement Generator] Failed to initialize generator")
+            logger.warning("[Enforcement Generator] ❌ Failed to initialize generator (returned None)")
+    except ImportError as e:
+        logger.error(f"[Enforcement Generator] ❌ Import failed: {e}")
+        logger.error(f"[Enforcement Generator] Make sure enforcement_generator.py exists in app/services/")
+        _enforcement_generator = None
     except Exception as e:
-        logger.warning(f"[Enforcement Generator] Initialization failed: {e}")
+        logger.error(f"[Enforcement Generator] ❌ Initialization failed: {e}")
+        import traceback
+        logger.error(f"[Enforcement Generator] Traceback: {traceback.format_exc()}")
         _enforcement_generator = None
 else:
     if not ENABLE_AI_ENFORCEMENT:
@@ -118,9 +132,17 @@ _razorpay_whatsapp_payment = None
 RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID")
 RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET")
 
+logger.info(f"[Razorpay WhatsApp] 🔍 Initialization check:")
+logger.info(f"[Razorpay WhatsApp] - WHATSAPP_PHONE_ID: {'SET' if WHATSAPP_PHONE_ID else 'NOT SET'}")
+logger.info(f"[Razorpay WhatsApp] - WHATSAPP_ACCESS_TOKEN: {'SET' if WHATSAPP_ACCESS_TOKEN else 'NOT SET'}")
+logger.info(f"[Razorpay WhatsApp] - RAZORPAY_KEY_ID: {'SET' if RAZORPAY_KEY_ID else 'NOT SET'}")
+logger.info(f"[Razorpay WhatsApp] - RAZORPAY_KEY_SECRET: {'SET' if RAZORPAY_KEY_SECRET else 'NOT SET'}")
+
 if WHATSAPP_PHONE_ID and WHATSAPP_ACCESS_TOKEN and RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET:
     try:
+        logger.info("[Razorpay WhatsApp] 🎯 All credentials present, attempting to initialize...")
         from app.services.enforcement_buttons import get_razorpay_whatsapp_sender
+        logger.info("[Razorpay WhatsApp] ✅ Import successful")
         _razorpay_whatsapp_payment = get_razorpay_whatsapp_sender(
             phone_id=WHATSAPP_PHONE_ID,
             access_token=WHATSAPP_ACCESS_TOKEN,
@@ -130,11 +152,26 @@ if WHATSAPP_PHONE_ID and WHATSAPP_ACCESS_TOKEN and RAZORPAY_KEY_ID and RAZORPAY_
             use_native_whatsapp_flow=False  # Hybrid mode (works immediately)
         )
         logger.info("[Razorpay WhatsApp] ✅ Successfully initialized (Hybrid mode)")
+    except ImportError as e:
+        logger.error(f"[Razorpay WhatsApp] ❌ Import failed: {e}")
+        logger.error(f"[Razorpay WhatsApp] Make sure enforcement_buttons.py exists in app/services/")
+        _razorpay_whatsapp_payment = None
     except Exception as e:
-        logger.warning(f"[Razorpay WhatsApp] ❌ Failed to initialize: {e}")
+        logger.error(f"[Razorpay WhatsApp] ❌ Failed to initialize: {e}")
+        import traceback
+        logger.error(f"[Razorpay WhatsApp] Traceback: {traceback.format_exc()}")
         _razorpay_whatsapp_payment = None
 else:
-    logger.info("[Razorpay WhatsApp] Disabled (missing WHATSAPP_PHONE_ID, WHATSAPP_ACCESS_TOKEN, or Razorpay credentials)")
+    missing = []
+    if not WHATSAPP_PHONE_ID:
+        missing.append("WHATSAPP_PHONE_ID")
+    if not WHATSAPP_ACCESS_TOKEN:
+        missing.append("WHATSAPP_ACCESS_TOKEN")
+    if not RAZORPAY_KEY_ID:
+        missing.append("RAZORPAY_KEY_ID")
+    if not RAZORPAY_KEY_SECRET:
+        missing.append("RAZORPAY_KEY_SECRET")
+    logger.warning(f"[Razorpay WhatsApp] Disabled (missing: {', '.join(missing)})")
 
 # ===================================================================
 # Payment Confirmation Messages
