@@ -370,13 +370,11 @@ class RazorpayWhatsAppPaymentSender:
             Razorpay payment short URL
         """
         try:
-            # Razorpay payment link payload
+            # Razorpay payment link payload (simplified - only supported fields)
             payload = {
                 "amount": amount,
                 "currency": "INR",
                 "accept_partial": False,
-                "expire_by": int((datetime.now() + timedelta(minutes=30)).timestamp()),
-                "reference_id": f"{user_id}_{plan_id}_{int(datetime.now().timestamp())}",
                 "description": f"Astrology subscription - {plan_id}",
                 "customer": {
                     "name": f"User {user_id}",
@@ -388,10 +386,10 @@ class RazorpayWhatsAppPaymentSender:
                     "user_id": user_id,
                     "phone": phone
                 },
-                "sms_notify": False,
-                "email_notify": False,
-                "callback_url": f"https://your-domain.com/razorpay-webhook",
-                "callback_method": "get"
+                "notify": {
+                    "sms": False,
+                    "email": False
+                }
             }
 
             # Call Razorpay API
