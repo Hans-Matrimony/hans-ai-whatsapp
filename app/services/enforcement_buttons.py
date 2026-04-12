@@ -443,10 +443,13 @@ class RazorpayWhatsAppPaymentSender:
             "Content-Type": "application/json"
         }
 
-        # Try interactive button first
+        # Try interactive button first (CTA URL button)
+        # WhatsApp API requires: display_text (not title), phone without + prefix
+        clean_phone = phone.lstrip('+')
         payload = {
             "messaging_product": "whatsapp",
-            "to": phone if phone.startswith('+') else f"+{phone}",
+            "recipient_type": "individual",
+            "to": clean_phone,
             "type": "interactive",
             "interactive": {
                 "type": "cta_url",
@@ -456,8 +459,8 @@ class RazorpayWhatsAppPaymentSender:
                 "action": {
                     "name": "cta_url",
                     "parameters": {
-                        "url": razorpay_link,
-                        "title": "Buy Now"
+                        "display_text": "Buy Now",
+                        "url": razorpay_link
                     }
                 }
             }
@@ -476,7 +479,7 @@ class RazorpayWhatsAppPaymentSender:
                 # Fallback: Send as text message with clickable link
                 text_payload = {
                     "messaging_product": "whatsapp",
-                    "to": phone if phone.startswith('+') else f"+{phone}",
+                    "to": clean_phone,
                     "type": "text",
                     "text": {
                         "body": f"{plan_text}\n\n💳 Pay: {razorpay_link}\n\n✨ Secure payment via Razorpay",

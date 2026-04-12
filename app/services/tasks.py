@@ -82,7 +82,7 @@ except Exception as _redis_err:
 # AI-Generated Enforcement Messages (Feature Flag Controlled)
 # ===================================================================
 _enforcement_generator = None
-ENABLE_AI_ENFORCEMENT = os.getenv("ENABLE_AI_ENFORCEMENT", "false").lower() == "true"
+ENABLE_AI_ENFORCEMENT = os.getenv("ENABLE_AI_ENFORCEMENT", "true").lower() == "true"
 AI_ENFORCEMENT_CACHE_TTL = int(os.getenv("AI_ENFORCEMENT_CACHE_TTL", "86400"))  # 24 hours
 AI_ENFORCEMENT_TIMEOUT = float(os.getenv("AI_ENFORCEMENT_TIMEOUT", "10.0"))
 AI_ENFORCEMENT_FALLBACK = os.getenv("AI_ENFORCEMENT_FALLBACK", "true").lower() == "true"
