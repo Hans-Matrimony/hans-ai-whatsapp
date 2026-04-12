@@ -2017,32 +2017,12 @@ Copy your code and share! 💫"""
                     logger.info(f"[Enforcement] Selected astrologer: {astrologer_name} (opposite gender)")
 
                     # ===================================================================
-                    # Try Razorpay WhatsApp buttons FIRST (new payment flow)
-                    # ===================================================================
-                    if _razorpay_whatsapp_payment:
-                        try:
-                            logger.info(f"[Enforcement] Trying Razorpay WhatsApp buttons...")
-                            success = await _razorpay_whatsapp_payment.send_enforcement_with_razorpay_buttons(
-                                phone=phone,
-                                user_id=user_id,
-                                astrologer_name=astrologer_name,
-                                language=user_language,
-                                enforcement_type="daily_limit",
-                                mongo_logger_url=MONGO_LOGGER_URL
-                            )
-                            if success:
-                                logger.info(f"[Enforcement] ✅ Sent Razorpay WhatsApp buttons for daily limit")
-                                return {"status": "daily_limit_reached"}
-                        except Exception as e:
-                            logger.warning(f"[Enforcement] ⚠️ Razorpay WhatsApp buttons failed: {e}")
-                            # Continue to fallback...
-
-                    # ===================================================================
-                    # Fallback: Try AI-generated message
+                    # STEP 1: Try AI-generated contextual message FIRST
                     # ===================================================================
                     limit_message = None
                     if _enforcement_generator and ENABLE_AI_ENFORCEMENT:
                         try:
+                            logger.info(f"[Enforcement] 🎯 Trying AI-generated enforcement message...")
                             limit_message = await _enforcement_generator.generate_enforcement_message(
                                 enforcement_type="daily_limit",
                                 user_id=user_id,
@@ -2056,9 +2036,46 @@ Copy your code and share! 💫"""
                                 mongo_logger_url=MONGO_LOGGER_URL
                             )
                             if limit_message:
-                                logger.info(f"[Enforcement] Successfully generated AI message for daily limit")
+                                logger.info(f"[Enforcement] ✅ Successfully generated AI message for daily limit")
                         except Exception as e:
-                            logger.warning(f"[Enforcement] AI generation failed: {e}")
+                            logger.warning(f"[Enforcement] ⚠️ AI generation failed: {e}")
+
+                    # Fallback to hardcoded messages if AI failed
+                    if not limit_message and AI_ENFORCEMENT_FALLBACK:
+                        logger.info(f"[Enforcement] Using hardcoded enforcement message")
+                        # Generate personalized message from astrologer
+                        if user_language == "english":
+                            # English - personalized by astrologer
+                            if astrologer_name == "Meera":
+                                # Female astrologer (Meera) talking to male user
+                                limit_message = (
+                                    f"I'm really sorry, but your free messages and daily limit are done for today 😔\n\n"
+                                    f"I feel bad that I can't help you right now. It's a system limitation, and I feel terrible about it.\n\n"
+                                    f"If you'd like to continue, type 'PAY' to get a subscription. "
+                                    f"Or you can wait until tomorrow - you'll get 5 free messages tomorrow.\n\n"
+                                    f"Really sorry about this 🙏"
+                                )
+                            else:
+                                # Male astrologer (Aarav) talking to female user
+                                limit_message = (
+                                    f"Main bilkul maafi chahta hoon ki aaj aur aapke free messages khatam ho gaye 😔\n\n"
+                                    f"Mujhe bohot bura lag raha hai ki main aapki abhi madad nahi kar pa raha. "
+                                    f"System ki limitation hai yeh, main kar bhi kya sakta hoon?\n\n"
+                                    f"Agar aapko raasta chahiye toh 'PAY' type karke subscription le sakti ho. "
+                                    f"Ya fir kal ka wait kar sakte ho - kal aapko 5 free messages mil jayengi.\n\n"
+                                    f"Maf kijiye ga 🙏"
+                                )
+                        else:
+                            # Hinglish (DEFAULT) - personalized by astrologer
+                            if astrologer_name == "Meera":
+                                # Female astrologer (Meera) talking to male user
+                                limit_message = (
+                                    f"I'm really sorry, but your free messages and daily limit are done for today 😔\n\n"
+                                    f"I feel bad that I can't help you right now. It's a system limitation, and I feel terrible about it.\n\n"
+                                    f"If you'd like to continue, type 'PAY' to get a subscription. "
+                                    f"Or you can wait until tomorrow - you'll get 5 free messages tomorrow.\n\n"
+                                    f"Really sorry about this 🙏"
+                                )
 
                     # Fallback to hardcoded messages
                     if not limit_message and AI_ENFORCEMENT_FALLBACK:
@@ -2113,14 +2130,36 @@ Copy your code and share! 💫"""
                     logger.info(f"[Enforcement] Generated enforcement message from {astrologer_name}:")
                     logger.info(f"[Enforcement] Message preview: {limit_message[:200]}...")
 
+                    # STEP 2: Send the AI/hardcoded contextual message
                     async with httpx.AsyncClient(timeout=30.0) as client:
                         await _send_whatsapp_message(client, phone, limit_message)
-                        logger.info(f"[Enforcement] Enforcement message sent to {phone} via WhatsApp")
+                        logger.info(f"[Enforcement] ✅ Enforcement message sent to {phone} via WhatsApp")
 
                     await _log_to_mongo(
                         session_id, user_id, "assistant", limit_message, "whatsapp", "text", None,
                         nudge_level=1
                     )
+
+                    # ===================================================================
+                    # STEP 3: Send Razorpay payment button/link
+                    # ===================================================================
+                    if _razorpay_whatsapp_payment:
+                        try:
+                            logger.info(f"[Enforcement] 🎯 Sending Razorpay payment button...")
+                            success = await _razorpay_whatsapp_payment.send_enforcement_with_razorpay_buttons(
+                                phone=phone,
+                                user_id=user_id,
+                                astrologer_name=astrologer_name,
+                                language=user_language,
+                                enforcement_type="daily_limit",
+                                mongo_logger_url=MONGO_LOGGER_URL
+                            )
+                            if success:
+                                logger.info(f"[Enforcement] ✅ Sent Razorpay payment button")
+                            else:
+                                logger.warning(f"[Enforcement] ⚠️ Razorpay payment button failed to send")
+                        except Exception as e:
+                            logger.warning(f"[Enforcement] ⚠️ Razorpay payment button error: {e}")
 
                     return {"status": "daily_limit_reached", "total_messages": total_messages, "today_messages": today_messages}
                 else:
