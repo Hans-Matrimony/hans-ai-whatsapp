@@ -467,6 +467,15 @@ class RazorpayWhatsAppPaymentSender:
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(url, json=payload, headers=headers)
+
+            # Log payload and response for debugging
+            logger.info(f"[WhatsApp Button] Payload: {payload}")
+            logger.info(f"[WhatsApp Button] Response status: {response.status_code}")
+
+            if response.status_code != 200:
+                logger.error(f"[WhatsApp Button] Error response: {response.text}")
+                logger.error(f"[WhatsApp Button] Response headers: {dict(response.headers)}")
+
             response.raise_for_status()
 
             logger.info(
