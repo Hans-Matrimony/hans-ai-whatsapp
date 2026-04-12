@@ -434,7 +434,9 @@ Generate the message now:"""
 
     async def _call_openclaw_api(self, prompt: str) -> Optional[str]:
         """
-        Call OpenClaw API to generate message
+        Call OpenClaw API to generate the message.
+        We route this through the agent endpoint since the gateway token
+        does not have wildcard completion permissions.
 
         Args:
             prompt: AI prompt
@@ -443,59 +445,31 @@ Generate the message now:"""
             Generated message or None
         """
         try:
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.openclaw_token}"
-            }
-
-            payload = {
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                "max_tokens": 300,  # Short messages
-                "temperature": 0.8,  # Creativity for variety
-                "model": "gemini-2.0-flash-exp"  # Fast, cost-effective model
-            }
-
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(
-                    f"{self.openclaw_url}/v1/chat/completions",
-                    json=payload,
-                    headers=headers
-                )
-
-                if response.status_code != 200:
-                    logger.error(
-                        f"[Enforcement Generator] OpenClaw API error: "
-                        f"{response.status_code} - {response.text[:200]}"
-                    )
-                    return None
-
-                data = response.json()
-
-                # Extract message from response
-                if "choices" in data and len(data["choices"]) > 0:
-                    message = data["choices"][0]["message"]["content"].strip()
-                    return message
-                else:
-                    logger.error(
-                        "[Enforcement Generator] Invalid OpenClaw API response format"
-                    )
-                    return None
-
-        except httpx.TimeoutException:
-            logger.error(
-                f"[Enforcement Generator] OpenClaw API timeout after {self.timeout}s"
+            from app.services.openclaw_client import OpenClawClient
+            
+            client = OpenClawClient(
+                base_url=self.openclaw_url,
+                api_key=self.openclaw_token,
+                timeout=self.timeout
             )
-            return None
+            
+            logger.info("[Enforcement Generator] Sending request to OpenClaw agent endpoint...")
+            
+            response = await client.get_agent_response(
+                agent_id="workspace-astrologer",
+                message=f"[SYSTEM OVERRIDE TASK]\n{prompt}",
+                user_id="enforcement_system", # Use a system ID so it doesn't pollute user memory with prompts
+                thinking="medium"
+            )
+            
+            if not response:
+                logger.error("[Enforcement Generator] OpenClaw API returned empty message")
+                return None
+                
+            return response.strip()
+
         except Exception as e:
-            logger.error(
-                f"[Enforcement Generator] Error calling OpenClaw API: {e}",
-                exc_info=True
-            )
+            logger.error(f"[Enforcement Generator] Error calling OpenClaw: {e}", exc_info=True)
             return None
 
 
