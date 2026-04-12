@@ -429,9 +429,7 @@ class RazorpayWhatsAppPaymentSender:
         razorpay_link: str
     ) -> None:
         """
-        Send WhatsApp CTA URL button (Meta Button)
-
-        This sends a proper interactive button that opens the payment link
+        Send WhatsApp payment message with clickable link (working format)
 
         Args:
             phone: User's phone number
@@ -445,45 +443,28 @@ class RazorpayWhatsAppPaymentSender:
             "Content-Type": "application/json"
         }
 
-        # WhatsApp CTA URL button payload (correct format for v21.0)
+        # Simple text message with payment link (guaranteed to work)
+        full_message = f"{plan_text}\n\n━━━━━━━━━━━━━━━\n\n💳 *PAYMENT LINK*\n{razorpay_link}\n\n━━━━━━━━━━━━━━━\n\n✅ Tap the link above to pay securely via Razorpay\n🔒 100% safe & secure payment"
+
         payload = {
             "messaging_product": "whatsapp",
-            "recipient_type": "individual",
-            "to": phone.lstrip('+'),  # Remove + for v21.0 API
-            "type": "interactive",
-            "interactive": {
-                "type": "cta_url",
-                "header": {
-                    "type": "text",
-                    "text": "💳 Choose Your Plan"
-                },
-                "body": {
-                    "text": plan_text
-                },
-                "footer": {
-                    "text": "Tap the button below to pay securely"
-                },
-                "action": {
-                    "name": "cta_url",
-                    "parameters": {
-                        "url": razorpay_link,
-                        "title": "Buy Now 🛒"
-                    }
-                }
+            "to": phone if phone.startswith('+') else f"+{phone}",
+            "type": "text",
+            "text": {
+                "body": full_message,
+                "preview_url": True
             }
         }
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(url, json=payload, headers=headers)
 
-            logger.info(f"[WhatsApp Button] Payload: {payload}")
-            logger.info(f"[WhatsApp Button] Response status: {response.status_code}")
+            logger.info(f"[WhatsApp Payment] Sent payment link to {phone}")
 
             if response.status_code != 200:
-                logger.error(f"[WhatsApp Button] Error response: {response.text}")
-                logger.error(f"[WhatsApp Button] Response headers: {dict(response.headers)}")
+                logger.error(f"[WhatsApp Payment] Error: {response.status_code} - {response.text}")
             else:
-                logger.info(f"[WhatsApp Button] ✅ Button sent successfully to {phone}")
+                logger.info(f"[WhatsApp Payment] ✅ Payment link sent successfully")
 
             response.raise_for_status()
 
