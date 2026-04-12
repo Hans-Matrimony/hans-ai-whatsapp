@@ -293,7 +293,7 @@ class RazorpayWhatsAppPaymentSender:
                 else:
                     duration_text = f"{duration} Days"
 
-                message = f"*{duration_text} - ₹{price_rupees}*\n"
+                message = f"{duration_text} - ₹{price_rupees}\n"
                 for feature in features[:3]:
                     message += f"✓ {feature}\n"
 
@@ -309,7 +309,7 @@ class RazorpayWhatsAppPaymentSender:
                 else:
                     duration_text = f"{duration} Days"
 
-                message = f"*{duration_text} - ₹{price_rupees}*\n"
+                message = f"{duration_text} - ₹{price_rupees}\n"
                 for feature in features[:3]:
                     message += f"✓ {feature}\n"
 
@@ -448,10 +448,14 @@ class RazorpayWhatsAppPaymentSender:
         # WhatsApp CTA URL button payload
         payload = {
             "messaging_product": "whatsapp",
-            "to": phone,
+            "to": phone if phone.startswith('+') else f"+{phone}",  # Ensure E.164 format
             "type": "interactive",
             "interactive": {
                 "type": "cta_url",
+                "header": {
+                    "type": "text",
+                    "text": "Choose Plan"  # Optional header
+                },
                 "body": {
                     "text": text
                 },
@@ -459,7 +463,7 @@ class RazorpayWhatsAppPaymentSender:
                     "name": "cta_url",
                     "parameters": {
                         "url": razorpay_link,
-                        "title": "Buy Now"  # Button label - "title" not "text"!
+                        "title": "Buy Now"  # Button label
                     }
                 }
             }
