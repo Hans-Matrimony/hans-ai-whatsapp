@@ -1772,7 +1772,7 @@ Copy your code and share! 💫"""
 
     # Message limits for all users
     FREE_MESSAGE_LIMIT = 25
-    DAILY_MESSAGE_LIMIT = 3
+    DAILY_MESSAGE_LIMIT = 5
 
     logger.info(f"[Enforcement] Checking message limits for {phone}")
 
