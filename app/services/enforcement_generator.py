@@ -454,7 +454,7 @@ Generate the message now:"""
                 ],
                 "max_tokens": 300,
                 "temperature": 0.8,
-                "model": "gemini-2.0-flash-exp"
+                "model": "openclaw"
             }
 
             async with httpx.AsyncClient(timeout=self.timeout) as client:
