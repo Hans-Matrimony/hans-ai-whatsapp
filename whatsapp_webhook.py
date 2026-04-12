@@ -434,8 +434,25 @@ async def receive_webhook(request: Request):
                 elif message_type == "document":
                     media_id = msg.get("document", {}).get("id")
                     filename = msg.get("document", {}).get("filename", "")
+                    mime_type = msg.get("document", {}).get("mime_type", "")
+
+                    # Check if PDF (for future PDF analysis feature)
+                    is_pdf = (
+                        mime_type == "application/pdf" or
+                        filename.lower().endswith(".pdf")
+                    )
+
                     text_content = f"[Document: {filename}]" if filename else "[Document]"
-                    media_info = {"type": "document", "id": media_id, "filename": filename}
+                    media_info = {
+                        "type": "document",
+                        "id": media_id,
+                        "filename": filename
+                    }
+
+                    # Add PDF marker if detected (non-breaking addition)
+                    if is_pdf:
+                        media_info["subtype"] = "pdf"
+                        logger.info(f"PDF document detected: {filename}")
                 elif message_type == "sticker":
                     media_id = msg.get("sticker", {}).get("id")
                     text_content = "[Sticker]"

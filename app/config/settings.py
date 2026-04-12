@@ -60,6 +60,10 @@ class Settings(BaseSettings):
     enable_interactive_messages: bool = Field(default=True)
     enable_message_status: bool = Field(default=False)
 
+    # NEW: PDF and Audio Analysis Features (default: False for safe rollout)
+    enable_pdf_analysis: bool = Field(default=False, description="Enable PDF document analysis feature")
+    enable_audio_emotion_detection: bool = Field(default=False, description="Enable advanced audio emotion detection")
+
     # Retry
     max_retries: int = Field(default=3)
     retry_delay: float = Field(default=1.0)
