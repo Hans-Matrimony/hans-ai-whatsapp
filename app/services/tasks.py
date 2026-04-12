@@ -78,6 +78,83 @@ except Exception as _redis_err:
     logger.warning(f"[Proactive Nudge] Redis connection failed for dedup: {_redis_err}")
     _nudge_redis = None
 
+# ===================================================================
+# AI-Generated Enforcement Messages (Feature Flag Controlled)
+# ===================================================================
+_enforcement_generator = None
+ENABLE_AI_ENFORCEMENT = os.getenv("ENABLE_AI_ENFORCEMENT", "false").lower() == "true"
+AI_ENFORCEMENT_CACHE_TTL = int(os.getenv("AI_ENFORCEMENT_CACHE_TTL", "86400"))  # 24 hours
+AI_ENFORCEMENT_TIMEOUT = float(os.getenv("AI_ENFORCEMENT_TIMEOUT", "10.0"))
+AI_ENFORCEMENT_FALLBACK = os.getenv("AI_ENFORCEMENT_FALLBACK", "true").lower() == "true"
+
+if ENABLE_AI_ENFORCEMENT and OPENCLAW_URL and OPENCLAW_GATEWAY_TOKEN:
+    try:
+        from app.services.enforcement_generator import create_enforcement_generator
+        _enforcement_redis = redis.from_url(_redis_url, decode_responses=True)
+        _enforcement_generator = create_enforcement_generator(
+            openclaw_url=OPENCLAW_URL,
+            openclaw_token=OPENCLAW_GATEWAY_TOKEN,
+            redis_url=_redis_url,
+            cache_ttl=AI_ENFORCEMENT_CACHE_TTL,
+            timeout=AI_ENFORCEMENT_TIMEOUT
+        )
+        if _enforcement_generator:
+            logger.info("[Enforcement Generator] Successfully initialized AI enforcement generator")
+        else:
+            logger.warning("[Enforcement Generator] Failed to initialize generator")
+    except Exception as e:
+        logger.warning(f"[Enforcement Generator] Initialization failed: {e}")
+        _enforcement_generator = None
+else:
+    if not ENABLE_AI_ENFORCEMENT:
+        logger.info("[Enforcement Generator] AI enforcement disabled (feature flag: ENABLE_AI_ENFORCEMENT=false)")
+    else:
+        logger.warning("[Enforcement Generator] AI enforcement disabled (missing OPENCLAW_URL or OPENCLAW_GATEWAY_TOKEN)")
+
+# ===================================================================
+# Razorpay WhatsApp Payments (Hybrid Mode - Works Immediately)
+# ===================================================================
+_razorpay_whatsapp_payment = None
+RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID")
+RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET")
+
+if WHATSAPP_PHONE_ID and WHATSAPP_ACCESS_TOKEN and RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET:
+    try:
+        from app.services.enforcement_buttons import get_razorpay_whatsapp_sender
+        _razorpay_whatsapp_payment = get_razorpay_whatsapp_sender(
+            phone_id=WHATSAPP_PHONE_ID,
+            access_token=WHATSAPP_ACCESS_TOKEN,
+            razorpay_key_id=RAZORPAY_KEY_ID,
+            razorpay_key_secret=RAZORPAY_KEY_SECRET,
+            subscriptions_url=SUBSCRIPTIONS_URL,
+            use_native_whatsapp_flow=False  # Hybrid mode (works immediately)
+        )
+        logger.info("[Razorpay WhatsApp] ✅ Successfully initialized (Hybrid mode)")
+    except Exception as e:
+        logger.warning(f"[Razorpay WhatsApp] ❌ Failed to initialize: {e}")
+        _razorpay_whatsapp_payment = None
+else:
+    logger.info("[Razorpay WhatsApp] Disabled (missing WHATSAPP_PHONE_ID, WHATSAPP_ACCESS_TOKEN, or Razorpay credentials)")
+
+# ===================================================================
+# Payment Confirmation Messages
+# ===================================================================
+_payment_confirmation = None
+if WHATSAPP_PHONE_ID and WHATSAPP_ACCESS_TOKEN:
+    try:
+        from app.services.payment_confirmation import get_payment_confirmation_sender
+        _payment_confirmation = get_payment_confirmation_sender(
+            phone_id=WHATSAPP_PHONE_ID,
+            access_token=WHATSAPP_ACCESS_TOKEN,
+            mongo_logger_url=MONGO_LOGGER_URL
+        )
+        logger.info("[Payment Confirmation] ✅ Successfully initialized")
+    except Exception as e:
+        logger.warning(f"[Payment Confirmation] ❌ Failed to initialize: {e}")
+        _payment_confirmation = None
+else:
+    logger.info("[Payment Confirmation] Disabled (missing WHATSAPP_PHONE_ID or WHATSAPP_ACCESS_TOKEN)")
+
 # Gender-based Astrologer Personality Configuration
 ASTROLOGER_PERSONALITIES = {
     "male": {
@@ -764,7 +841,7 @@ async def _send_plans_interactive(phone: str) -> bool:
         return False
 
 
-async def _generate_payment_link(user_id: str, plan_number: int = None, plan_id: str = None) -> str:
+async def _generate_payment_link(user_id: str, plan_number: int = None, plan_id: str = None, language: str = "english", astrologer_name: str = "Meera") -> str:
     """
     Generate Razorpay payment link for selected plan.
     Calls subscriptions service which creates Razorpay Payment Link.
@@ -774,6 +851,8 @@ async def _generate_payment_link(user_id: str, plan_number: int = None, plan_id:
         user_id: User phone number
         plan_number: Plan index (1-based) for backward compatibility
         plan_id: Plan ID from subscriptions service
+        language: User's language preference (english/hinglish)
+        astrologer_name: User's astrologer (Meera/Aarav)
     """
     if not SUBSCRIPTIONS_URL:
         logger.error("SUBSCRIPTIONS_URL not configured")
@@ -830,7 +909,15 @@ async def _generate_payment_link(user_id: str, plan_number: int = None, plan_id:
         request_body = {
             "userId": user_id,
             "planId": final_plan_id,  # Use the correctly extracted plan ID
-            "currency": "INR"
+            "currency": "INR",
+            # Store metadata for payment confirmation
+            "notes": {
+                "user_id": user_id,
+                "phone": user_id,
+                "plan_id": final_plan_id,
+                "language": language,
+                "astrologer_name": astrologer_name
+            }
         }
         logger.info(f"[Payment Link] Calling subscriptions API with: {request_body}")
 
@@ -1715,10 +1802,18 @@ Copy your code and share! 💫"""
                         #         return {"status": "payment_flow_sent", "flow_id": flow_message_id}
 
                         # Generate Razorpay payment link (PRIMARY METHOD)
+                        # Detect language and astrologer for personalized payment confirmation
+                        user_language = _detect_language(message)
+                        user_gender = await get_user_gender(phone, message)
+                        astrologer = get_astrologer_personality(user_gender)
+                        astrologer_name = astrologer["name"]
+
                         payment_link = await _generate_payment_link(
                             user_id,
                             plan_number=plan_number if not (plan_id_from_button or plan_id_from_name) else None,
-                            plan_id=plan_id_from_button or plan_id_from_name
+                            plan_id=plan_id_from_button or plan_id_from_name,
+                            language=user_language,
+                            astrologer_name=astrologer_name
                         )
                         if payment_link:
                             link_message = (
@@ -1884,48 +1979,99 @@ Copy your code and share! 💫"""
                     astrologer_name = astrologer["name"]
                     logger.info(f"[Enforcement] Selected astrologer: {astrologer_name} (opposite gender)")
 
-                    # Generate personalized message from astrologer
-                    if user_language == "english":
-                        # English - personalized by astrologer
-                        if astrologer_name == "Meera":
-                            # Female astrologer (Meera) talking to male user
-                            limit_message = (
-                                f"I'm really sorry, but your free messages and daily limit are done for today 😔\n\n"
-                                f"I feel bad that I can't help you right now. It's a system limitation, and I feel terrible about it.\n\n"
-                                f"If you'd like to continue, type 'PAY' to get a subscription. "
-                                f"Or you can wait until tomorrow - you'll get 5 free messages tomorrow.\n\n"
-                                f"Really sorry about this 🙏"
+                    # ===================================================================
+                    # Try Razorpay WhatsApp buttons FIRST (new payment flow)
+                    # ===================================================================
+                    if _razorpay_whatsapp_payment:
+                        try:
+                            logger.info(f"[Enforcement] Trying Razorpay WhatsApp buttons...")
+                            success = await _razorpay_whatsapp_payment.send_enforcement_with_razorpay_buttons(
+                                phone=phone,
+                                user_id=user_id,
+                                astrologer_name=astrologer_name,
+                                language=user_language,
+                                enforcement_type="daily_limit",
+                                mongo_logger_url=MONGO_LOGGER_URL
                             )
+                            if success:
+                                logger.info(f"[Enforcement] ✅ Sent Razorpay WhatsApp buttons for daily limit")
+                                return {"status": "daily_limit_reached"}
+                        except Exception as e:
+                            logger.warning(f"[Enforcement] ⚠️ Razorpay WhatsApp buttons failed: {e}")
+                            # Continue to fallback...
+
+                    # ===================================================================
+                    # Fallback: Try AI-generated message
+                    # ===================================================================
+                    limit_message = None
+                    if _enforcement_generator and ENABLE_AI_ENFORCEMENT:
+                        try:
+                            limit_message = await _enforcement_generator.generate_enforcement_message(
+                                enforcement_type="daily_limit",
+                                user_id=user_id,
+                                session_id=session_id,
+                                astrologer_name=astrologer_name,
+                                astrologer_personality=astrologer,
+                                user_gender=user_gender,
+                                language=user_language,
+                                message_count=total_messages,
+                                today_messages=today_messages,
+                                mongo_logger_url=MONGO_LOGGER_URL
+                            )
+                            if limit_message:
+                                logger.info(f"[Enforcement] Successfully generated AI message for daily limit")
+                        except Exception as e:
+                            logger.warning(f"[Enforcement] AI generation failed: {e}")
+
+                    # Fallback to hardcoded messages
+                    if not limit_message and AI_ENFORCEMENT_FALLBACK:
+                        logger.info(f"[Enforcement] Using hardcoded enforcement message")
+                        # Generate personalized message from astrologer
+                        if user_language == "english":
+                            # English - personalized by astrologer
+                            if astrologer_name == "Meera":
+                                # Female astrologer (Meera) talking to male user
+                                limit_message = (
+                                    f"I'm really sorry, but your free messages and daily limit are done for today 😔\n\n"
+                                    f"I feel bad that I can't help you right now. It's a system limitation, and I feel terrible about it.\n\n"
+                                    f"If you'd like to continue, type 'PAY' to get a subscription. "
+                                    f"Or you can wait until tomorrow - you'll get 5 free messages tomorrow.\n\n"
+                                    f"Really sorry about this 🙏"
+                                )
+                            else:
+                                # Male astrologer (Aarav) talking to female user
+                                limit_message = (
+                                    f"Main bilkul maafi chahta hoon ki aaj aur aapke free messages khatam ho gaye 😔\n\n"
+                                    f"Mujhe bohot bura lag raha hai ki main aapki abhi madad nahi kar pa raha. "
+                                    f"System ki limitation hai yeh, main kar bhi kya sakta hoon?\n\n"
+                                    f"Agar aapko raasta chahiye toh 'PAY' type karke subscription le sakti ho. "
+                                    f"Ya fir kal ka wait kar sakte ho - kal aapko 5 free messages mil jayengi.\n\n"
+                                    f"Maf kijiye ga 🙏"
+                                )
                         else:
-                            # Male astrologer (Aarav) talking to female user
-                            limit_message = (
-                                f"Main bilkul maafi chahta hoon ki aaj aur aapke free messages khatam ho gaye 😔\n\n"
-                                f"Mujhe bohot bura lag raha hai ki main aapki abhi madad nahi kar pa raha. "
-                                f"System ki limitation hai yeh, main kar bhi kya sakta hoon?\n\n"
-                                f"Agar aapko raasta chahiye toh 'PAY' type karke subscription le sakti ho. "
-                                f"Ya fir kal ka wait kar sakte ho - kal aapko 5 free messages mil jayengi.\n\n"
-                                f"Maf kijiye ga 🙏"
-                            )
-                    else:
-                        # Hinglish (DEFAULT) - personalized by astrologer
-                        if astrologer_name == "Meera":
-                            # Female astrologer (Meera) talking to male user
-                            limit_message = (
-                                f"I'm really sorry, but your free messages and daily limit are done for today 😔\n\n"
-                                f"I feel bad that I can't help you right now. It's a system limitation, and I feel terrible about it.\n\n"
-                                f"If you'd like to continue, type 'PAY' to get a subscription. "
-                                f"Or you can wait until tomorrow - you'll get 5 free messages tomorrow.\n\n"
-                                f"Really sorry about this 🙏"
-                            )
-                        else:
-                            # Male astrologer (Aarav) talking to female user
-                            limit_message = (
-                                f"I'm really sorry, but your free messages and daily limit are done for today 😔\n\n"
-                                f"I feel bad that I can't help you right now. It's a system limitation, and I feel terrible about it.\n\n"
-                                f"If you'd like to continue, type 'PAY' to get a subscription. "
-                                f"Or you can wait until tomorrow - you'll get 5 free messages tomorrow.\n\n"
-                                f"Really sorry about this 🙏"
-                            )
+                            # Hinglish (DEFAULT) - personalized by astrologer
+                            if astrologer_name == "Meera":
+                                # Female astrologer (Meera) talking to male user
+                                limit_message = (
+                                    f"I'm really sorry, but your free messages and daily limit are done for today 😔\n\n"
+                                    f"I feel bad that I can't help you right now. It's a system limitation, and I feel terrible about it.\n\n"
+                                    f"If you'd like to continue, type 'PAY' to get a subscription. "
+                                    f"Or you can wait until tomorrow - you'll get 5 free messages tomorrow.\n\n"
+                                    f"Really sorry about this 🙏"
+                                )
+                            else:
+                                # Male astrologer (Aarav) talking to female user
+                                limit_message = (
+                                    f"I'm really sorry, but your free messages and daily limit are done for today 😔\n\n"
+                                    f"I feel bad that I can't help you right now. It's a system limitation, and I feel terrible about it.\n\n"
+                                    f"If you'd like to continue, type 'PAY' to get a subscription. "
+                                    f"Or you can wait until tomorrow - you'll get 5 free messages tomorrow.\n\n"
+                                    f"Really sorry about this 🙏"
+                                )
+
+                    if not limit_message:
+                        logger.error("[Enforcement] Failed to generate enforcement message")
+                        return {"status": "error", "error": "Failed to generate enforcement message"}
 
                     logger.info(f"[Enforcement] Generated enforcement message from {astrologer_name}:")
                     logger.info(f"[Enforcement] Message preview: {limit_message[:200]}...")
@@ -1975,20 +2121,49 @@ Copy your code and share! 💫"""
         astrologer_name = astrologer["name"]
         logger.info(f"[Subscription] Selected astrologer: {astrologer_name} for payment nudge")
 
-        if astrologer_name == "Meera":
-            # Female astrologer (Meera) talking to male user
-            payment_message = (
-                f"Hi! Aapke free messages khatam ho gaye hain 😔\n\n"
-                f"Main continue kar na chahti hoon lekin system ne limit laga di hai. "
-                f"Agar aapko chahiye toh 'PAY' type karke subscription le lo."
-            )
-        else:
-            # Male astrologer (Aarav) talking to female user
-            payment_message = (
-                f"Hi! Aapke free messages khatam ho gaye hain 😔\n\n"
-                f"Main continue kar na chahta hoon lekin system ne limit laga di hai. "
-                f"Agar aapko chahiye toh 'PAY' type karke subscription le lo."
-            )
+        # Try AI-generated message first
+        payment_message = None
+        if _enforcement_generator and ENABLE_AI_ENFORCEMENT:
+            try:
+                user_language = _detect_language(message)
+                payment_message = await _enforcement_generator.generate_enforcement_message(
+                    enforcement_type="payment_nudge",
+                    user_id=user_id,
+                    session_id=session_id,
+                    astrologer_name=astrologer_name,
+                    astrologer_personality=astrologer,
+                    user_gender=user_gender,
+                    language=user_language,
+                    message_count=total_messages,
+                    today_messages=today_messages,
+                    mongo_logger_url=MONGO_LOGGER_URL
+                )
+                if payment_message:
+                    logger.info(f"[Subscription] Successfully generated AI message for payment nudge")
+            except Exception as e:
+                logger.warning(f"[Subscription] AI generation failed: {e}")
+
+        # Fallback to hardcoded messages
+        if not payment_message and AI_ENFORCEMENT_FALLBACK:
+            logger.info(f"[Subscription] Using hardcoded payment nudge message")
+            if astrologer_name == "Meera":
+                # Female astrologer (Meera) talking to male user
+                payment_message = (
+                    f"Hi! Aapke free messages khatam ho gaye hain 😔\n\n"
+                    f"Main continue kar na chahti hoon lekin system ne limit laga di hai. "
+                    f"Agar aapko chahiye toh 'PAY' type karke subscription le lo."
+                )
+            else:
+                # Male astrologer (Aarav) talking to female user
+                payment_message = (
+                    f"Hi! Aapke free messages khatam ho gaye hain 😔\n\n"
+                    f"Main continue kar na chahta hoon lekin system ne limit laga di hai. "
+                    f"Agar aapko chahiye toh 'PAY' type karke subscription le lo."
+                )
+
+        if not payment_message:
+            logger.error("[Subscription] Failed to generate payment nudge message")
+            return {"status": "error", "error": "Failed to generate payment nudge"}
 
         logger.info(f"[Subscription] Payment message from {astrologer_name}: {payment_message[:150]}...")
 
@@ -2051,6 +2226,36 @@ Copy your code and share! 💫"""
                         # Show soft paywall but still allow message
                         paywall_message = limit_check.get("message")
                         message_limiter.mark_paywall_shown(user_id)
+
+                        # Try to generate AI-powered soft paywall message
+                        if _enforcement_generator and ENABLE_AI_ENFORCEMENT:
+                            try:
+                                user_gender = await get_user_gender(phone, message)
+                                user_language = _detect_language(message)
+                                astrologer = get_astrologer_personality(user_gender)
+                                astrologer_name = astrologer["name"]
+
+                                ai_message = await _enforcement_generator.generate_enforcement_message(
+                                    enforcement_type="soft_paywall",
+                                    user_id=user_id,
+                                    session_id=session_id,
+                                    astrologer_name=astrologer_name,
+                                    astrologer_personality=astrologer,
+                                    user_gender=user_gender,
+                                    language=user_language,
+                                    message_count=limit_check.get("messageCount", 40),
+                                    today_messages=0,
+                                    mongo_logger_url=MONGO_LOGGER_URL
+                                )
+
+                                if ai_message:
+                                    paywall_message = ai_message
+                                    logger.info(f"[Message Limiter] Using AI-generated soft paywall message")
+                                else:
+                                    logger.info(f"[Message Limiter] AI generation failed, using default message")
+                            except Exception as e:
+                                logger.warning(f"[Message Limiter] AI soft paywall generation failed: {e}")
+
                         # Send paywall message first, then continue to process normally
                         async with httpx.AsyncClient(timeout=30.0) as client:
                             await _send_whatsapp_message(client, phone, paywall_message)

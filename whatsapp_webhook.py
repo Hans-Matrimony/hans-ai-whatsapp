@@ -555,6 +555,96 @@ async def send_whatsapp_message(phone: str, message: str):
 
 
 # =============================================================================
+# Payment Confirmation Webhook
+# =============================================================================
+
+@app.post("/webhook/payment-confirmation")
+async def payment_confirmation_webhook(request: Request):
+    """
+    Receive payment confirmation from subscriptions service.
+    Sends personalized payment confirmation message to user.
+
+    Expected payload:
+    {
+        "phone": "919876543210",
+        "user_id": "+919876543210",
+        "plan_id": "monthly_199",
+        "plan_name": "Monthly",
+        "amount": 199,
+        "payment_id": "pay_12345",
+        "notes": {
+            "language": "english",
+            "astrologer_name": "Meera"
+        }
+    }
+    """
+    try:
+        data = await request.json()
+        logger.info(f"[Payment Confirmation] Received webhook: {data}")
+
+        phone = data.get("phone")
+        user_id = data.get("user_id", phone)
+        plan_id = data.get("plan_id", "")
+        plan_name = data.get("plan_name", "Plan")
+        amount = data.get("amount", 0)
+        payment_id = data.get("payment_id", "")
+
+        # Get metadata from notes
+        notes = data.get("notes", {})
+        user_language = notes.get("language", "english")
+        astrologer_name = notes.get("astrologer_name", "Meera")
+
+        if not phone:
+            logger.error("[Payment Confirmation] Missing phone number")
+            return {"status": "error", "error": "Missing phone number"}
+
+        logger.info(
+            f"[Payment Confirmation] Processing: phone={phone}, "
+            f"plan={plan_name}, amount=₹{amount}, language={user_language}, "
+            f"astrologer={astrologer_name}"
+        )
+
+        # Import here to avoid circular dependency
+        from app.services.tasks import _payment_confirmation, MONGO_LOGGER_URL
+
+        if not _payment_confirmation:
+            logger.warning("[Payment Confirmation] Service not initialized")
+            return {"status": "error", "error": "Payment confirmation service not available"}
+
+        # Send personalized confirmation
+        try:
+            success = await _payment_confirmation.send_payment_confirmation(
+                phone=phone,
+                user_id=user_id,
+                plan_name=plan_name,
+                amount=amount,
+                astrologer_name=astrologer_name,
+                language=user_language,
+                mongo_logger_url=MONGO_LOGGER_URL
+            )
+
+            if success:
+                logger.info(f"[Payment Confirmation] ✅ Sent confirmation to {phone}")
+                return {
+                    "status": "success",
+                    "message": "Payment confirmation sent",
+                    "phone": phone,
+                    "plan": plan_name
+                }
+            else:
+                logger.error(f"[Payment Confirmation] ✗ Failed to send to {phone}")
+                return {"status": "error", "error": "Failed to send confirmation"}
+
+        except Exception as e:
+            logger.error(f"[Payment Confirmation] Error: {e}", exc_info=True)
+            return {"status": "error", "error": str(e)}
+
+    except Exception as e:
+        logger.error(f"[Payment Confirmation] Webhook error: {e}", exc_info=True)
+        return {"status": "error", "error": str(e)}
+
+
+# =============================================================================
 # Trigger Kundli PDF Generation
 # =============================================================================
 

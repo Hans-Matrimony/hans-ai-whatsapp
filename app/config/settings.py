@@ -64,6 +64,12 @@ class Settings(BaseSettings):
     enable_pdf_analysis: bool = Field(default=False, description="Enable PDF document analysis feature")
     enable_audio_emotion_detection: bool = Field(default=False, description="Enable advanced audio emotion detection")
 
+    # NEW: AI-Generated Enforcement Messages (default: False for safe rollout)
+    enable_ai_enforcement: bool = Field(default=False, description="Enable AI-generated contextual enforcement messages")
+    ai_enforcement_cache_ttl: int = Field(default=86400, description="AI enforcement message cache TTL in seconds (24h)")
+    ai_enforcement_timeout: float = Field(default=10.0, description="AI enforcement generation timeout in seconds")
+    ai_enforcement_fallback: bool = Field(default=True, description="Fall back to hardcoded messages if AI generation fails")
+
     # Retry
     max_retries: int = Field(default=3)
     retry_delay: float = Field(default=1.0)
