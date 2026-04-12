@@ -377,7 +377,7 @@ class RazorpayWhatsAppPaymentSender:
                 "amount": amount,
                 "currency": "INR",
                 "accept_partial": False,
-                "description": f"Astrology subscription - {plan_id}",
+                "description": f"{plan_id.replace('_', ' ').title()} - Astrofriend AI",
                 "customer": {
                     "name": f"User {user_id}",
                     "email": f"user_{user_id}@example.com",
@@ -391,6 +391,14 @@ class RazorpayWhatsAppPaymentSender:
                 "notify": {
                     "sms": False,
                     "email": False
+                },
+                "options": {
+                    "checkout": {
+                        "name": "Astro Friend",
+                        "theme": {
+                            "color": "#7E57C2"
+                        }
+                    }
                 }
             }
 
