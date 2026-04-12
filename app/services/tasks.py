@@ -2121,7 +2121,17 @@ Copy your code and share! 💫"""
         astrologer_name = astrologer["name"]
         logger.info(f"[Subscription] Selected astrologer: {astrologer_name} for payment nudge")
 
+        # DEBUG: Check if services are initialized
+        logger.info(f"[Subscription] DEBUG: _razorpay_whatsapp_payment={'INITIALIZED' if _razorpay_whatsapp_payment else 'NOT INITIALIZED'}")
+        logger.info(f"[Subscription] DEBUG: _enforcement_generator={'INITIALIZED' if _enforcement_generator else 'NOT INITIALIZED'}")
+        logger.info(f"[Subscription] DEBUG: ENABLE_AI_ENFORCEMENT={ENABLE_AI_ENFORCEMENT}")
+
         # LAYER 1: Try WhatsApp payment buttons first (NEW)
+        if _razorpay_whatsapp_payment:
+            logger.info(f"[Subscription] 🎯 Trying WhatsApp payment buttons...")
+        else:
+            logger.warning(f"[Subscription] ⚠️ WhatsApp payment buttons NOT initialized, skipping to Layer 2")
+
         if _razorpay_whatsapp_payment:
             try:
                 user_language = _detect_language(message)
@@ -2153,6 +2163,14 @@ Copy your code and share! 💫"""
 
         # LAYER 2: Try AI-generated message
         payment_message = None
+        if _enforcement_generator and ENABLE_AI_ENFORCEMENT:
+            logger.info(f"[Subscription] 🎯 Trying AI-generated message...")
+        else:
+            if not _enforcement_generator:
+                logger.warning(f"[Subscription] ⚠️ AI enforcement generator NOT initialized")
+            if not ENABLE_AI_ENFORCEMENT:
+                logger.warning(f"[Subscription] ⚠️ ENABLE_AI_ENFORCEMENT={ENABLE_AI_ENFORCEMENT} (AI disabled)")
+
         if _enforcement_generator and ENABLE_AI_ENFORCEMENT:
             try:
                 user_language = _detect_language(message)
