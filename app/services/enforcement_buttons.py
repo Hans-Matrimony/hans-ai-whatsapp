@@ -458,7 +458,8 @@ class RazorpayWhatsAppPaymentSender:
                 "action": {
                     "name": "cta_url",
                     "parameters": {
-                        "url": razorpay_link
+                        "url": razorpay_link,
+                        "text": "Buy Now"  # Button label - REQUIRED field
                     }
                 }
             }
