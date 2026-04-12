@@ -1878,17 +1878,70 @@ Copy your code and share! 💫"""
     # ==================== HELPER FUNCTIONS ====================
 
     def _detect_language(text: str) -> str:
-        """Detect if text is primarily Hindi or English."""
+        """Detect if text is English, Hindi, or Hinglish (Roman script with Hindi words)."""
         if not text:
             return "english"
 
-        # Count Hindi characters (Devanagari script)
-        hindi_chars = set('अआइईउऊऋएऐओऔकखगघङचछजझञटडणतथदधनपफबभमयरलवशषसह')
-        hindi_count = sum(1 for char in text if char in hindi_chars)
+        # Common Hinglish words (Roman script Hindi)
+        hinglish_words = {
+            # Common words
+            'namaste', 'kaise', 'ho', 'kya', 'hai', 'hain', 'nahi', 'ji', 'acha',
+            'theek', 'hai', 'hain', 'kar', 'ke', 'ka', 'ki', 'ko', 'se', 'mein', 'mera',
+            'tera', 'apna', 'karna', 'sakta', 'sakti', 'sakta', 'hai', 'hoga', 'hogi',
+            'please', 'thank', 'you', 'sorry', 'maf', 'kijiye', 'ga', 'bhai', 'behen',
+            'yeh', 'voh', 'yah', 'yahin', 'wahan', 'kya', 'kisko', 'kiske', 'kab',
+            'kabhi', 'kahan', 'kaise', 'kitna', 'kitni', 'kitne', 'sab', 'sabse',
+            'ek', 'do', 'teen', 'char', 'paanch', 'cheh', 'saath', 'aath', 'nau', 'das',
+            'bohot', 'bahut', 'zyada', 'kam', 'accha', 'achha', 'bilkul', 'pakka',
+            'shayad', 'haan', 'haanji', 'ji', 'nahi', 'na', 'toh', 'to', 'aur', 'or',
+            'lekin', 'magar', 'par', 'kyunki', 'kyun', 'kyun', 'isliye', 'liye',
+            'wajah', 'wajahse', 'batao', 'batana', 'bata', 'suno', 'sunna', 'samjha',
+            'samjhi', 'samajh', 'samjh', 'pata', 'maloom', 'chal', 'chalo', 'ruko',
+            'rukho', 'aa', 'aao', 'jao', 'jayiye', 'jiyega', 'jiyegi', 'hoga', 'hogi',
+            # Time/relations
+            'abhi', 'ab', 'kal', 'aaj', 'aj', 'parson', 'neste', 'subah', 'shaam',
+            'dophar', 'raat', 'morning', 'evening', 'night', 'dinner', 'lunch',
+            'mom', 'dad', 'papa', 'mummy', 'maa', 'baap', 'beti', 'beta', 'bhai',
+            'behen', 'didi', 'bhaiya', 'family', 'ghar', 'gharpe', 'office',
+            # Astrology specific
+            'kundli', 'horoscope', 'rashi', 'lagna', 'planets', 'grah', 'nakshatra',
+            'dasha', 'mahadasha', 'antardasha', 'vivah', 'shaadi', 'marriage', 'career',
+            'naukri', 'job', 'business', 'paisa', 'paisaye', 'rupaye', 'investment',
+            # Feelings
+            'pyaar', 'love', 'dil', 'dilse', 'mann', 'mannki', 'feel', 'feeling',
+            'khush', 'gussa', 'naraaz', 'udaas', 'happy', 'sad', 'excited', 'tension',
+            'problem', 'solution', 'mamla', 'baat', 'baaten', 'chinta', 'worry',
+            # Common connectors
+            'hmm', 'haan', 'ok', 'okay', 'thik', 'theek', 'sahi', 'galat', 'wrong',
+            'right', 'correct', 'sach', 'truth', 'jhooth', 'lie', 'batao', 'bolo'
+        }
 
-        # If more than 20% Hindi characters, consider it Hindi
-        if hindi_count > len(text) * 0.2:
+        # Convert to lowercase for checking
+        text_lower = text.lower()
+
+        # Count Hinglish words in the text
+        hinglish_count = 0
+        words = text_lower.split()
+        for word in words:
+            # Remove punctuation for matching
+            clean_word = word.strip('.,!?;:"\'-')
+            if clean_word in hinglish_words:
+                hinglish_count += 1
+
+        # Count Devanagari characters (Hindi script)
+        hindi_chars = set('अआइईउऊऋएऐओऔकखगघङचछजझञटडणतथदधनपफबभमयरलवशषसह')
+        hindi_char_count = sum(1 for char in text if char in hindi_chars)
+
+        # Decision logic:
+        # 1. If has Devanagari characters → Hindi
+        if hindi_char_count > 0:
             return "hindi"
+
+        # 2. If more than 15% Hinglish words → Hinglish
+        if hinglish_count > 0 and hinglish_count > len(words) * 0.15:
+            return "hinglish"
+
+        # 3. Otherwise → English
         return "english"
 
     def _get_today_start_ist() -> str:

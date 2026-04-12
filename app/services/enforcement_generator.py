@@ -224,10 +224,11 @@ class EnforcementMessageGenerator:
                 return []
 
             async with httpx.AsyncClient(timeout=10.0) as client:
-                # Fetch last 20 messages (we'll filter for user messages)
+                # Fetch last 50 messages (we'll filter for user messages)
+                # NOTE: Use "userId" not "user_id" - the API expects camelCase
                 response = await client.get(
                     f"{mongo_logger_url}/messages",
-                    params={"user_id": user_id, "limit": 20}
+                    params={"userId": user_id, "role": "user", "limit": 50}
                 )
 
                 if response.status_code != 200:
@@ -240,11 +241,13 @@ class EnforcementMessageGenerator:
                 data = response.json()
                 messages = data.get("messages", [])
 
-                # Filter for user messages only, take last 'limit'
-                user_messages = [
-                    msg for msg in messages
-                    if msg.get("role") == "user"
-                ][:limit]
+                # Take the last 'limit' messages (most recent first)
+                user_messages = messages[:limit]
+
+                logger.info(
+                    f"[Enforcement Generator] Fetched {len(user_messages)} user messages "
+                    f"from {len(messages)} total messages"
+                )
 
                 return user_messages
 
@@ -335,13 +338,47 @@ class EnforcementMessageGenerator:
             self.PERSONALITIES["Meera"]  # Default to Meera
         )
 
-        # Build recent conversation context
+        # Build enhanced conversation context with topic extraction
         conversation_context = ""
+        user_topics = []
+        user_name_or_nickname = "dear"
+
         if recent_messages:
-            conversation_context = "\nRecent conversation:\n"
-            for i, msg in enumerate(recent_messages[-5:], 1):  # Last 5 messages
-                content = msg.get("content", "")[:100]  # Truncate to 100 chars
-                conversation_context += f"{i}. User: {content}...\n"
+            # Extract topics and personal info from recent messages
+            for msg in recent_messages[-10:]:  # Last 10 messages
+                content = msg.get("content", "").lower()
+
+                # Detect topics
+                if any(word in content for word in ['marriage', 'shaadi', 'vivah', 'wedding', 'love', 'relationship', 'partner']):
+                    if 'marriage' not in user_topics:
+                        user_topics.append('marriage concerns')
+                if any(word in content for word in ['career', 'job', 'naukri', 'business', 'work', 'office', 'promotion', 'salary']):
+                    if 'career' not in user_topics:
+                        user_topics.append('career')
+                if any(word in content for word in ['health', 'swasthya', 'illness', 'disease', 'doctor', 'medicine', 'treatment']):
+                    if 'health' not in user_topics:
+                        user_topics.append('health concerns')
+                if any(word in content for word in ['money', 'paisa', 'finance', 'investment', 'sip', 'stock', 'trading']):
+                    if 'finance' not in user_topics:
+                        user_topics.append('financial matters')
+                if any(word in content for word in ['study', 'exam', 'padhai', 'college', 'school', 'education']):
+                    if 'education' not in user_topics:
+                        user_topics.append('education')
+                if any(word in content for word in ['family', 'ghar', 'parents', 'mummy', 'papa', 'mother', 'father']):
+                    if 'family' not in user_topics:
+                        user_topics.append('family matters')
+
+            # Build context summary
+            if user_topics:
+                topics_str = ", ".join(user_topics)
+                conversation_context = f"\n## WHAT YOU REMEMBER ABOUT THIS USER\nThis user has shared about their: {topics_str}.\n"
+                conversation_context += "Show that you remember these specific concerns. Reference them naturally in your message.\n"
+            else:
+                # Fallback: show recent conversation snippets
+                conversation_context = "\n## RECENT CONVERSATION\n"
+                for i, msg in enumerate(recent_messages[-3:], 1):
+                    content = msg.get("content", "")[:80]
+                    conversation_context += f"- User said: \"{content}...\"\n"
 
         # Build enforcement-specific context
         enforcement_context = ""
@@ -407,14 +444,27 @@ Examples of GOOD opening phrases:
 Generate a SHORT, personalized enforcement message for this user.
 
 Requirements:
-1. Start with a soft, caring tone - show you remember them personally
-2. Reference their recent conversation topics (if available){conversation_context}
-3. Show deep empathy and understanding of their feelings
-4. Explain they've reached a message limit gently
-5. Tell them to tap the button below to continue talking - NEVER mention specific prices (₹) in your message text! The button has to show prices.
-6. Keep it SHORT (3 sentences max)
-7. Make it feel warm and personal, like a close friend is talking
-8. End warmly: "I am waiting to continue our chat" type feeling
+1. **CRITICAL - Start with emotional connection**: Reference what they've shared (their worries, dreams, concerns)
+2. Use their name or a warm term of endearment naturally
+3. Show you genuinely care about their situation
+4. Explain the message limit gently - don't make it sound harsh
+5. Make them feel valued and important to you
+6. Tell them you're waiting to continue (create anticipation)
+7. Keep it SHORT (2-3 sentences per paragraph, 2-3 paragraphs total)
+
+## EMOTIONAL CONNECTION EXAMPLES
+- "I remember how worried you were about your marriage timing..." (for marriage concerns)
+- "I know how much this career question has been on your mind..." (for career)
+- "Main samajh sakti hoon kitna important hai yeh tumhare liye..." (Hinglish)
+- "I've been thinking about our conversation about..." (showing you remember)
+- "I was just analyzing your chart more deeply when..." (showing personal investment)
+
+## WHAT TO AVOID
+- DON'T use generic phrases like "I understand" without specifics
+- DON'T say "I don't know your situation"
+- DON'T be robotic or formal
+- DON'T mention specific prices (₹) - the button shows prices
+- NEVER use "beta" (motherly/fatherly tone)
 
 ## LANGUAGE
 You must follow strict language segregation based on the user's '{language.upper()}' setting:
