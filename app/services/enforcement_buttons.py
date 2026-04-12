@@ -429,7 +429,7 @@ class RazorpayWhatsAppPaymentSender:
         razorpay_link: str
     ) -> None:
         """
-        Send WhatsApp payment message with clickable link (working format)
+        Send WhatsApp interactive button with payment link
 
         Args:
             phone: User's phone number
@@ -443,30 +443,51 @@ class RazorpayWhatsAppPaymentSender:
             "Content-Type": "application/json"
         }
 
-        # Simple text message with payment link (guaranteed to work)
-        full_message = f"{plan_text}\n\n━━━━━━━━━━━━━━━\n\n💳 *PAYMENT LINK*\n{razorpay_link}\n\n━━━━━━━━━━━━━━━\n\n✅ Tap the link above to pay securely via Razorpay\n🔒 100% safe & secure payment"
-
+        # Try interactive button first
         payload = {
             "messaging_product": "whatsapp",
             "to": phone if phone.startswith('+') else f"+{phone}",
-            "type": "text",
-            "text": {
-                "body": full_message,
-                "preview_url": True
+            "type": "interactive",
+            "interactive": {
+                "type": "cta_url",
+                "body": {
+                    "text": plan_text.strip()
+                },
+                "action": {
+                    "name": "cta_url",
+                    "parameters": {
+                        "url": razorpay_link,
+                        "title": "Buy Now"
+                    }
+                }
             }
         }
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(url, json=payload, headers=headers)
 
-            logger.info(f"[WhatsApp Payment] Sent payment link to {phone}")
-
-            if response.status_code != 200:
-                logger.error(f"[WhatsApp Payment] Error: {response.status_code} - {response.text}")
+            if response.status_code == 200:
+                logger.info(f"[WhatsApp Button] ✅ Button sent successfully to {phone}")
+                return
             else:
-                logger.info(f"[WhatsApp Payment] ✅ Payment link sent successfully")
+                logger.warning(f"[WhatsApp Button] Failed ({response.status_code}): {response.text}")
+                logger.info(f"[WhatsApp Button] Falling back to text message with link...")
 
-            response.raise_for_status()
+                # Fallback: Send as text message with clickable link
+                text_payload = {
+                    "messaging_product": "whatsapp",
+                    "to": phone if phone.startswith('+') else f"+{phone}",
+                    "type": "text",
+                    "text": {
+                        "body": f"{plan_text}\n\n💳 Pay: {razorpay_link}\n\n✨ Secure payment via Razorpay",
+                        "preview_url": True
+                    }
+                }
+
+                response2 = await client.post(url, json=text_payload, headers=headers)
+                if response2.status_code == 200:
+                    logger.info(f"[WhatsApp Payment] ✅ Payment link sent to {phone}")
+                response2.raise_for_status()
 
     async def _send_cta_url_button(
         self,
