@@ -1885,17 +1885,16 @@ Copy your code and share! 💫"""
                     logger.info(f"[Enforcement] Selected astrologer: {astrologer_name} (opposite gender)")
 
                     # Generate personalized message from astrologer
-                    if user_language == "hindi":
-                        # Hinglish - personalized by astrologer
+                    if user_language == "english":
+                        # English - personalized by astrologer
                         if astrologer_name == "Meera":
                             # Female astrologer (Meera) talking to male user
                             limit_message = (
-                                f"Main bilkul maafi chahti hoon ki aaj aur aapke free messages khatam ho gaye 😔\n\n"
-                                f"Mujhe bohot bura lag raha hai ki main aapki abhi madad nahi kar pa rahi. "
-                                f"System ki limitation hai yeh, main kar bhi kya sakti hoon?\n\n"
-                                f"Agar aapko raasta chahiye toh 'PAY' type karke subscription le sakte ho. "
-                                f"Ya fir kal ka wait kar sakte ho - kal aapko 3 free messages mil jayengi.\n\n"
-                                f"Maf kijiya ga 🙏"
+                                f"I'm really sorry, but your free messages and daily limit are done for today 😔\n\n"
+                                f"I feel bad that I can't help you right now. It's a system limitation, and I feel terrible about it.\n\n"
+                                f"If you'd like to continue, type 'PAY' to get a subscription. "
+                                f"Or you can wait until tomorrow - you'll get 5 free messages tomorrow.\n\n"
+                                f"Really sorry about this 🙏"
                             )
                         else:
                             # Male astrologer (Aarav) talking to female user
@@ -1904,18 +1903,18 @@ Copy your code and share! 💫"""
                                 f"Mujhe bohot bura lag raha hai ki main aapki abhi madad nahi kar pa raha. "
                                 f"System ki limitation hai yeh, main kar bhi kya sakta hoon?\n\n"
                                 f"Agar aapko raasta chahiye toh 'PAY' type karke subscription le sakti ho. "
-                                f"Ya fir kal ka wait kar sakte ho - kal aapko 3 free messages mil jayengi.\n\n"
+                                f"Ya fir kal ka wait kar sakte ho - kal aapko 5 free messages mil jayengi.\n\n"
                                 f"Maf kijiye ga 🙏"
                             )
                     else:
-                        # English - personalized by astrologer
+                        # Hinglish (DEFAULT) - personalized by astrologer
                         if astrologer_name == "Meera":
                             # Female astrologer (Meera) talking to male user
                             limit_message = (
                                 f"I'm really sorry, but your free messages and daily limit are done for today 😔\n\n"
                                 f"I feel bad that I can't help you right now. It's a system limitation, and I feel terrible about it.\n\n"
                                 f"If you'd like to continue, type 'PAY' to get a subscription. "
-                                f"Or you can wait until tomorrow - you'll get 3 free messages tomorrow.\n\n"
+                                f"Or you can wait until tomorrow - you'll get 5 free messages tomorrow.\n\n"
                                 f"Really sorry about this 🙏"
                             )
                         else:
@@ -1924,7 +1923,7 @@ Copy your code and share! 💫"""
                                 f"I'm really sorry, but your free messages and daily limit are done for today 😔\n\n"
                                 f"I feel bad that I can't help you right now. It's a system limitation, and I feel terrible about it.\n\n"
                                 f"If you'd like to continue, type 'PAY' to get a subscription. "
-                                f"Or you can wait until tomorrow - you'll get 3 free messages tomorrow.\n\n"
+                                f"Or you can wait until tomorrow - you'll get 5 free messages tomorrow.\n\n"
                                 f"Really sorry about this 🙏"
                             )
 
