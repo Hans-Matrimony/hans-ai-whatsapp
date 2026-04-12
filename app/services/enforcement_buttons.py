@@ -336,10 +336,10 @@ class RazorpayWhatsAppPaymentSender:
                     razorpay_link=razorpay_payment_link
                 )
             else:
-                # Hybrid mode: CTA URL button (works immediately)
-                await self._send_cta_url_button(
+                # Hybrid mode: Send as clickable link (most reliable)
+                await self._send_payment_link_message(
                     phone=phone,
-                    text=message,
+                    plan_text=message,
                     razorpay_link=razorpay_payment_link
                 )
 
@@ -422,20 +422,20 @@ class RazorpayWhatsAppPaymentSender:
             logger.error(f"[Razorpay WhatsApp] Error creating payment link: {e}", exc_info=True)
             return None
 
-    async def _send_cta_url_button(
+    async def _send_payment_link_message(
         self,
         phone: str,
-        text: str,
+        plan_text: str,
         razorpay_link: str
     ) -> None:
         """
-        Send WhatsApp CTA URL button (Hybrid mode)
+        Send payment link as clickable URL (Simple & Reliable)
 
-        When user taps button, opens Razorpay payment in browser
+        This is the most reliable method - sends a text message with a clickable payment link
 
         Args:
             phone: User's phone number
-            text: Message text
+            plan_text: Plan details text
             razorpay_link: Razorpay payment link
         """
         url = f"{self.api_url}/{self.phone_id}/messages"
@@ -445,47 +445,51 @@ class RazorpayWhatsAppPaymentSender:
             "Content-Type": "application/json"
         }
 
-        # WhatsApp CTA URL button payload
-        # NOTE: header is REQUIRED for cta_url type
+        # Simple text message with clickable link
+        full_message = f"{plan_text}\n\n🔗 Pay here: {razorpay_link}\n\n✨ Tap the link above to pay securely via Razorpay!"
+
         payload = {
             "messaging_product": "whatsapp",
             "to": phone if phone.startswith('+') else f"+{phone}",
-            "type": "interactive",
-            "interactive": {
-                "type": "cta_url",
-                "header": {
-                    "type": "text",
-                    "text": "Choose Your Plan"
-                },
-                "body": {
-                    "text": text
-                },
-                "action": {
-                    "name": "cta_url",
-                    "parameters": {
-                        "url": razorpay_link,
-                        "title": "Buy Now"
-                    }
-                }
+            "type": "text",
+            "text": {
+                "body": full_message,
+                "preview_url": True
             }
         }
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(url, json=payload, headers=headers)
 
-            # Log payload and response for debugging
-            logger.info(f"[WhatsApp Button] Payload: {payload}")
-            logger.info(f"[WhatsApp Button] Response status: {response.status_code}")
+            logger.info(f"[WhatsApp Payment Link] Sent to {phone}: {razorpay_link}")
 
             if response.status_code != 200:
-                logger.error(f"[WhatsApp Button] Error response: {response.text}")
-                logger.error(f"[WhatsApp Button] Response headers: {dict(response.headers)}")
+                logger.error(f"[WhatsApp Payment Link] Error: {response.status_code} - {response.text}")
 
             response.raise_for_status()
 
             logger.info(
-                f"[Razorpay WhatsApp] Sent CTA URL button to {phone}"
+                f"[Razorpay WhatsApp] Sent payment link message to {phone}"
             )
+
+    async def _send_cta_url_button(
+        self,
+        phone: str,
+        text: str,
+        razorpay_link: str
+    ) -> None:
+        """
+        Send WhatsApp CTA URL button (Hybrid mode) - DEPRECATED, using _send_payment_link_message instead
+
+        This method is kept for reference but not used due to API issues
+
+        Args:
+            phone: User's phone number
+            text: Message text
+            razorpay_link: Razorpay payment link
+        """
+        # Redirect to the simpler, more reliable method
+        await self._send_payment_link_message(phone, text, razorpay_link)
 
     async def _send_whatsapp_flow_button(
         self,
@@ -563,12 +567,12 @@ class RazorpayWhatsAppPaymentSender:
             if self.use_native_whatsapp_flow:
                 return "✨ Tap the button above to pay securely via Razorpay (without leaving WhatsApp)!"
             else:
-                return "✨ Tap the button above to pay securely via Razorpay!"
+                return "✨ Tap the payment link above to complete your purchase securely via Razorpay!"
         else:
             if self.use_native_whatsapp_flow:
                 return "✨ Upar diye gaye button tap karke WhatsApp ke andar hi securely Razorpay se pay kar sakte ho!"
             else:
-                return "✨ Upar diye gaye button tap karke securely Razorpay se pay kar sakte ho!"
+                return "✨ Upar diye gaye payment link tap karke securely Razorpay se pay kar sakte ho!"
 
     async def _send_text_message(self, phone: str, message: str) -> None:
         """Send text message via WhatsApp API"""
