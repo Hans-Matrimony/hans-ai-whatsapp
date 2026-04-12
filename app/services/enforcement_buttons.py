@@ -299,7 +299,7 @@ class RazorpayWhatsAppPaymentSender:
                 for feature in features[:3]:
                     message += f"✓ {feature}\n"
 
-                button_text = f"Buy Now - ₹{price_rupees}"
+                button_text = f"Pay Now - ₹{price_rupees}"
 
             else:  # Hinglish
                 if duration == 1:
@@ -315,7 +315,7 @@ class RazorpayWhatsAppPaymentSender:
                 for feature in features[:3]:
                     message += f"✓ {feature}\n"
 
-                button_text = f"Buy Now - ₹{price_rupees}"
+                button_text = f"Pay Now - ₹{price_rupees}"
 
             # Create Razorpay payment link
             razorpay_payment_link = await self._create_razorpay_payment_link(
@@ -461,7 +461,7 @@ class RazorpayWhatsAppPaymentSender:
                 "action": {
                     "name": "cta_url",
                     "parameters": {
-                        "display_text": "Buy Now",
+                        "display_text": "Pay Now",
                         "url": razorpay_link
                     }
                 }
