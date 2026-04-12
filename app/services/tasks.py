@@ -104,7 +104,9 @@ if ENABLE_AI_ENFORCEMENT and OPENCLAW_URL and OPENCLAW_GATEWAY_TOKEN:
             openclaw_token=OPENCLAW_GATEWAY_TOKEN,
             redis_url=_redis_url,
             cache_ttl=AI_ENFORCEMENT_CACHE_TTL,
-            timeout=AI_ENFORCEMENT_TIMEOUT
+            timeout=AI_ENFORCEMENT_TIMEOUT,
+            mem0_url=os.getenv("MEM0_URL"),
+            mem0_api_key=os.getenv("MEM0_API_KEY")
         )
         if _enforcement_generator:
             logger.info("[Enforcement Generator] ✅ Successfully initialized AI enforcement generator")

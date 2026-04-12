@@ -68,7 +68,9 @@ class EnforcementMessageGenerator:
         openclaw_token: str,
         redis_client: redis.Redis,
         cache_ttl: int = 86400,  # 24 hours
-        timeout: float = 10.0
+        timeout: float = 10.0,
+        mem0_url: str = None,
+        mem0_api_key: str = None
     ):
         """
         Initialize enforcement message generator
@@ -79,15 +81,19 @@ class EnforcementMessageGenerator:
             redis_client: Redis client for caching
             cache_ttl: Cache TTL in seconds (default: 24 hours)
             timeout: AI generation timeout in seconds
+            mem0_url: Mem0 server URL (optional)
+            mem0_api_key: Mem0 API key (optional)
         """
         self.openclaw_url = openclaw_url
         self.openclaw_token = openclaw_token
         self.redis = redis_client
         self.cache_ttl = cache_ttl
         self.timeout = timeout
+        self.mem0_url = mem0_url or os.getenv("MEM0_URL", "https://rg4g0gkk0wwkk4cc00g4sg0c.api.hansastro.com")
+        self.mem0_api_key = mem0_api_key or os.getenv("MEM0_API_KEY")
 
         logger.info(
-            f"[Enforcement Generator] Initialized with cache_ttl={cache_ttl}s, timeout={timeout}s"
+            f"[Enforcement Generator] Initialized with cache_ttl={cache_ttl}s, timeout={timeout}s, mem0_enabled={bool(self.mem0_api_key)}"
         )
 
     async def generate_enforcement_message(
@@ -131,6 +137,12 @@ class EnforcementMessageGenerator:
                 f"for user {user_id}"
             )
 
+            # Step 1.5: Fetch mem0 memories for personalization
+            user_memory = await self._fetch_mem0_memories(user_id)
+            logger.info(
+                f"[Enforcement Generator] User memory from mem0: {list(user_memory.keys())}"
+            )
+
             # Step 2: Generate context hash for cache key
             context_hash = self._generate_context_hash(
                 enforcement_type,
@@ -164,7 +176,8 @@ class EnforcementMessageGenerator:
                 language=language,
                 message_count=message_count,
                 today_messages=today_messages,
-                recent_messages=recent_messages
+                recent_messages=recent_messages,
+                user_memory=user_memory
             )
 
             # Step 5: Call OpenClaw API
@@ -231,15 +244,31 @@ class EnforcementMessageGenerator:
                     params={"userId": user_id, "role": "user", "limit": 50}
                 )
 
+                logger.info(f"[Enforcement Generator] API Response status: {response.status_code}")
+
                 if response.status_code != 200:
                     logger.warning(
                         f"[Enforcement Generator] Failed to fetch messages: "
-                        f"{response.status_code}"
+                        f"{response.status_code} - {response.text[:200]}"
                     )
                     return []
 
                 data = response.json()
+                logger.info(f"[Enforcement Generator] API Response keys: {list(data.keys())}")
+                logger.info(f"[Enforcement Generator] API Response preview: {str(data)[:500]}")
+
                 messages = data.get("messages", [])
+
+                # Try alternative response structures
+                if not messages and "sessions" in data:
+                    # Response might have sessions structure
+                    sessions = data.get("sessions", [])
+                    if sessions and isinstance(sessions, list):
+                        all_messages = []
+                        for session in sessions:
+                            session_messages = session.get("messages", [])
+                            all_messages.extend(session_messages)
+                        messages = all_messages
 
                 # Take the last 'limit' messages (most recent first)
                 user_messages = messages[:limit]
@@ -257,6 +286,109 @@ class EnforcementMessageGenerator:
                 exc_info=True
             )
             return []
+
+    async def _fetch_mem0_memories(self, user_id: str) -> Dict[str, Any]:
+        """
+        Fetch user memories from mem0 for personalization
+
+        Args:
+            user_id: User's phone number
+
+        Returns:
+            Dictionary with user info: {name, gender, concerns, preferences, birth_details}
+        """
+        if not self.mem0_api_key:
+            logger.info("[Enforcement Generator] Mem0 not configured (no API key)")
+            return {}
+
+        try:
+            # Normalize user_id for mem0 (ensure it has + prefix for phone numbers)
+            normalized_id = user_id if user_id.startswith('+') else f"+{user_id}"
+
+            headers = {
+                "Content-Type": "application/json"
+            }
+            if self.mem0_api_key:
+                headers["Authorization"] = f"Token {self.mem0_api_key}"
+
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(
+                    f"{self.mem0_url}/memory/{normalized_id}?limit=20",
+                    headers=headers
+                )
+
+                if response.status_code != 200:
+                    logger.warning(
+                        f"[Enforcement Generator] Mem0 fetch failed: {response.status_code}"
+                    )
+                    return {}
+
+                data = response.json()
+                memories = data if isinstance(data, list) else data.get("memories", data.get("results", []))
+
+                logger.info(
+                    f"[Enforcement Generator] Fetched {len(memories)} memories from mem0"
+                )
+
+                # Extract meaningful information from memories
+                user_info = {
+                    "name": None,
+                    "gender": None,
+                    "concerns": [],
+                    "preferences": [],
+                    "birth_details": None
+                }
+
+                for memory in memories:
+                    content = memory.get("content", "")
+                    metadata = memory.get("metadata", {})
+
+                    # Extract name
+                    if not user_info["name"]:
+                        # Look for name patterns
+                        import re
+                        name_match = re.search(r'(?:Name|User(?:\s*Name)?)\s*[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)', content, re.IGNORECASE)
+                        if name_match:
+                            user_info["name"] = name_match.group(1)
+
+                    # Extract gender
+                    if not user_info["gender"]:
+                        if any(word in content.lower() for word in ['gender:', 'male', 'female', 'gender']):
+                            if 'female' in content.lower() or 'woman' in content.lower() or girl in content.lower():
+                                user_info["gender"] = "female"
+                            elif 'male' in content.lower() or 'man' in content.lower() or 'boy' in content.lower():
+                                user_info["gender"] = "male"
+
+                    # Extract concerns
+                    content_lower = content.lower()
+                    if any(word in content_lower for word in ['marriage', 'shaadi', 'vivah', 'wedding', 'love marriage', 'arranged marriage']):
+                        if 'marriage' not in user_info["concerns"]:
+                            user_info["concerns"].append("marriage")
+                    if any(word in content_lower for word in ['career', 'job', 'naukri', 'business', 'work']):
+                        if 'career' not in user_info["concerns"]:
+                            user_info["concerns"].append("career")
+                    if any(word in content_lower for word in ['health', 'swasthya', 'illness', 'medical']):
+                        if 'health' not in user_info["concerns"]:
+                            user_info["concerns"].append("health")
+                    if any(word in content_lower for word in ['education', 'study', 'exam', 'college', 'school']):
+                        if 'education' not in user_info["concerns"]:
+                            user_info["concerns"].append("education")
+
+                    # Extract birth details
+                    if not user_info["birth_details"] and any(word in content_lower for word in ['dob:', 'born:', 'birth:', 'time:', 'place:']):
+                        user_info["birth_details"] = content[:100]  # First 100 chars
+
+                logger.info(
+                    f"[Enforcement Generator] Extracted user info: name={user_info['name']}, gender={user_info['gender']}, concerns={user_info['concerns']}"
+                )
+
+                return user_info
+
+        except Exception as e:
+            logger.warning(
+                f"[Enforcement Generator] Error fetching mem0 memories: {e}"
+            )
+            return {}
 
     def _generate_context_hash(
         self,
@@ -314,7 +446,8 @@ class EnforcementMessageGenerator:
         language: str,
         message_count: int,
         today_messages: int,
-        recent_messages: List[Dict[str, Any]]
+        recent_messages: List[Dict[str, Any]],
+        user_memory: Dict[str, Any] = None
     ) -> str:
         """
         Build AI prompt for message generation
@@ -369,16 +502,38 @@ class EnforcementMessageGenerator:
                         user_topics.append('family matters')
 
             # Build context summary
+            memory_context = ""
+
+            # First, use mem0 memory if available (has long-term personal info)
+            if user_memory and user_memory.get("name"):
+                user_name = user_memory.get("name", "dear")
+                memory_context = f"\n## WHAT YOU KNOW ABOUT THIS USER (from memory)\n"
+                memory_context += f"- Name: {user_memory.get('name', 'dear')}\n"
+
+                if user_memory.get("birth_details"):
+                    memory_context += f"- Birth details: {user_memory['birth_details']}\n"
+
+                if user_memory.get("concerns"):
+                    concerns = user_memory.get("concerns", [])
+                    if concerns:
+                        memory_context += f"- Concerns: {', '.join(concerns)}\n"
+
+                memory_context += "\n"
+
+            # Then, add recent conversation topics (short-term context)
             if user_topics:
                 topics_str = ", ".join(user_topics)
-                conversation_context = f"\n## WHAT YOU REMEMBER ABOUT THIS USER\nThis user has shared about their: {topics_str}.\n"
-                conversation_context += "Show that you remember these specific concerns. Reference them naturally in your message.\n"
-            else:
+                conversation_context = f"\n## RECENT TOPIC{'' if user_memory else 'S'} YOU DISCUSSED\nThis user has shared about their: {topics_str}.\n"
+                conversation_context += "Reference these naturally in your message.\n"
+            elif not user_memory:
                 # Fallback: show recent conversation snippets
                 conversation_context = "\n## RECENT CONVERSATION\n"
                 for i, msg in enumerate(recent_messages[-3:], 1):
                     content = msg.get("content", "")[:80]
                     conversation_context += f"- User said: \"{content}...\"\n"
+
+            # Combine both memory and recent context
+            full_context = memory_context + conversation_context
 
         # Build enforcement-specific context
         enforcement_context = ""
@@ -439,6 +594,8 @@ Examples of GOOD opening phrases:
 ## ENFORCEMENT CONTEXT
 {enforcement_context}
 {pricing_info}
+
+{full_context}
 
 ## TASK
 Generate a SHORT, personalized enforcement message for this user.
@@ -554,7 +711,9 @@ def create_enforcement_generator(
     openclaw_token: str,
     redis_url: str,
     cache_ttl: int = 86400,
-    timeout: float = 10.0
+    timeout: float = 10.0,
+    mem0_url: str = None,
+    mem0_api_key: str = None
 ) -> Optional[EnforcementMessageGenerator]:
     """
     Create enforcement message generator instance
@@ -565,6 +724,8 @@ def create_enforcement_generator(
         redis_url: Redis URL
         cache_ttl: Cache TTL in seconds
         timeout: AI generation timeout
+        mem0_url: Mem0 server URL (optional)
+        mem0_api_key: Mem0 API key (optional)
 
     Returns:
         EnforcementMessageGenerator instance or None if initialization fails
@@ -574,7 +735,16 @@ def create_enforcement_generator(
         redis_client = redis.from_url(redis_url, decode_responses=True)
         redis_client.ping()
 
-        # Create generator
+        # Create generator with mem0 integration
+        generator = EnforcementMessageGenerator(
+            openclaw_url=openclaw_url,
+            openclaw_token=openclaw_token,
+            redis_client=redis_client,
+            cache_ttl=cache_ttl,
+            timeout=timeout,
+            mem0_url=mem0_url,
+            mem0_api_key=mem0_api_key
+        )
         generator = EnforcementMessageGenerator(
             openclaw_url=openclaw_url,
             openclaw_token=openclaw_token,
