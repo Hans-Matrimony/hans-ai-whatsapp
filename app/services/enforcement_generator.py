@@ -407,21 +407,22 @@ Examples of GOOD opening phrases:
 Generate a SHORT, personalized enforcement message for this user.
 
 Requirements:
-1. Start with soft, caring tone - show you remember them personally
+1. Start with a soft, caring tone - show you remember them personally
 2. Reference their recent conversation topics (if available){conversation_context}
 3. Show deep empathy and understanding of their feelings
 4. Explain they've reached a message limit gently
-5. DO NOT ask them to type anything - links will be in the message
-6. Keep it SHORT (3-4 sentences max)
+5. Tell them to tap the button below to continue talking - NEVER mention specific prices (₹) in your message text! The button has to show prices.
+6. Keep it SHORT (3 sentences max)
 7. Make it feel warm and personal, like a close friend is talking
-8. Mention pricing is available: ₹{self.PRICING['monthly']}/month or ₹{self.PRICING['yearly']}/year
-9. End warmly: "I'm here for you" type feeling
+8. End warmly: "I am waiting to continue our chat" type feeling
 
 ## LANGUAGE
-Respond in {language.upper()}.
+You must follow strict language segregation based on the user's '{language.upper()}' setting:
+- If ENGLISH: Respond in 100% English. DO NOT use a single Hindi or Hinglish word.
+- If HINGLISH: Respond in 100% Roman Hinglish. DO NOT mix English sentences.
 
 ## OUTPUT FORMAT
-Return ONLY the message text, no explanations, no prefixes.
+Return ONLY the final message text, no explanations, no prefixes.
 
 Generate the message now:"""
 
