@@ -262,11 +262,13 @@ async def _get_all_info_from_mem0(phone: str) -> Optional[Dict]:
             # Combined info from all memories
             info = {}
 
-            # Regex patterns for birth details
-            dob_pattern = r'(?:DOB|Date of Birth|Birth Date|dob)[:\s=]+([0-9]{1,4}[-/][0-9]{1,2}[-/][0-9]{1,4})'
-            time_pattern = r'(?:TOB|Time|Birth Time|tob|time)[:\s=]+([0-9]{1,2}:[0-9]{2}(?:\s*[AP]M)?)'
-            place_pattern = r'(?:Place|Birth Place|City|place|sthaan)[:\s=]+([A-Za-z\s]+?)(?:,|\.|\n|$)'
-            gender_pattern = r'gender\s+is\s+(male|female)'
+            # 2. Check Content via Patterns (Fuzzy Regex)
+            # dob_pattern: Handles "DOB is 1990-05-15", "Born on 15/05/1990", "Birth Date: 1990-05-15"
+            dob_pattern = r'(?:dob|date\s+of\s+birth|birth\s+date|born\s+on)(?:\s+of\s+birth)?(?:\s+is|\s+on)?[:\s=]+([0-9]{1,4}[-/][A-Za-z0-9/]+[-/][0-9]{1,4})'
+            # time_pattern: Handles "TOB is 10:30 AM", "Born at 14:30", "Birth Time: 10:30:00"
+            time_pattern = r'(?:tob|time\s+of\s+birth|birth\s+time|born\s+at)(?:\s+of\s+birth)?(?:\s+is|\s+at)?[:\s=]+([0-9]{1,2}[:.][0-9]{2}(?::[0-9]{2})?(?:\s*[ap]m)?)'
+            # place_pattern: Handles "Place of Birth is Mumbai", "Born in Delhi", "City: Meerut"
+            place_pattern = r'(?:place|birth\s+place|city|sthaan|born\s+in)(?:\s+of\s+birth|\s+is)?[:\s=]+([a-z\s]{2,30})(?:,|\.|\n|$)'
 
             for memory in memories:
                 if memory is None or not isinstance(memory, dict):
@@ -283,7 +285,7 @@ async def _get_all_info_from_mem0(phone: str) -> Optional[Dict]:
 
                 # 2. Check Content via Patterns
                 if not info.get("gender"):
-                    gender_match = re.search(gender_pattern, content)
+                    gender_match = re.search(r'gender\s+is\s+(male|female)', content)
                     if gender_match: info["gender"] = gender_match.group(1)
                     elif "gender is female" in content or "user is female" in content: info["gender"] = "female"
                     elif "gender is male" in content or "user is male" in content: info["gender"] = "male"
@@ -300,6 +302,13 @@ async def _get_all_info_from_mem0(phone: str) -> Optional[Dict]:
                     place_match = re.search(place_pattern, raw_content, re.IGNORECASE)
                     if place_match: info["place"] = place_match.group(1).strip()
 
+            # 3. Post-Processing Cleanup
+            if info.get("place"):
+                # Remove leading filler words that might have been captured
+                info["place"] = re.sub(r'^(is|in|of\s+birth\s+is)\s+', '', info["place"], flags=re.IGNORECASE).strip()
+                # Clean up "of Birth is Meerut" -> "Meerut"
+                info["place"] = re.sub(r'^(of\s+Birth\s+is)\s+', '', info["place"], flags=re.IGNORECASE).strip()
+            
             return info if info else None
 
     except Exception as e:
