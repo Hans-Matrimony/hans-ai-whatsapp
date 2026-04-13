@@ -1560,8 +1560,14 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
         logger.info(f"[Audio] Received audio message from {phone}")
 
         try:
-            # Import audio processor (directory has hyphen, need importlib)
+            # Import audio processor (directory has hyphen, need importlib + sys.path)
+            import sys
+            import os
             import importlib
+            # Add project root to sys.path for skills module import
+            project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            if project_root not in sys.path:
+                sys.path.insert(0, project_root)
             transcribe_module = importlib.import_module('skills.audio-processor.transcribe')
             transcribe_audio = transcribe_module.transcribe_audio
 
