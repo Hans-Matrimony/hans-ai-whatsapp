@@ -30,6 +30,8 @@ logger = logging.getLogger(__name__)
 OPENCLAW_URL = os.getenv("OPENCLAW_URL")
 OPENCLAW_GATEWAY_TOKEN = os.getenv("OPENCLAW_GATEWAY_TOKEN")
 MONGO_LOGGER_URL = os.getenv("MONGO_LOGGER_URL")
+# NEW: Separate MongoDB connection for user metadata (can be different from MONGO_LOGGER_URL)
+MONGO_METADATA_URL = os.getenv("MONGO_METADATA_URL")  # Use mongodb:// or mongodb+srv://
 WHATSAPP_PHONE_ID = os.getenv("WHATSAPP_PHONE_ID")
 WHATSAPP_ACCESS_TOKEN = os.getenv("WHATSAPP_ACCESS_TOKEN")
 FB_API_URL = "https://graph.facebook.com/v18.0"
@@ -39,21 +41,26 @@ MEM0_URL = os.getenv("MEM0_URL", "https://rg4g0gkk0wwkk4cc00g4sg0c.api.hansastro
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 MAX_MESSAGES_PER_MINUTE_PER_USER = 10  # WhatsApp's actual limit is around 20-60/min per user
 
-# Initialize user metadata service if MongoDB URL is available and is a direct connection
-if MONGO_LOGGER_URL and MONGO_LOGGER_URL.startswith(("mongodb://", "mongodb+srv://")):
+# Initialize user metadata service if MongoDB URL is available
+# Priority: MONGO_METADATA_URL > MONGO_LOGGER_URL (if it's a direct connection)
+metadata_url = MONGO_METADATA_URL or MONGO_LOGGER_URL
+
+if metadata_url and metadata_url.startswith(("mongodb://", "mongodb+srv://")):
     try:
-        init_result = user_metadata.init_user_metadata_service(MONGO_LOGGER_URL)
+        init_result = user_metadata.init_user_metadata_service(metadata_url)
         if init_result:
-            logger.info("[User Metadata] Service initialized successfully")
+            logger.info(f"[User Metadata] Service initialized successfully using: {'MONGO_METADATA_URL' if MONGO_METADATA_URL else 'MONGO_LOGGER_URL'}")
         else:
             logger.warning("[User Metadata] Failed to initialize service")
     except Exception as e:
         logger.warning(f"[User Metadata] Failed to initialize service: {e}")
-elif MONGO_LOGGER_URL:
-    logger.warning("[User Metadata] MONGO_LOGGER_URL is set but is not a direct MongoDB connection (HTTP URL detected)")
+elif metadata_url:
+    logger.warning(f"[User Metadata] URL is set but is not a direct MongoDB connection (HTTP URL detected): {metadata_url[:50]}...")
     logger.warning("[User Metadata] User metadata features disabled - requires mongodb:// or mongodb+srv:// URL")
+    logger.warning("[User Metadata] Set MONGO_METADATA_URL environment variable with MongoDB connection string")
 else:
-    logger.warning("[User Metadata] MONGO_LOGGER_URL not set, user metadata features disabled")
+    logger.warning("[User Metadata] No MongoDB URL configured (MONGO_METADATA_URL or MONGO_LOGGER_URL with mongodb:// prefix)")
+    logger.warning("[User Metadata] User metadata features disabled - gender/birth details will not persist")
 
 # Subscription Service Configuration
 SUBSCRIPTIONS_URL = os.getenv("SUBSCRIPTIONS_URL")
