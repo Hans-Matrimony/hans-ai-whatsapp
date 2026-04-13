@@ -2609,7 +2609,8 @@ Copy your code and share! 💫"""
                     tob=birth_data["tob"],
                     place=birth_data["place"],
                     language=language,
-                    user_message=message
+                    user_message=message,
+                    phone=phone
                 )
 
                 if horoscope:

@@ -111,7 +111,8 @@ class HoroscopeService:
         tob: str,
         place: str,
         language: str = "auto",
-        user_message: str = ""
+        user_message: str = "",
+        phone: str = None
     ) -> Optional[Dict]:
         """Generate personalized horoscope using OpenClaw API"""
         
@@ -119,8 +120,9 @@ class HoroscopeService:
             logger.error("[Horoscope] Cannot generate horoscope: OPENCLAW_URL missing")
             return None
 
+        phone_id = phone or "horoscope_service"
         try:
-            logger.info(f"[Horoscope] Requesting API horoscope for DOB={dob}, Place={place}")
+            logger.info(f"[Horoscope] Requesting API horoscope for DOB={dob}, Place={place}, User={phone_id}")
 
             # Create prompt for the OpenClaw agent to act as the Vedic Horoscope Engine
             prompt = f"""You are the Vedic Horoscope Engine. 
@@ -156,10 +158,12 @@ Rules:
             if self.api_token:
                 headers["Authorization"] = f"Bearer {self.api_token}"
 
+            prompt = f"Generate a detailed daily Vedic horoscope for DOB: {dob}, TOB: {tob}, Place: {place}. Return ONLY a JSON object with keys: date, birth_moon_sign, birth_moon_sign_hindi, birth_nakshatra, transit_moon_house, prediction, lucky_color, lucky_numbers, lucky_day. Language: {language}."
+
             payload = {
                 "model": "agent:astrologer",
-                "input": prompt,
-                "user": "horoscope_service"
+                "message": prompt,
+                "user": f"+{phone_id}"
             }
 
             async with httpx.AsyncClient(timeout=45.0) as client:
