@@ -137,7 +137,16 @@ class EnforcementMessageGenerator:
                 f"for user {user_id}"
             )
 
-            # Step 1.5: Fetch mem0 memories for personalization
+            # Step 1.5: Detect language from recent conversation
+            detected_language = self._detect_language_from_conversation(recent_messages)
+            logger.info(
+                f"[Enforcement Generator] Detected language from MongoDB: {detected_language} "
+                f"(passed language: {language})"
+            )
+            # Use detected language from conversation instead of passed parameter
+            language = detected_language
+
+            # Step 1.6: Fetch mem0 memories for personalization
             user_memory = await self._fetch_mem0_memories(user_id)
             logger.info(
                 f"[Enforcement Generator] User memory from mem0: {list(user_memory.keys())}"
@@ -286,6 +295,119 @@ class EnforcementMessageGenerator:
                 exc_info=True
             )
             return []
+
+    def _detect_language_from_conversation(
+        self,
+        messages: List[Dict[str, Any]]
+    ) -> str:
+        """
+        Detect user's language from their recent conversation history
+
+        Analyzes the user's messages to determine if they communicate in:
+        - English (predominantly English)
+        - Hinglish (Hindi words written in English script)
+
+        Args:
+            messages: List of user messages from MongoDB
+
+        Returns:
+            "english" or "hinglish"
+        """
+        try:
+            if not messages:
+                logger.info("[Enforcement Generator] No messages to detect language, defaulting to english")
+                return "english"
+
+            # Common Hinglish words (Roman script Hindi)
+            hinglish_keywords = {
+                # Pronouns & common words
+                'mai', 'me', 'main', 'mera', 'meri', 'mera', 'tera', 'teri', 'tum', 'tumhara',
+                'ap', 'aap', 'aapka', 'aapki', 'hamara', 'hamari', 'uska', 'uski',
+                # Verbs & auxiliaries
+                'hai', 'hain', 'ho', 'hoga', 'hogi', 'hon', 'tha', 'thi', 'the',
+                'kar', 'ke', 'ki', 'ko', 'se', 'mein', 'me', 'par', 'liye', 'wajahse',
+                'karta', 'karti', 'karte', 'sakta', 'sakti', 'sake', 'chahta', 'chahti',
+                'chaiye', ' Lena', 'dene', 'de', 'diya', 'dijiye', 'kijiye', 'batana',
+                'bata', 'bolo', 'bol', 'aana', 'jana', 'ana', 'ja', 'raha', 'rahi', 'rahe',
+                'karunga', 'karegi', 'karenge', 'karun', 'kar', 'rakha', 'rakhi', 'hain',
+                # Time & place
+                'abhi', 'ab', 'kal', 'aaj', 'aj', 'pehli', 'pichli', 'baad', 'mein',
+                'kabhi', 'kab', 'kahan', 'kaise', 'kitna', 'kitni', 'kitne', 'itna',
+                'itni', 'bahut', 'bohot', 'zyada', 'kam', 'thoda', 'bahut', 'kaafi',
+                # Question words
+                'kya', 'kyun', 'kyunki', 'kisko', 'kiska', 'kaun', 'kaunsa', 'kahan',
+                # Connecting words
+                'aur', 'or', 'lekin', 'magar', 'par', 'toh', 'to', 'bhi', 'hi', 'tak',
+                'vaadi', 'ke_sath', 'ke_bina', 'ke_liye',
+                # Feelings & reactions
+                'acha', 'achha', 'theek', 'thik', 'sahi', 'galat', 'maza', 'maza',
+                'dushman', 'dost', 'pyaar', 'pyar', 'love', 'hate', 'ghussa', 'gussa',
+                'khush', 'udaaS', 'naraaz', 'khushi', 'gussaa', 'dard', 'pain',
+                # Family & relations
+                'mummy', 'papa', 'mummyji', 'papaaji', 'maa', 'baap', 'beti', 'beta',
+                'bhai', 'behen', 'didi', 'bhaiya', 'family', 'ghar', 'gharpe',
+                # Astrology specific
+                'kundli', 'kundli', 'rashi', 'lagna', 'grah', 'nakshatra', 'dasha',
+                'mahadasha', 'vivah', 'shaadi', 'marriage', 'kundli', 'janam', 'patrika',
+                # Common phrases
+                'ji', 'jii', 'sahij', 'sahi', 'bilkul', 'pakka', 'shayad', 'hmm',
+                'haan', 'haanji', 'hanji', 'na', 'nahi', 'nahee', 'ok', 'okay',
+                'sorry', 'thank', 'thanks', 'welcome', 'please', 'kripaya',
+                # Actions
+                'dekhna', 'dekho', 'sunna', 'suno', 'samajhna', 'samajh', 'samjho',
+                'pata', 'maloom', 'chal', 'chalo', 'ruk', 'ruko', 'wait', 'karo',
+                # Numbers & quantities
+                'ek', 'do', 'teen', 'char', 'paanch', 'cheh', 'saath', 'aath', 'nau', 'das',
+                'bees', 'tees', 'chaalis', 'pachas', 'sattar', 'assi', 'nabbe',
+            }
+
+            # Analyze user's last 10 messages
+            hinglish_count = 0
+            total_messages = 0
+            total_words = 0
+
+            for msg in messages[-10:]:  # Check last 10 messages
+                content = msg.get("text", msg.get("content", ""))
+                if not content:
+                    continue
+
+                total_messages += 1
+                words = content.lower().split()
+                total_words += len(words)
+
+                # Count Hinglish keywords
+                for word in words:
+                    clean_word = word.strip('.,!?;:"\'-()[]{}')
+                    if clean_word in hinglish_keywords:
+                        hinglish_count += 1
+
+            if total_messages == 0 or total_words == 0:
+                logger.info("[Enforcement Generator] No valid messages to analyze, defaulting to english")
+                return "english"
+
+            # Calculate Hinglish ratio
+            hinglish_ratio = hinglish_count / total_words
+
+            # If more than 8% of words are Hinglish keywords, classify as Hinglish
+            # (Lowered threshold to be more sensitive)
+            is_hinglish = hinglish_ratio > 0.08
+
+            detected = "hinglish" if is_hinglish else "english"
+
+            logger.info(
+                f"[Enforcement Generator] Language detection: "
+                f"hinglish_words={hinglish_count}, total_words={total_words}, "
+                f"ratio={hinglish_ratio:.3f}, detected={detected}"
+            )
+
+            return detected
+
+        except Exception as e:
+            logger.error(
+                f"[Enforcement Generator] Error detecting language: {e}",
+                exc_info=True
+            )
+            return "english"  # Default to English on error
 
     async def _fetch_mem0_memories(self, user_id: str) -> Dict[str, Any]:
         """
@@ -546,7 +668,7 @@ class EnforcementMessageGenerator:
             )
         elif enforcement_type == "daily_limit":
             enforcement_context = (
-                f"The user has sent {today_messages}/5 messages today. "
+                f"The user has sent {today_messages}/6 messages today. "
                 f"DAILY LIMIT REACHED. Cannot send more messages today. "
             )
         elif enforcement_type == "payment_nudge":
