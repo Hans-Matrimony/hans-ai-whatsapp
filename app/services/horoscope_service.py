@@ -63,41 +63,103 @@ class HoroscopeService:
 
     async def get_user_birth_data(self, phone: str) -> Optional[Dict]:
         """
-        Get user birth data from MongoDB.
+        Get user birth data from Mem0.
         Returns dict with dob, tob, place if found, None otherwise.
         """
         try:
-            from pymongo import MongoClient
-            from app.services.user_metadata import init_user_metadata_service
+            import httpx
 
-            # Get MongoDB URL from environment
-            mongo_url = os.getenv("MONGO_LOGGER_URL")
+            # Get Mem0 URL from environment
+            mem0_url = os.getenv("MEM0_URL")
 
-            if not mongo_url or not mongo_url.startswith(("mongodb://", "mongodb+srv://")):
-                logger.warning(f"[Horoscope] Invalid MongoDB URL")
+            if not mem0_url:
+                logger.warning(f"[Horoscope] MEM0_URL not configured")
                 return None
 
-            # Connect to MongoDB
-            client = MongoClient(mongo_url)
-            db = client.astrology
-            users_collection = db.user_birth_details
+            # Format user ID with + prefix for Mem0
+            user_id = f"+{phone}" if not phone.startswith("+") else phone
 
-            # Find user by phone number
-            user_data = users_collection.find_one({"phone": phone})
+            # Search Mem0 for birth details
+            search_url = f"{mem0_url}/v1/memories/search"
+            query = "birth details DOB date of birth time place"
 
-            if user_data:
-                logger.info(f"[Horoscope] Found birth data for {phone}")
+            payload = {
+                "query": query,
+                "user_id": user_id,
+                "limit": 5
+            }
+
+            logger.info(f"[Horoscope] Searching Mem0 for birth data - user: {user_id}")
+
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(
+                    search_url,
+                    json=payload,
+                    headers={"Content-Type": "application/json"}
+                )
+
+                if response.status_code == 200:
+                    memories = response.json()
+
+                    if memories and len(memories) > 0:
+                        # Search through memories for birth details
+                        for memory in memories:
+                            memory_text = memory.get("memory", "")
+                            logger.info(f"[Horoscope] Found memory: {memory_text[:100]}...")
+
+                            # Parse birth details from memory text
+                            birth_data = self._parse_birth_details_from_memory(memory_text)
+
+                            if birth_data and all(birth_data.values()):
+                                logger.info(f"[Horoscope] Successfully parsed birth data from Mem0 for {phone}")
+                                return birth_data
+
+                        logger.info(f"[Horoscope] No valid birth data found in Mem0 memories for {phone}")
+                        return None
+                    else:
+                        logger.info(f"[Horoscope] No memories found in Mem0 for {phone}")
+                        return None
+                else:
+                    logger.error(f"[Horoscope] Mem0 search failed: {response.status_code} - {response.text}")
+                    return None
+
+        except Exception as e:
+            logger.error(f"[Horoscope] Error fetching birth data from Mem0: {e}")
+            return None
+
+    def _parse_birth_details_from_memory(self, memory_text: str) -> Optional[Dict]:
+        """
+        Parse birth details from Mem0 memory text.
+        Handles various formats of stored birth data.
+        """
+        import re
+
+        try:
+            # Pattern to match various formats
+            # Format 1: "User birth details: DOB=1990-05-15, TOB=10:30 AM, Place=Mumbai"
+            # Format 2: "DOB: 1990-05-15, Time: 10:30 AM, Place: Mumbai"
+            # Format 3: "Date of Birth: 15 May 1990, Time: 10:30, Place: Mumbai"
+
+            dob_pattern = r'(?:DOB|Date of Birth|Birth Date|dob)[:\s=]+([0-9]{1,4}[-/][0-9]{1,2}[-/][0-9]{1,4})'
+            time_pattern = r'(?:TOB|Time|Birth Time|tob|time)[:\s=]+([0-9]{1,2}:[0-9]{2}(?:\s*[AP]M)?)'
+            place_pattern = r'(?:Place|Birth Place|City|place|sthaan)[:\s=]+([A-Za-z\s]+?)(?:,|\.|\n|$)'
+
+            dob_match = re.search(dob_pattern, memory_text, re.IGNORECASE)
+            time_match = re.search(time_pattern, memory_text, re.IGNORECASE)
+            place_match = re.search(place_pattern, memory_text, re.IGNORECASE)
+
+            if dob_match and time_match and place_match:
                 return {
-                    "dob": user_data.get("dob"),
-                    "tob": user_data.get("tob"),
-                    "place": user_data.get("place")
+                    "dob": dob_match.group(1).strip(),
+                    "tob": time_match.group(1).strip(),
+                    "place": place_match.group(1).strip()
                 }
             else:
-                logger.info(f"[Horoscope] No birth data found for {phone}")
+                logger.debug(f"[Horoscope] Could not parse all birth details from memory")
                 return None
 
         except Exception as e:
-            logger.error(f"[Horoscope] Error fetching birth data: {e}")
+            logger.error(f"[Horoscope] Error parsing birth details from memory: {e}")
             return None
 
     async def generate_horoscope(
