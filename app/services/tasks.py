@@ -647,7 +647,7 @@ async def _extract_and_save_birth_details(phone: str, message: str) -> Optional[
     # Or: "naam: x, janam tithi: DD-MM-YYYY, samay: HH:MM, sthaan: city"
     dob_pattern = r'(?:(?:DOB|Date of Birth|Birth Date|janam tithi|dob)[:\s]+([0-9]{1,4}[-/][0-9]{1,2}[-/][0-9]{1,4}))'
     time_pattern = r'(?:(?:Time|Birth Time|samay|tob|time)[:\s]+([0-9]{1,2}:[0-9]{2})'
-    place_pattern = r'(?:(?:Place|Birth Place|City|janam sthaan|place|sthaan)[:\s]+([A-Za-z\s]+?)(?:,|\.|\n|$|Gender|gender|ling|$))'
+    place_pattern = r'(?:(?:Place|Birth Place|City|janam sthaan|place|sthaan)[:\s]+([A-Za-z\s]+?)(?:,|\.|\n|Gender|gender|ling|$))'
     name_pattern = r'(?:(?:Name|naam|name)[:\s]+([A-Za-z]+))'
     gender_pattern = r'(?:(?:Gender|ling|gender)[:\s]+(male|female|Male|Female))'
 
