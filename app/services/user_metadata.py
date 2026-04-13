@@ -221,13 +221,26 @@ async def _get_gender_from_mem0(phone: str) -> Optional[str]:
                 return None
 
             data = response.json()
-            if not data or not isinstance(data, list):
+            if not data:
+                return None
+
+            # Handle Mem0 response format: {success: true, memories: [...], count: N}
+            memories = []
+            if isinstance(data, list):
+                memories = data
+            elif isinstance(data, dict):
+                memories = data.get("memories", data.get("results", data.get("data", [])))
+            else:
+                return None
+
+            if not memories:
                 return None
 
             # Search memories for gender
             import re
-            for memory in data:
-                content = memory.get("content", "").lower()
+            for memory in memories:
+                # Mem0 uses "memory" field, not "content"
+                content = memory.get("memory", memory.get("content", "")).lower()
                 metadata = memory.get("metadata", {})
 
                 # Check metadata first (most reliable)
@@ -237,15 +250,16 @@ async def _get_gender_from_mem0(phone: str) -> Optional[str]:
                         logger.info(f"[User Metadata] Gender from Mem0 metadata: {gender}")
                         return gender
 
-                # Check content for explicit gender
-                gender_match = re.search(r'gender\s*[:\s]\s*(male|female)', content)
+                # Check content for "Gender is Male/Female" pattern
+                gender_match = re.search(r'gender\s+is\s+(male|female)', content)
                 if gender_match:
+                    logger.info(f"[User Metadata] Gender from Mem0 content: {gender_match.group(1)}")
                     return gender_match.group(1)
 
-                # Keyword search
-                if any(word in content for word in ["gender: female", "user is female", "she is a"]):
+                # Keyword search (fallback)
+                if "gender is female" in content or "user is female" in content:
                     return "female"
-                elif any(word in content for word in ["gender: male", "user is male", "he is a"]):
+                elif "gender is male" in content or "user is male" in content:
                     return "male"
 
             return None
