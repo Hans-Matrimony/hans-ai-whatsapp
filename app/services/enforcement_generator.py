@@ -297,8 +297,8 @@ class EnforcementMessageGenerator:
         Returns:
             Dictionary with user info: {name, gender, concerns, preferences, birth_details}
         """
-        if not self.mem0_api_key:
-            logger.info("[Enforcement Generator] Mem0 not configured (no API key)")
+        if not self.mem0_url:
+            logger.info("[Enforcement Generator] Mem0 not configured (no URL)")
             return {}
 
         try:
@@ -308,6 +308,7 @@ class EnforcementMessageGenerator:
             headers = {
                 "Content-Type": "application/json"
             }
+            # Only add Authorization header if API key is provided
             if self.mem0_api_key:
                 headers["Authorization"] = f"Token {self.mem0_api_key}"
 
