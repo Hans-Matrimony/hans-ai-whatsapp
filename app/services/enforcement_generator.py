@@ -332,12 +332,26 @@ class EnforcementMessageGenerator:
                             all_messages.extend(session_messages)
                         messages = all_messages
 
+                # CRITICAL: Filter to ONLY user messages (role: "user")
+                # This prevents AI assistant messages from being used as "user context"
+                all_user_messages = []
+                for msg in messages:
+                    # Check role field
+                    if msg.get("role") == "user":
+                        all_user_messages.append(msg)
+                    # Also check if there's no explicit role but looks like user message
+                    elif "role" not in msg and msg.get("text", "").strip():
+                        # Basic heuristic: short messages (< 300 chars) are likely user
+                        text = msg.get("text", "")
+                        if len(text) < 300:
+                            all_user_messages.append(msg)
+
                 # Take the last 'limit' messages (most recent first)
-                user_messages = messages[:limit]
+                user_messages = all_user_messages[:limit]
 
                 logger.info(
                     f"[Enforcement Generator] Fetched {len(user_messages)} user messages "
-                    f"from {len(messages)} total messages"
+                    f"from {len(messages)} total messages (filtered from {len(all_user_messages)} user msgs)"
                 )
 
                 return user_messages
@@ -910,14 +924,37 @@ class EnforcementMessageGenerator:
         if current_message and len(current_message.strip()) > 3:
             last_user_message = current_message.strip()
             logger.info(f"[Enforcement Generator] Using CURRENT message: {last_user_message[:50]}...")
-        # Fallback: use the last message from MongoDB history
+        # Fallback: use the last USER message from MongoDB history
+        # IMPORTANT: Only use user messages, NOT assistant messages (to avoid repeating AI's own responses)
         elif recent_messages:
-            for msg in reversed(recent_messages[-5:]):
+            # Filter to only USER messages and exclude AI corrections/noise
+            noise_phrases = [
+                "seems to be incorrect", "spelling", "wrong", "incorrect",
+                "confirm kar", "let me check", "i'll confirm", "abhi confirm",
+                "namaste", "hello", "hi", "hey", "achaarya", "astrologer"
+            ]
+
+            for msg in reversed(recent_messages[-10:]):  # Check last 10 messages
+                # Only use user messages
+                if msg.get("role") != "user":
+                    continue
+
                 msg_text = msg.get("text", msg.get("content", ""))
-                if msg_text and len(msg_text.strip()) > 3:
-                    last_user_message = msg_text
-                    logger.info(f"[Enforcement Generator] Using message from MongoDB: {last_user_message[:50]}...")
-                    break
+                if not msg_text or len(msg_text.strip()) <= 3:
+                    continue
+
+                # Skip messages that look like AI responses or corrections
+                msg_lower = msg_text.lower()
+                if any(phrase in msg_lower for phrase in noise_phrases):
+                    continue
+
+                # Skip very long messages (likely AI responses mistakenly marked as user)
+                if len(msg_text) > 300:
+                    continue
+
+                last_user_message = msg_text
+                logger.info(f"[Enforcement Generator] Using USER message from MongoDB: {last_user_message[:50]}...")
+                break
 
         # Detect topic from the message (current or MongoDB)
         if last_user_message:
