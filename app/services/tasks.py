@@ -1560,7 +1560,13 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
         logger.info(f"[Audio] Received audio message from {phone}")
 
         try:
-            # Import audio processor
+            # Import audio processor - add app directory to path if needed
+            import sys
+            import os
+            app_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            if app_dir not in sys.path:
+                sys.path.insert(0, app_dir)
+
             from skills.audio_processor.transcribe import transcribe_audio
 
             # Transcribe audio to text using Groq (FREE)
