@@ -646,8 +646,8 @@ async def _extract_and_save_birth_details(phone: str, message: str) -> Optional[
     # Matches: "Name: X, DOB: YYYY-MM-DD, Time: HH:MM, Place: City"
     # Or: "naam: x, janam tithi: DD-MM-YYYY, samay: HH:MM, sthaan: city"
     dob_pattern = r'(?:(?:DOB|Date of Birth|Birth Date|janam tithi|dob)[:\s]+([0-9]{1,4}[-/][0-9]{1,2}[-/][0-9]{1,4}))'
-    time_pattern = r'(?:(?:Time|Birth Time|samay|tob|time)[:\s]+([0-9]{1,2}:[0-9]{2})'
-    place_pattern = r'(?:(?:Place|Birth Place|City|janam sthaan|place|sthaan)[:\s]+([A-Za-z\s]+?)(?:,|\.|\n|Gender|gender|ling|$))'
+    time_pattern = r'(?:(?:Time|Birth Time|samay|tob|time)[:\s]+([0-9]{1,2}:[0-9]{2}))'
+    place_pattern = r'(?:(?:Place|Birth Place|City|janam sthaan|place|sthaan)[:\s]+([A-Za-z\s]+?)(?:,|\.|\n|$|Gender|gender|ling|$))'
     name_pattern = r'(?:(?:Name|naam|name)[:\s]+([A-Za-z]+))'
     gender_pattern = r'(?:(?:Gender|ling|gender)[:\s]+(male|female|Male|Female))'
 
@@ -1560,14 +1560,16 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
         logger.info(f"[Audio] Received audio message from {phone}")
 
         try:
-            # Import audio processor - add app directory to path if needed
+            # Import audio processor (directory has hyphen, need importlib + sys.path)
             import sys
             import os
-            app_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-            if app_dir not in sys.path:
-                sys.path.insert(0, app_dir)
-
-            from skills.audio_processor.transcribe import transcribe_audio
+            import importlib
+            # Add project root to sys.path for skills module import
+            project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            if project_root not in sys.path:
+                sys.path.insert(0, project_root)
+            transcribe_module = importlib.import_module('skills.audio-processor.transcribe')
+            transcribe_audio = transcribe_module.transcribe_audio
 
             # Transcribe audio to text using Groq (FREE)
             if media_info and media_info.get("base64_data"):
