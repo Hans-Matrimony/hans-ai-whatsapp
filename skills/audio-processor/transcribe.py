@@ -85,8 +85,14 @@ async def transcribe_audio(audio_bytes: bytes, mime_type: str = "audio/ogg") -> 
                     )
 
                     if response.status_code == 200:
-                        result = response.json()
-                        transcribed_text = result.get("text", "").strip()
+                        # Handle both JSON and text responses from Groq
+                        content_type = response.headers.get("content-type", "")
+                        if "application/json" in content_type:
+                            result = response.json()
+                            transcribed_text = result.get("text", "").strip()
+                        else:
+                            # Plain text response
+                            transcribed_text = response.text.strip()
 
                         if transcribed_text:
                             logger.info(f"[Audio] Transcription successful: {transcribed_text[:50]}...")
