@@ -151,6 +151,7 @@ Rules:
             headers = {
                 "Content-Type": "application/json",
                 "x-openclaw-session-key": f"horoscope:{dob}:{place.replace(' ', '_')}",
+                "x-openclaw-scopes": "operator.admin"
             }
             if self.api_token:
                 headers["Authorization"] = f"Bearer {self.api_token}"
