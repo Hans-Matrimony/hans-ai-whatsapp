@@ -450,6 +450,10 @@ async def _fetch_gender_from_mem0(phone: str) -> Optional[str]:
             # Search through memories for gender
             import re
             for memory in memories:
+                # Skip None or invalid memory items
+                if memory is None or not isinstance(memory, dict):
+                    continue
+
                 # Mem0 uses "memory" field, not "content"
                 content = memory.get("memory", memory.get("content", "")).lower()
                 metadata = memory.get("metadata", {})

@@ -685,6 +685,10 @@ class EnforcementMessageGenerator:
                 }
 
                 for memory in memories:
+                    # Skip None or invalid memory items
+                    if memory is None or not isinstance(memory, dict):
+                        continue
+
                     # Mem0 response uses "memory" field, not "content"
                     content = memory.get("memory", memory.get("content", ""))
                     metadata = memory.get("metadata", {})
