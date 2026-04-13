@@ -2438,6 +2438,75 @@ Copy your code and share! 💫"""
         logger.error(f"[Message Limiter] Error checking message limit: {e}")
         # On error, continue with message processing (fail open)
 
+    # ==================== HOROSCOPE CHECK (NEW!) ====================
+    # Check if user is asking for horoscope and handle it directly
+    # This bypasses the AI agent and uses our 100% accurate Vedic horoscope engine
+    try:
+        from app.services.horoscope_service import HoroscopeService
+
+        horoscope_service = HoroscopeService()
+
+        # Check if this is a horoscope request
+        if horoscope_service.is_horoscope_request(message):
+            logger.info(f"[Horoscope] Processing horoscope request from {phone}")
+
+            # Detect language from user message
+            language = horoscope_service.detect_language(message)
+            logger.info(f"[Horoscope] Detected language: {language}")
+
+            # Try to get user birth data from MongoDB
+            birth_data = await horoscope_service.get_user_birth_data(phone)
+
+            if birth_data:
+                # User has birth data - generate horoscope!
+                logger.info(f"[Horoscope] Found birth data, generating horoscope...")
+
+                horoscope = await horoscope_service.generate_horoscope(
+                    dob=birth_data["dob"],
+                    tob=birth_data["tob"],
+                    place=birth_data["place"],
+                    language=language,
+                    user_message=message
+                )
+
+                if horoscope:
+                    # Format and send horoscope
+                    horoscope_message = horoscope_service.format_horoscope_message(horoscope)
+
+                    async with httpx.AsyncClient(timeout=30.0) as client:
+                        await _send_whatsapp_message(client, phone, horoscope_message)
+
+                    # Log to MongoDB
+                    await _log_to_mongo(session_id, user_id, "assistant", horoscope_message, "whatsapp")
+
+                    logger.info(f"[Horoscope] Successfully sent horoscope to {phone}")
+                    return {"status": "horoscope_sent", "source": "vedic_horoscope_engine"}
+                else:
+                    # Horoscope generation failed
+                    error_msg = "Sorry, I couldn't generate your horoscope right now. Please try again later."
+                    async with httpx.AsyncClient(timeout=30.0) as client:
+                        await _send_whatsapp_message(client, phone, error_msg)
+                    await _log_to_mongo(session_id, user_id, "assistant", error_msg, "whatsapp")
+                    return {"status": "horoscope_error"}
+            else:
+                # No birth data found - ask user for it
+                logger.info(f"[Horoscope] No birth data found, asking user...")
+
+                request_message = horoscope_service.get_birth_details_request_message(language)
+
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    await _send_whatsapp_message(client, phone, request_message)
+
+                await _log_to_mongo(session_id, user_id, "assistant", request_message, "whatsapp")
+
+                logger.info(f"[Horoscope] Sent birth details request to {phone}")
+                return {"status": "birth_details_requested"}
+
+    except Exception as e:
+        logger.error(f"[Horoscope] Error processing horoscope request: {e}")
+        # On error, continue to normal AI processing
+        pass
+
     # ============================================================
 
     if not OPENCLAW_URL:
