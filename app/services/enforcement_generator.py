@@ -690,10 +690,13 @@ class EnforcementMessageGenerator:
                         continue
 
                     # Mem0 response uses "memory" field, not "content"
-                    content = memory.get("memory", memory.get("content", ""))
-                    metadata = memory.get("metadata", {})
-
+                    # Use 'or ""' to handle cases where field exists but is null (None)
+                    raw_content = memory.get("memory") or memory.get("content") or ""
+                    content = raw_content
                     content_lower = content.lower()
+                    
+                    # Safely handle metadata (use 'or {}' to handle null/None)
+                    metadata = memory.get("metadata") or {}
 
                     # Extract name - look for "Name is X" pattern
                     if not user_info["name"]:

@@ -249,8 +249,12 @@ async def _get_gender_from_mem0(phone: str) -> Optional[str]:
                     continue
 
                 # Mem0 uses "memory" field, not "content"
-                content = memory.get("memory", memory.get("content", "")).lower()
-                metadata = memory.get("metadata", {})
+                # Use 'or ""' to handle cases where field exists but is null (None)
+                raw_content = memory.get("memory") or memory.get("content") or ""
+                content = raw_content.lower()
+                
+                # Safely handle metadata (use 'or {}' to handle null/None)
+                metadata = memory.get("metadata") or {}
 
                 # Check metadata first (most reliable)
                 if metadata.get("gender"):
