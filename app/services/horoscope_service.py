@@ -157,7 +157,9 @@ Rules:
                 headers["Authorization"] = f"Bearer {self.api_token}"
 
             payload = {
-                "message": prompt,
+                "model": "agent:astrologer",
+                "input": prompt,
+                "user": f"horoscope_service",
                 "stream": False,
                 "max_tokens": 1000
             }
@@ -174,7 +176,22 @@ Rules:
                     return None
 
                 data = response.json()
-                reply_text = data.get("response", "")
+                
+                # Extract text from the complex OpenClaw output structure
+                # Schema: data -> output[] -> content[] -> text
+                reply_text = ""
+                if "output" in data:
+                    for item in data["output"]:
+                        if item.get("type") == "message" and "content" in item:
+                            for content in item["content"]:
+                                if "text" in content:
+                                    reply_text += content["text"]
+                elif "response" in data:
+                    reply_text = data["response"]
+                
+                if not reply_text:
+                    logger.error(f"[Horoscope] No text found in AI response: {data}")
+                    return None
                 
                 # Extract JSON from reply (in case agent added words)
                 json_match = re.search(r'(\{.*\})', reply_text, re.DOTALL)
