@@ -137,7 +137,7 @@ class EnforcementMessageGenerator:
                 f"for user {user_id}"
             )
 
-            # Step 1.5: Detect language from recent conversation
+            # Step 1.5: Detect language and gender from recent conversation
             detected_language = self._detect_language_from_conversation(recent_messages)
             logger.info(
                 f"[Enforcement Generator] Detected language from MongoDB: {detected_language} "
@@ -145,6 +145,27 @@ class EnforcementMessageGenerator:
             )
             # Use detected language from conversation instead of passed parameter
             language = detected_language
+
+            # Detect gender from conversation
+            detected_gender = self._detect_gender_from_conversation(recent_messages)
+            logger.info(
+                f"[Enforcement Generator] Detected gender from MongoDB: {detected_gender} "
+                f"(passed gender: {user_gender})"
+            )
+            # Use detected gender if it's more certain than passed parameter
+            if detected_gender in ['male', 'female']:
+                user_gender = detected_gender
+                # Select astrologer based on detected gender (opposite gender)
+                if user_gender == "male":
+                    astrologer_name = "Meera"  # Female astrologer for male user
+                    astrologer_personality = self.PERSONALITIES["Meera"]
+                else:
+                    astrologer_name = "Aarav"  # Male astrologer for female user
+                    astrologer_personality = self.PERSONALITIES["Aarav"]
+                logger.info(
+                    f"[Enforcement Generator] Updated astrologer to {astrologer_name} "
+                    f"based on detected gender: {user_gender}"
+                )
 
             # Step 1.6: Fetch mem0 memories for personalization
             user_memory = await self._fetch_mem0_memories(user_id)
@@ -408,6 +429,135 @@ class EnforcementMessageGenerator:
                 exc_info=True
             )
             return "english"  # Default to English on error
+
+    def _detect_gender_from_conversation(
+        self,
+        messages: List[Dict[str, Any]]
+    ) -> str:
+        """
+        Detect user's gender from their conversation history
+
+        Analyzes pronouns, verbs, and self-references to determine if user is:
+        - male (uses masculine verb forms: karunga, sakta, hoon, etc.)
+        - female (uses feminine verb forms: karungi, sakti, hoon, etc.)
+
+        Args:
+            messages: List of user messages from MongoDB
+
+        Returns:
+            "male", "female", or "unknown"
+        """
+        try:
+            if not messages:
+                logger.info("[Enforcement Generator] No messages to detect gender, returning unknown")
+                return "unknown"
+
+            # Gender indicators in Hindi/Hinglish
+            masculine_indicators = {
+                # First person masculine verb forms
+                'karunga', 'karenga', 'karun', 'karunga', 'jaunga', 'jayenge',
+                'dekhta', 'dekhte', 'dekhun', 'rahana', 'rehenga', 'rahun',
+                # Pronouns & self-reference (masculine context)
+                'maine', 'mujhe', 'mera', 'mere', 'mein', 'main',
+                # Masculine verb endings
+                'sakta', 'sakte', 'chahta', 'chahte', 'pahunchna', 'pahunchega',
+                'hoga', 'honge', 'hoon', 'raha', 'rahe', 'rata',
+                # Relationship terms (if user mentions being husband)
+                'husband', 'pati', 'meri patni', 'meri wife',
+            }
+
+            feminine_indicators = {
+                # First person feminine verb forms
+                'karungi', 'karengi', 'jaungi', 'jayengi',
+                'dekhti', 'dekhun', 'rahna', 'rehengi', 'rahungi',
+                # Feminine verb endings
+                'sakti', 'sakhti', 'sakti', 'chahti', 'chahte',
+                'chahiye', 'pahunchegi', 'hogi', 'hongi',
+                'hoon', 'rahi', 'rahen', 'rati',
+                # Relationship terms (if user mentions being wife)
+                'wife', 'patni', 'meri husband', 'mera pati',
+            }
+
+            male_score = 0
+            female_score = 0
+            total_indicators = 0
+
+            # Analyze last 15 messages for gender clues
+            for msg in messages[-15:]:
+                content = msg.get("text", msg.get("content", "")).lower()
+                if not content:
+                    continue
+
+                words = content.split()
+
+                # Count masculine indicators
+                for word in words:
+                    clean_word = word.strip('.,!?;:"\'-()[]{}')
+                    if clean_word in masculine_indicators:
+                        male_score += 1
+                        total_indicators += 1
+                    elif clean_word in feminine_indicators:
+                        female_score += 1
+                        total_indicators += 1
+
+                # Check for specific patterns (more weight)
+                # "Main X hoon" patterns
+                import re
+                male_patterns = [
+                    r'main\s+\w+\s+(?:karunga|jaunga|dunga|lunga|sakta)',
+                    r'mera\s+(?:beta|son|bhai|dad|papa)',
+                    r'maine\s+\w+\s+(?:kiya|liya|diya)',
+                ]
+
+                female_patterns = [
+                    r'main\s+\w+\s+(?:karungi|jaungi|dungi|lungi|sakti)',
+                    r'meri\s+(?:beti|daughter|sister|didi|mom|mummy)',
+                ]
+
+                for pattern in male_patterns:
+                    if re.search(pattern, content):
+                        male_score += 2
+                        total_indicators += 2
+
+                for pattern in female_patterns:
+                    if re.search(pattern, content):
+                        female_score += 2
+                        total_indicators += 2
+
+            if total_indicators == 0:
+                logger.info("[Enforcement Generator] No gender indicators found in messages")
+                return "unknown"
+
+            # Calculate ratio
+            male_ratio = male_score / total_indicators
+            female_ratio = female_score / total_indicators
+
+            # Determine gender with confidence threshold
+            confidence_threshold = 0.60  # Need 60% confidence
+
+            if male_ratio >= confidence_threshold:
+                detected = "male"
+            elif female_ratio >= confidence_threshold:
+                detected = "female"
+            else:
+                # Not enough confidence
+                detected = "unknown"
+
+            logger.info(
+                f"[Enforcement Generator] Gender detection: "
+                f"male_score={male_score}, female_score={female_score}, "
+                f"male_ratio={male_ratio:.2f}, female_ratio={female_ratio:.2f}, "
+                f"detected={detected}"
+            )
+
+            return detected
+
+        except Exception as e:
+            logger.error(
+                f"[Enforcement Generator] Error detecting gender: {e}",
+                exc_info=True
+            )
+            return "unknown"
 
     async def _fetch_mem0_memories(self, user_id: str) -> Dict[str, Any]:
         """
