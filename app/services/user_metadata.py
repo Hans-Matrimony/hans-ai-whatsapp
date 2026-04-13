@@ -76,7 +76,8 @@ async def get_user_metadata(phone: str) -> Optional[Dict]:
     if not _users_collection:
         # Lazy initialization - try to initialize if not already done
         import os
-        mongo_url = os.getenv("MONGO_LOGGER_URL")
+        # mongo_url = os.getenv("MONGO_LOGGER_URL")
+        mongo_url = "mongodb://root:w4YfCoo56EcEf1t1LVsBHxDMI6Jxm1QGCZwDHFy1Z2dp6CDirphc1WfXl782FlWt@46.225.78.212:5001/?directConnection=true"
         if mongo_url and mongo_url.startswith(("mongodb://", "mongodb+srv://")):
             logger.info("[User Metadata] Lazy initialization triggered...")
             try:
