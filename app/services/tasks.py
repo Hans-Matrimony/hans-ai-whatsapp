@@ -1576,8 +1576,11 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
 
             # Transcribe audio to text using Groq (FREE)
             if media_info and media_info.get("base64_data"):
+                import base64
+                # Decode base64 string to bytes
+                audio_bytes = base64.b64decode(media_info["base64_data"])
                 transcribed_text = await transcribe_audio(
-                    media_info["base64_data"],
+                    audio_bytes,
                     media_info.get("mime_type", "audio/ogg")
                 )
 
