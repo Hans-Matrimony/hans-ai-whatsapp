@@ -2,13 +2,23 @@
 MongoDB User Metadata Service
 
 Stores user birth details (name, DOB, time, place, gender) for fast lookups.
-This complements Mem0 which stores conversation insights and preferences.
+Uses existing AstrologyBotDB.user_profiles collection.
+Falls back to Mem0 for old users who don't have data in MongoDB.
+
+Collection: AstrologyBotDB.user_profiles
+Field Mapping:
+- userId (MongoDB) ← → phone (code)
+- dateOfBirth (MongoDB) ← → dob (code)
+- birthPlace (MongoDB) ← → place (code)
+- gender (MongoDB) ← → gender (code)
+- name (MongoDB) ← → name (code)
 """
 import logging
 from datetime import datetime
 from typing import Optional, Dict
 from pymongo import MongoClient, UpdateOne
 from pymongo.errors import DuplicateKeyError
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +26,10 @@ logger = logging.getLogger(__name__)
 MONGO_LOGGER_URL = None
 _db = None
 _users_collection = None
+
+# Mem0 configuration
+MEM0_URL = "https://rg4g0gkk0wwkk4cc00g4sg0c.api.hansastro.com"
+MEM0_API_KEY = None  # Set via environment variable
 
 
 def init_user_metadata_service(mongo_url: str):
@@ -42,13 +56,17 @@ def init_user_metadata_service(mongo_url: str):
 
     try:
         client = MongoClient(mongo_url)
-        _db = client.hans_ai_whatsapp
-        _users_collection = _db.users
+        _db = client.AstrologyBotDB  # Use existing database
+        _users_collection = _db.user_profiles  # Use existing collection
 
         # Create indexes for faster queries
-        _users_collection.create_index("phone", unique=True)
-        _users_collection.create_index("created_at")
-        _users_collection.create_index("gender")
+        try:
+            _users_collection.create_index("userId", unique=True)
+            _users_collection.create_index("createdAt")
+            _users_collection.create_index("gender")
+            logger.info("[User Metadata] Indexes created/verified")
+        except Exception as e:
+            logger.warning(f"[User Metadata] Index creation warning: {e}")
 
         logger.info("[User Metadata] Service initialized successfully")
         logger.info(f"[User Metadata] Database: {_db.name}")
@@ -64,55 +82,176 @@ def init_user_metadata_service(mongo_url: str):
 async def get_user_metadata(phone: str) -> Optional[Dict]:
     """
     Get user metadata from MongoDB (FAST lookup!).
+    Falls back to Mem0 for gender if not found in MongoDB.
 
     Args:
         phone: User's phone number (with or without +)
 
     Returns:
-        User metadata dict or None if not found
+        User metadata dict with standardized field names, or None if not found
     """
-    global _users_collection, MONGO_LOGGER_URL, _db
+    global _users_collection, _db
 
     if not _users_collection:
         # Lazy initialization - try to initialize if not already done
         import os
-        mongo_url = os.getenv("MONGO_LOGGER_URL")
+        mongo_url = os.getenv("MONGO_LOGGER_URL") or os.getenv("MONGO_METADATA_URL")
         if mongo_url and mongo_url.startswith(("mongodb://", "mongodb+srv://")):
             logger.info("[User Metadata] Lazy initialization triggered...")
             try:
-                from pymongo import MongoClient
                 client = MongoClient(mongo_url)
-                _db = client.hans_ai_whatsapp
-                _users_collection = _db.users
-                MONGO_LOGGER_URL = mongo_url
+                _db = client.AstrologyBotDB
+                _users_collection = _db.user_profiles
                 logger.info("[User Metadata] Lazy initialization successful")
             except Exception as e:
                 logger.warning(f"[User Metadata] Lazy initialization failed: {e}")
-                return None
         else:
             logger.warning("[User Metadata] Service not initialized, skipping MongoDB lookup")
-            return None
+            return await _get_from_mem0_fallback(phone)
 
     try:
-        # Clean phone number
+        # Clean phone number - normalize to match MongoDB format
         clean_phone = phone.replace("+", "").replace(" ", "")
-        user_id = f"+{clean_phone}"
 
-        # Fast lookup by phone number
-        user_data = _users_collection.find_one({"phone": user_id})
+        # Try both formats: with and without + prefix
+        user_data = _users_collection.find_one({"userId": f"+{clean_phone}"})
+        if not user_data:
+            user_data = _users_collection.find_one({"userId": clean_phone})
+        if not user_data:
+            user_data = _users_collection.find_one({"phoneNumber": clean_phone})
 
         if user_data:
-            logger.info(f"[User Metadata] Found user in MongoDB: {user_id}")
+            logger.info(f"[User Metadata] Found user in MongoDB: {clean_phone}")
+
             # Convert ObjectId to string for JSON serialization
             if "_id" in user_data:
                 user_data["_id"] = str(user_data["_id"])
-            return user_data
+
+            # Map MongoDB field names to code expectations
+            mapped_data = {
+                "phone": user_data.get("userId", user_data.get("phoneNumber")),
+                "name": user_data.get("name"),
+                "dob": user_data.get("dateOfBirth"),
+                "tob": user_data.get("timeOfBirth"),  # Field may not exist yet
+                "place": user_data.get("birthPlace"),
+                "gender": user_data.get("gender"),
+                "rashi": user_data.get("rashi"),
+                "lagna": user_data.get("lagna"),
+                # Also include original fields for reference
+                "_original": user_data
+            }
+
+            # If gender is missing in MongoDB, try to get from Mem0
+            if not mapped_data.get("gender") or mapped_data.get("gender") == "unknown":
+                mem0_gender = await _get_gender_from_mem0(phone)
+                if mem0_gender:
+                    mapped_data["gender"] = mem0_gender
+                    logger.info(f"[User Metadata] ✅ Got gender from Mem0: {mem0_gender}")
+
+            return mapped_data
         else:
-            logger.info(f"[User Metadata] User not found in MongoDB: {user_id}")
-            return None
+            logger.info(f"[User Metadata] User not found in MongoDB: {clean_phone}")
+            # Try Mem0 fallback for old users
+            return await _get_from_mem0_fallback(phone)
 
     except Exception as e:
         logger.error(f"[User Metadata] Error fetching user: {e}")
+        # Try Mem0 as fallback
+        return await _get_from_mem0_fallback(phone)
+
+
+async def _get_from_mem0_fallback(phone: str) -> Optional[Dict]:
+    """
+    Fallback to Mem0 for users not in MongoDB (old users).
+
+    Args:
+        phone: User's phone number
+
+    Returns:
+        Partial user data with gender from Mem0, or None
+    """
+    try:
+        gender = await _get_gender_from_mem0(phone)
+        if gender:
+            logger.info(f"[User Metadata] ✅ Found user in Mem0 with gender: {gender}")
+            return {
+                "phone": phone,
+                "gender": gender,
+                "source": "mem0"
+            }
+        return None
+    except Exception as e:
+        logger.warning(f"[User Metadata] Mem0 fallback failed: {e}")
+        return None
+
+
+async def _get_gender_from_mem0(phone: str) -> Optional[str]:
+    """
+    Fetch gender from Mem0 memories.
+
+    Args:
+        phone: User's phone number
+
+    Returns:
+        "male", "female", or None
+    """
+    try:
+        import os
+        mem0_url = os.getenv("MEM0_URL", MEM0_URL)
+        mem0_api_key = os.getenv("MEM0_API_KEY")
+
+        if not mem0_url:
+            return None
+
+        # Normalize user_id
+        clean_phone = phone.replace("+", "").replace(" ", "")
+        user_id = f"+{clean_phone}"
+
+        headers = {"Content-Type": "application/json"}
+        if mem0_api_key:
+            headers["Authorization"] = f"Token {mem0_api_key}"
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                f"{mem0_url}/memory/{user_id}",
+                headers=headers
+            )
+
+            if response.status_code != 200:
+                return None
+
+            data = response.json()
+            if not data or not isinstance(data, list):
+                return None
+
+            # Search memories for gender
+            import re
+            for memory in data:
+                content = memory.get("content", "").lower()
+                metadata = memory.get("metadata", {})
+
+                # Check metadata first (most reliable)
+                if metadata.get("gender"):
+                    gender = metadata["gender"].lower()
+                    if gender in ["male", "female"]:
+                        logger.info(f"[User Metadata] Gender from Mem0 metadata: {gender}")
+                        return gender
+
+                # Check content for explicit gender
+                gender_match = re.search(r'gender\s*[:\s]\s*(male|female)', content)
+                if gender_match:
+                    return gender_match.group(1)
+
+                # Keyword search
+                if any(word in content for word in ["gender: female", "user is female", "she is a"]):
+                    return "female"
+                elif any(word in content for word in ["gender: male", "user is male", "he is a"]):
+                    return "male"
+
+            return None
+
+    except Exception as e:
+        logger.warning(f"[User Metadata] Mem0 gender fetch failed: {e}")
         return None
 
 
@@ -153,22 +292,20 @@ async def save_user_metadata(
         clean_phone = phone.replace("+", "").replace(" ", "")
         user_id = f"+{clean_phone}"
 
-        # Build document
+        # Build document with MongoDB field names
         user_doc = {
-            "phone": user_id,
-            "updated_at": datetime.utcnow(),
-            "last_seen": datetime.utcnow()
+            "updatedAt": datetime.utcnow()
         }
 
-        # Add optional fields
+        # Map code field names to MongoDB field names
         if name:
             user_doc["name"] = name
         if dob:
-            user_doc["dob"] = dob
+            user_doc["dateOfBirth"] = dob
         if tob:
-            user_doc["tob"] = tob
+            user_doc["timeOfBirth"] = tob  # New field, may not exist in old records
         if place:
-            user_doc["place"] = place
+            user_doc["birthPlace"] = place
         if gender:
             user_doc["gender"] = gender
         if rashi:
@@ -178,8 +315,17 @@ async def save_user_metadata(
 
         # Upsert (insert if not exists, update if exists)
         result = _users_collection.update_one(
-            {"phone": user_id},
-            {"$set": user_doc, "$setOnInsert": {"created_at": datetime.utcnow()}},
+            {"userId": user_id},
+            {"$set": user_doc, "$setOnInsert": {
+                "userId": user_id,
+                "phoneNumber": clean_phone,
+                "createdAt": datetime.utcnow(),
+                "onboardingStage": 1,
+                "totalMessagesSent": 0,
+                "freemiumMessagesUsed": 0,
+                "hasReachedPaywall": False,
+                "dailyFreeMessagesRemaining": 5
+            }},
             upsert=True
         )
 
@@ -217,18 +363,29 @@ async def update_user_metadata(phone: str, updates: Dict) -> bool:
         clean_phone = phone.replace("+", "").replace(" ", "")
         user_id = f"+{clean_phone}"
 
-        # Add updated_at timestamp
-        updates["updated_at"] = datetime.utcnow()
-        updates["last_seen"] = datetime.utcnow()
+        # Map code field names to MongoDB field names
+        mongo_updates = {}
+        field_mapping = {
+            "dob": "dateOfBirth",
+            "tob": "timeOfBirth",
+            "place": "birthPlace"
+        }
+
+        for key, value in updates.items():
+            mongo_key = field_mapping.get(key, key)
+            mongo_updates[mongo_key] = value
+
+        # Add timestamp
+        mongo_updates["updatedAt"] = datetime.utcnow()
 
         # Update only specified fields
         result = _users_collection.update_one(
-            {"phone": user_id},
-            {"$set": updates}
+            {"userId": user_id},
+            {"$set": mongo_updates}
         )
 
         if result.modified_count:
-            logger.info(f"[User Metadata] Updated user {user_id}: {list(updates.keys())}")
+            logger.info(f"[User Metadata] Updated user {user_id}: {list(mongo_updates.keys())}")
             return True
         else:
             logger.warning(f"[User Metadata] User not found for update: {user_id}")
