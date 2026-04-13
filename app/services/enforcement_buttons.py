@@ -386,6 +386,8 @@ class RazorpayWhatsAppPaymentSender:
                 "notes": {
                     "plan_id": plan_id,
                     "user_id": user_id,
+                    "planId": plan_id,
+                    "userId": user_id,
                     "phone": phone
                 },
                 "notify": {
