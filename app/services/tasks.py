@@ -1083,18 +1083,10 @@ async def _check_subscription_access(phone: str) -> dict:
         logger.debug("[Subscription] SUBSCRIPTIONS_URL not configured, skipping check")
         return {"access": "trial", "skip_reason": "no_url"}
 
-    # Skip subscription check if not the test number (testing mode)
+    # REMOVED: Test number restriction - ALL users with subscriptions should be checked
+    # Previously: Only test numbers were checked, everyone else was marked as "trial"
+    # Now: All users get subscription checks, paying users get access
     clean_phone = phone.replace("+", "").replace(" ", "")
-
-    # Handle both formats: with country code (919760347653) and without (9760347653)
-    test_numbers = [SUBSCRIPTION_TEST_NUMBER]
-    if SUBSCRIPTION_TEST_NUMBER.startswith("91"):
-        # Also check without country code
-        test_numbers.append(SUBSCRIPTION_TEST_NUMBER[2:])
-
-    if clean_phone not in test_numbers:
-        logger.debug(f"[Subscription] Not test number ({clean_phone} not in {test_numbers}), skipping check")
-        return {"access": "trial", "skip_reason": "not_test_number"}
 
     # Check subscription status
     user_id = f"+{clean_phone}"
