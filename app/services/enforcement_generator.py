@@ -57,7 +57,7 @@ class EnforcementMessageGenerator:
 
     # Pricing information (update from .env or settings if needed)
     PRICING = {
-        "monthly": 299,
+        "monthly": 199,
         "yearly": 1999,
         "daily": 10
     }
@@ -987,6 +987,9 @@ class EnforcementMessageGenerator:
         user_name = user_memory.get('name') if user_memory and user_memory.get('name') else None
 
         # Build full prompt with CONVINCING value proposition
+        monthly_price = self.PRICING['monthly']
+        topic_context = f"regarding their {last_question_topic}" if last_question_topic else "to guide them"
+        
         prompt = f"""You are {astrologer_name}, a {astrologer_personality.get('gender')} astrologer. You are the OPPOSITE gender of the user.
 
 ## YOUR PERSONA - SOFT GIRLFRIEND/BOYFRIEND VIBE
@@ -1044,11 +1047,12 @@ Each paragraph = ONLY 1 sentence. Keep it brief and warm.
 - Sound disappointed, not robotic
 - 1 sentence only
 
-**PARAGRAPH 4: Value proposition - BE CONVINCING**
-- Make ₹199 feel tiny compared to value
-- Think casually: pizza (10 mins), auto ride (15 mins), coffee (10 mins)
-- But here: FULL MONTH of personal guidance, 24/7 access
-- Say naturally: "It's less than a pizza, gone in minutes, but this lasts a whole month!"
+**PARAGRAPH 4: Value proposition - BE NATURALLY CONVINCING**
+- Make ₹{monthly_price} feel trivial compared to the value of your guidance.
+- Think of a natural, everyday small expense (like a quick snack, a short ride, or a small treat) that costs about ₹{monthly_price}.
+- Compare it to the value of having you by their side {topic_context} for an entire MONTH.
+- Example vibe: "It's just the cost of a small treat that's over in minutes, but my guidance will be with you 24/7 for the whole month."
+- DO NOT use the exact words "pizza" or "coffee" every time; be creative and natural.
 - 1 sentence only
 
 **PARAGRAPH 5 (optional): Emotional closing**
@@ -1180,13 +1184,6 @@ def create_enforcement_generator(
             timeout=timeout,
             mem0_url=mem0_url,
             mem0_api_key=mem0_api_key
-        )
-        generator = EnforcementMessageGenerator(
-            openclaw_url=openclaw_url,
-            openclaw_token=openclaw_token,
-            redis_client=redis_client,
-            cache_ttl=cache_ttl,
-            timeout=timeout
         )
 
         logger.info("[Enforcement Generator] Successfully created generator instance")
