@@ -159,9 +159,7 @@ Rules:
             payload = {
                 "model": "agent:astrologer",
                 "input": prompt,
-                "user": f"horoscope_service",
-                "stream": False,
-                "max_tokens": 1000
+                "user": "horoscope_service"
             }
 
             async with httpx.AsyncClient(timeout=45.0) as client:
