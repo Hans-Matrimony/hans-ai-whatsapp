@@ -1083,18 +1083,10 @@ async def _check_subscription_access(phone: str) -> dict:
         logger.debug("[Subscription] SUBSCRIPTIONS_URL not configured, skipping check")
         return {"access": "trial", "skip_reason": "no_url"}
 
-    # Skip subscription check if not the test number (testing mode)
+    # REMOVED: Test number restriction - ALL users with subscriptions should be checked
+    # Previously: Only test numbers were checked, everyone else was marked as "trial"
+    # Now: All users get subscription checks, paying users get access
     clean_phone = phone.replace("+", "").replace(" ", "")
-
-    # Handle both formats: with country code (919760347653) and without (9760347653)
-    test_numbers = [SUBSCRIPTION_TEST_NUMBER]
-    if SUBSCRIPTION_TEST_NUMBER.startswith("91"):
-        # Also check without country code
-        test_numbers.append(SUBSCRIPTION_TEST_NUMBER[2:])
-
-    if clean_phone not in test_numbers:
-        logger.debug(f"[Subscription] Not test number ({clean_phone} not in {test_numbers}), skipping check")
-        return {"access": "trial", "skip_reason": "not_test_number"}
 
     # Check subscription status
     user_id = f"+{clean_phone}"
@@ -1601,74 +1593,16 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
     # ===================================================================
 
     # ==================== PAY COMMAND CHECK (GLOBAL) ====================
-    # Check for PAY command FIRST, before subscription check
-    # This allows ANY user to request plan options
-
+    # PAY command returns generic "didn't understand" message
+    # Payment is handled via Razorpay WhatsApp payment buttons only
     pay_command = message.strip().upper()
     if pay_command in ["PAY", "PAYMENT", "PLAN", "PLANS", "SUBSCRIBE"]:
-        # Check if user already has an active subscription
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                access_response = await client.get(
-                    f"{SUBSCRIPTIONS_URL}/users/{user_id}/access-check"
-                )
-                if access_response.status_code == 200:
-                    access_data = access_response.json()
-                    access_status = access_data.get("access")
-
-                    # If user has active subscription, show status instead of plans
-                    if access_status in ["full_access", "active"]:
-                        logger.info(f"[PAY Command] User {user_id} has active subscription: {access_status}")
-
-                        # Get subscription details
-                        sub_response = await client.get(
-                            f"{SUBSCRIPTIONS_URL}/subscriptions/{user_id}"
-                        )
-
-                        status_message = "✅ **You already have an active subscription!**\n\n"
-
-                        if sub_response.status_code == 200:
-                            sub_data = sub_response.json()
-                            subscription = sub_data.get("subscription", {})
-
-                            plan_name = subscription.get("plan_name", "Premium Plan")
-                            start_date = subscription.get("start_date")
-                            end_date = subscription.get("end_date")
-
-                            if start_date and end_date:
-                                start = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
-                                end = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
-                                status_message += f"📅 **Plan:** {plan_name}\n"
-                                status_message += f"🗓️ **Started:** {start.strftime('%d %b %Y')}\n"
-                                status_message += f"⏰ **Expires:** {end.strftime('%d %b %Y')}\n\n"
-                                status_message += "Enjoy unlimited access to all features! 💫"
-                            else:
-                                status_message += f"📅 **Plan:** {plan_name}\n\n"
-                                status_message += "Your subscription is active. Enjoy unlimited access! 💫"
-                        else:
-                            status_message += "Your subscription is active. Enjoy unlimited access! 💫"
-
-                        async with httpx.AsyncClient(timeout=30.0) as msg_client:
-                            await _send_whatsapp_message(msg_client, phone, status_message)
-                        await _log_to_mongo(session_id, user_id, "assistant", status_message, "whatsapp")
-                        return {"status": "subscription_shown"}
-        except Exception as e:
-            logger.warning(f"[PAY Command] Failed to check subscription status: {e}")
-
-        # Send beautiful interactive list with plans
-        success = await _send_plans_interactive(phone)
-        if success:
-            # Log a simple message (the actual list is sent via WhatsApp API)
-            log_message = "💫 Subscription plans sent - please select a plan from the list"
-            await _log_to_mongo(session_id, user_id, "assistant", log_message, "whatsapp")
-            return {"status": "plans_sent"}
-        else:
-            # Fallback to text message if interactive list fails
-            plans_message = await _get_plans_message()
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                await _send_whatsapp_message(client, phone, plans_message)
-            await _log_to_mongo(session_id, user_id, "assistant", plans_message, "whatsapp")
-            return {"status": "plans_sent"}
+        logger.info(f"[PAY Command] User typed '{pay_command}' - returning generic response")
+        generic_message = "I didn't get that. Please ask me about astrology, kundli, marriage, career, or any life guidance! 💫"
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            await _send_whatsapp_message(client, phone, generic_message)
+        await _log_to_mongo(session_id, user_id, "assistant", generic_message, "whatsapp")
+        return {"status": "generic_response"}
 
     # ==================== REFERRAL COMMAND (GLOBAL) ====================
     # Check for REFER command - share with friends
@@ -1842,30 +1776,19 @@ Copy your code and share! 💫"""
                         #         await _log_to_mongo(session_id, user_id, "assistant", flow_message, "whatsapp")
                         #         return {"status": "payment_flow_sent", "flow_id": flow_message_id}
 
-                        # Generate Razorpay payment link (PRIMARY METHOD)
-                        # Detect language and astrologer for personalized payment confirmation
-                        user_language = _detect_language(message)
-                        user_gender = await get_user_gender(phone, message)
-                        astrologer = get_astrologer_personality(user_gender)
-                        astrologer_name = astrologer["name"]
-
-                        payment_link = await _generate_payment_link(
-                            user_id,
-                            plan_number=plan_number if not (plan_id_from_button or plan_id_from_name) else None,
-                            plan_id=plan_id_from_button or plan_id_from_name,
-                            language=user_language,
-                            astrologer_name=astrologer_name
+                        # DISABLED: Direct payment link sending
+                        # Payment is now handled via Razorpay WhatsApp payment buttons only
+                        # The payment buttons are shown automatically with enforcement messages
+                        logger.info(f"[Plan Selection] Plan {plan_name} selected - directing user to payment button")
+                        info_message = (
+                            f"Great! You selected **{plan_name}**. 💫\n\n"
+                            f"Please complete the payment using the payment button shown in my previous message.\n\n"
+                            f"If you don't see the payment button, just send me a message and I'll show it again!"
                         )
-                        if payment_link:
-                            link_message = (
-                                f"Great! You selected **{plan_name}**.\n\n"
-                                f"Click here to complete payment: {payment_link}\n\n"
-                                f"After payment, come back and send me a message! 💫"
-                            )
-                            async with httpx.AsyncClient(timeout=30.0) as client:
-                                await _send_whatsapp_message(client, phone, link_message)
-                            await _log_to_mongo(session_id, user_id, "assistant", link_message, "whatsapp")
-                            return {"status": "payment_link_sent", "payment_link": payment_link}
+                        async with httpx.AsyncClient(timeout=30.0) as client:
+                            await _send_whatsapp_message(client, phone, info_message)
+                        await _log_to_mongo(session_id, user_id, "assistant", info_message, "whatsapp")
+                        return {"status": "plan_selected", "plan_name": plan_name}
 
         except Exception as e:
             logger.error(f"Error processing plan selection: {e}", exc_info=True)
@@ -1989,7 +1912,7 @@ Copy your code and share! 💫"""
 
     # Message limits for all users
     FREE_MESSAGE_LIMIT = 25
-    DAILY_MESSAGE_LIMIT = 5
+    DAILY_MESSAGE_LIMIT = 6
 
     logger.info(f"[Enforcement] Checking message limits for {phone}")
 
@@ -2111,7 +2034,8 @@ Copy your code and share! 💫"""
                                 language=user_language,
                                 message_count=total_messages,
                                 today_messages=today_messages,
-                                mongo_logger_url=MONGO_LOGGER_URL
+                                mongo_logger_url=MONGO_LOGGER_URL,
+                                current_message=message  # Pass current user message
                             )
                             if limit_message:
                                 logger.info(f"[Enforcement] ✅ Successfully generated AI message for daily limit")
@@ -2129,7 +2053,7 @@ Copy your code and share! 💫"""
                                 limit_message = (
                                     f"I'm really sorry, but your free messages and daily limit are done for today 😔\n\n"
                                     f"I feel bad that I can't help you right now. It's a system limitation, and I feel terrible about it.\n\n"
-                                    f"If you'd like to continue, type 'PAY' to get a subscription. "
+                                    f"Please use the payment button below to continue unlimited guidance. "
                                     f"Or you can wait until tomorrow - you'll get 5 free messages tomorrow.\n\n"
                                     f"Really sorry about this 🙏"
                                 )
@@ -2139,7 +2063,7 @@ Copy your code and share! 💫"""
                                     f"Main bilkul maafi chahta hoon ki aaj aur aapke free messages khatam ho gaye 😔\n\n"
                                     f"Mujhe bohot bura lag raha hai ki main aapki abhi madad nahi kar pa raha. "
                                     f"System ki limitation hai yeh, main kar bhi kya sakta hoon?\n\n"
-                                    f"Agar aapko raasta chahiye toh 'PAY' type karke subscription le sakti ho. "
+                                    f"Agar aapko raasta chahiye toh payment button use karke subscription le sakti ho. "
                                     f"Ya fir kal ka wait kar sakte ho - kal aapko 5 free messages mil jayengi.\n\n"
                                     f"Maf kijiye ga 🙏"
                                 )
@@ -2150,7 +2074,7 @@ Copy your code and share! 💫"""
                                 limit_message = (
                                     f"I'm really sorry, but your free messages and daily limit are done for today 😔\n\n"
                                     f"I feel bad that I can't help you right now. It's a system limitation, and I feel terrible about it.\n\n"
-                                    f"If you'd like to continue, type 'PAY' to get a subscription. "
+                                    f"Please use the payment button below to continue unlimited guidance. "
                                     f"Or you can wait until tomorrow - you'll get 5 free messages tomorrow.\n\n"
                                     f"Really sorry about this 🙏"
                                 )
@@ -2166,7 +2090,7 @@ Copy your code and share! 💫"""
                                 limit_message = (
                                     f"I'm really sorry, but your free messages and daily limit are done for today 😔\n\n"
                                     f"I feel bad that I can't help you right now. It's a system limitation, and I feel terrible about it.\n\n"
-                                    f"If you'd like to continue, type 'PAY' to get a subscription. "
+                                    f"Please use the payment button below to continue unlimited guidance. "
                                     f"Or you can wait until tomorrow - you'll get 5 free messages tomorrow.\n\n"
                                     f"Really sorry about this 🙏"
                                 )
@@ -2176,7 +2100,7 @@ Copy your code and share! 💫"""
                                     f"Main bilkul maafi chahta hoon ki aaj aur aapke free messages khatam ho gaye 😔\n\n"
                                     f"Mujhe bohot bura lag raha hai ki main aapki abhi madad nahi kar pa raha. "
                                     f"System ki limitation hai yeh, main kar bhi kya sakta hoon?\n\n"
-                                    f"Agar aapko raasta chahiye toh 'PAY' type karke subscription le sakti ho. "
+                                    f"Agar aapko raasta chahiye toh payment button use karke subscription le sakti ho. "
                                     f"Ya fir kal ka wait kar sakte ho - kal aapko 5 free messages mil jayengi.\n\n"
                                     f"Maf kijiye ga 🙏"
                                 )
@@ -2187,7 +2111,7 @@ Copy your code and share! 💫"""
                                 limit_message = (
                                     f"I'm really sorry, but your free messages and daily limit are done for today 😔\n\n"
                                     f"I feel bad that I can't help you right now. It's a system limitation, and I feel terrible about it.\n\n"
-                                    f"If you'd like to continue, type 'PAY' to get a subscription. "
+                                    f"Please use the payment button below to continue unlimited guidance. "
                                     f"Or you can wait until tomorrow - you'll get 5 free messages tomorrow.\n\n"
                                     f"Really sorry about this 🙏"
                                 )
@@ -2196,7 +2120,7 @@ Copy your code and share! 💫"""
                                 limit_message = (
                                     f"I'm really sorry, but your free messages and daily limit are done for today 😔\n\n"
                                     f"I feel bad that I can't help you right now. It's a system limitation, and I feel terrible about it.\n\n"
-                                    f"If you'd like to continue, type 'PAY' to get a subscription. "
+                                    f"Please use the payment button below to continue unlimited guidance. "
                                     f"Or you can wait until tomorrow - you'll get 5 free messages tomorrow.\n\n"
                                     f"Really sorry about this 🙏"
                                 )
@@ -2340,7 +2264,8 @@ Copy your code and share! 💫"""
                     language=user_language,
                     message_count=total_messages,
                     today_messages=today_messages,
-                    mongo_logger_url=MONGO_LOGGER_URL
+                    mongo_logger_url=MONGO_LOGGER_URL,
+                    current_message=message  # Pass current user message
                 )
                 if payment_message:
                     logger.info(f"[Subscription] Successfully generated AI message for payment nudge")
@@ -2480,7 +2405,8 @@ Copy your code and share! 💫"""
                                     language=user_language,
                                     message_count=limit_check.get("messageCount", 40),
                                     today_messages=0,
-                                    mongo_logger_url=MONGO_LOGGER_URL
+                                    mongo_logger_url=MONGO_LOGGER_URL,
+                                    current_message=message  # Pass current user message
                                 )
 
                                 if ai_message:

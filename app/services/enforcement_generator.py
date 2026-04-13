@@ -107,7 +107,8 @@ class EnforcementMessageGenerator:
         language: str,
         message_count: int = 0,
         today_messages: int = 0,
-        mongo_logger_url: Optional[str] = None
+        mongo_logger_url: Optional[str] = None,
+        current_message: str = None
     ) -> Optional[str]:
         """
         Generate AI-powered contextual enforcement message
@@ -123,6 +124,7 @@ class EnforcementMessageGenerator:
             message_count: Total messages sent by user
             today_messages: Messages sent today
             mongo_logger_url: MongoDB URL for fetching conversation context
+            current_message: The user's current message/question that triggered enforcement
 
         Returns:
             Generated message or None if generation failed
@@ -137,7 +139,37 @@ class EnforcementMessageGenerator:
                 f"for user {user_id}"
             )
 
-            # Step 1.5: Fetch mem0 memories for personalization
+            # Step 1.5: Detect language and gender from recent conversation
+            detected_language = self._detect_language_from_conversation(recent_messages)
+            logger.info(
+                f"[Enforcement Generator] Detected language from MongoDB: {detected_language} "
+                f"(passed language: {language})"
+            )
+            # Use detected language from conversation instead of passed parameter
+            language = detected_language
+
+            # Detect gender from conversation
+            detected_gender = self._detect_gender_from_conversation(recent_messages)
+            logger.info(
+                f"[Enforcement Generator] Detected gender from MongoDB: {detected_gender} "
+                f"(passed gender: {user_gender})"
+            )
+            # Use detected gender if it's more certain than passed parameter
+            if detected_gender in ['male', 'female']:
+                user_gender = detected_gender
+                # Select astrologer based on detected gender (opposite gender)
+                if user_gender == "male":
+                    astrologer_name = "Meera"  # Female astrologer for male user
+                    astrologer_personality = self.PERSONALITIES["Meera"]
+                else:
+                    astrologer_name = "Aarav"  # Male astrologer for female user
+                    astrologer_personality = self.PERSONALITIES["Aarav"]
+                logger.info(
+                    f"[Enforcement Generator] Updated astrologer to {astrologer_name} "
+                    f"based on detected gender: {user_gender}"
+                )
+
+            # Step 1.6: Fetch mem0 memories for personalization
             user_memory = await self._fetch_mem0_memories(user_id)
             logger.info(
                 f"[Enforcement Generator] User memory from mem0: {list(user_memory.keys())}"
@@ -177,7 +209,8 @@ class EnforcementMessageGenerator:
                 message_count=message_count,
                 today_messages=today_messages,
                 recent_messages=recent_messages,
-                user_memory=user_memory
+                user_memory=user_memory,
+                current_message=current_message
             )
 
             # Step 5: Call OpenClaw API
@@ -286,6 +319,248 @@ class EnforcementMessageGenerator:
                 exc_info=True
             )
             return []
+
+    def _detect_language_from_conversation(
+        self,
+        messages: List[Dict[str, Any]]
+    ) -> str:
+        """
+        Detect user's language from their recent conversation history
+
+        Analyzes the user's messages to determine if they communicate in:
+        - English (predominantly English)
+        - Hinglish (Hindi words written in English script)
+
+        Args:
+            messages: List of user messages from MongoDB
+
+        Returns:
+            "english" or "hinglish"
+        """
+        try:
+            if not messages:
+                logger.info("[Enforcement Generator] No messages to detect language, defaulting to english")
+                return "english"
+
+            # Common Hinglish words (Roman script Hindi)
+            hinglish_keywords = {
+                # Pronouns & common words
+                'mai', 'me', 'main', 'mera', 'meri', 'mera', 'tera', 'teri', 'tum', 'tumhara',
+                'ap', 'aap', 'aapka', 'aapki', 'hamara', 'hamari', 'uska', 'uski',
+                # Verbs & auxiliaries
+                'hai', 'hain', 'ho', 'hoga', 'hogi', 'hon', 'tha', 'thi', 'the',
+                'kar', 'ke', 'ki', 'ko', 'se', 'mein', 'me', 'par', 'liye', 'wajahse',
+                'karta', 'karti', 'karte', 'sakta', 'sakti', 'sake', 'chahta', 'chahti',
+                'chaiye', ' Lena', 'dene', 'de', 'diya', 'dijiye', 'kijiye', 'batana',
+                'bata', 'bolo', 'bol', 'aana', 'jana', 'ana', 'ja', 'raha', 'rahi', 'rahe',
+                'karunga', 'karegi', 'karenge', 'karun', 'kar', 'rakha', 'rakhi', 'hain',
+                # Time & place
+                'abhi', 'ab', 'kal', 'aaj', 'aj', 'pehli', 'pichli', 'baad', 'mein',
+                'kabhi', 'kab', 'kahan', 'kaise', 'kitna', 'kitni', 'kitne', 'itna',
+                'itni', 'bahut', 'bohot', 'zyada', 'kam', 'thoda', 'bahut', 'kaafi',
+                # Question words
+                'kya', 'kyun', 'kyunki', 'kisko', 'kiska', 'kaun', 'kaunsa', 'kahan',
+                # Connecting words
+                'aur', 'or', 'lekin', 'magar', 'par', 'toh', 'to', 'bhi', 'hi', 'tak',
+                'vaadi', 'ke_sath', 'ke_bina', 'ke_liye',
+                # Feelings & reactions
+                'acha', 'achha', 'theek', 'thik', 'sahi', 'galat', 'maza', 'maza',
+                'dushman', 'dost', 'pyaar', 'pyar', 'love', 'hate', 'ghussa', 'gussa',
+                'khush', 'udaaS', 'naraaz', 'khushi', 'gussaa', 'dard', 'pain',
+                # Family & relations
+                'mummy', 'papa', 'mummyji', 'papaaji', 'maa', 'baap', 'beti', 'beta',
+                'bhai', 'behen', 'didi', 'bhaiya', 'family', 'ghar', 'gharpe',
+                # Astrology specific
+                'kundli', 'kundli', 'rashi', 'lagna', 'grah', 'nakshatra', 'dasha',
+                'mahadasha', 'vivah', 'shaadi', 'marriage', 'kundli', 'janam', 'patrika',
+                # Common phrases
+                'ji', 'jii', 'sahij', 'sahi', 'bilkul', 'pakka', 'shayad', 'hmm',
+                'haan', 'haanji', 'hanji', 'na', 'nahi', 'nahee', 'ok', 'okay',
+                'sorry', 'thank', 'thanks', 'welcome', 'please', 'kripaya',
+                # Actions
+                'dekhna', 'dekho', 'sunna', 'suno', 'samajhna', 'samajh', 'samjho',
+                'pata', 'maloom', 'chal', 'chalo', 'ruk', 'ruko', 'wait', 'karo',
+                # Numbers & quantities
+                'ek', 'do', 'teen', 'char', 'paanch', 'cheh', 'saath', 'aath', 'nau', 'das',
+                'bees', 'tees', 'chaalis', 'pachas', 'sattar', 'assi', 'nabbe',
+            }
+
+            # Analyze user's last 10 messages
+            hinglish_count = 0
+            total_messages = 0
+            total_words = 0
+
+            for msg in messages[-10:]:  # Check last 10 messages
+                content = msg.get("text", msg.get("content", ""))
+                if not content:
+                    continue
+
+                total_messages += 1
+                words = content.lower().split()
+                total_words += len(words)
+
+                # Count Hinglish keywords
+                for word in words:
+                    clean_word = word.strip('.,!?;:"\'-()[]{}')
+                    if clean_word in hinglish_keywords:
+                        hinglish_count += 1
+
+            if total_messages == 0 or total_words == 0:
+                logger.info("[Enforcement Generator] No valid messages to analyze, defaulting to english")
+                return "english"
+
+            # Calculate Hinglish ratio
+            hinglish_ratio = hinglish_count / total_words
+
+            # If more than 8% of words are Hinglish keywords, classify as Hinglish
+            # (Lowered threshold to be more sensitive)
+            is_hinglish = hinglish_ratio > 0.08
+
+            detected = "hinglish" if is_hinglish else "english"
+
+            logger.info(
+                f"[Enforcement Generator] Language detection: "
+                f"hinglish_words={hinglish_count}, total_words={total_words}, "
+                f"ratio={hinglish_ratio:.3f}, detected={detected}"
+            )
+
+            return detected
+
+        except Exception as e:
+            logger.error(
+                f"[Enforcement Generator] Error detecting language: {e}",
+                exc_info=True
+            )
+            return "english"  # Default to English on error
+
+    def _detect_gender_from_conversation(
+        self,
+        messages: List[Dict[str, Any]]
+    ) -> str:
+        """
+        Detect user's gender from their conversation history
+
+        Analyzes pronouns, verbs, and self-references to determine if user is:
+        - male (uses masculine verb forms: karunga, sakta, hoon, etc.)
+        - female (uses feminine verb forms: karungi, sakti, hoon, etc.)
+
+        Args:
+            messages: List of user messages from MongoDB
+
+        Returns:
+            "male", "female", or "unknown"
+        """
+        try:
+            if not messages:
+                logger.info("[Enforcement Generator] No messages to detect gender, returning unknown")
+                return "unknown"
+
+            # Gender indicators in Hindi/Hinglish
+            masculine_indicators = {
+                # First person masculine verb forms
+                'karunga', 'karenga', 'karun', 'karunga', 'jaunga', 'jayenge',
+                'dekhta', 'dekhte', 'dekhun', 'rahana', 'rehenga', 'rahun',
+                # Pronouns & self-reference (masculine context)
+                'maine', 'mujhe', 'mera', 'mere', 'mein', 'main',
+                # Masculine verb endings
+                'sakta', 'sakte', 'chahta', 'chahte', 'pahunchna', 'pahunchega',
+                'hoga', 'honge', 'hoon', 'raha', 'rahe', 'rata',
+                # Relationship terms (if user mentions being husband)
+                'husband', 'pati', 'meri patni', 'meri wife',
+            }
+
+            feminine_indicators = {
+                # First person feminine verb forms
+                'karungi', 'karengi', 'jaungi', 'jayengi',
+                'dekhti', 'dekhun', 'rahna', 'rehengi', 'rahungi',
+                # Feminine verb endings
+                'sakti', 'sakhti', 'sakti', 'chahti', 'chahte',
+                'chahiye', 'pahunchegi', 'hogi', 'hongi',
+                'hoon', 'rahi', 'rahen', 'rati',
+                # Relationship terms (if user mentions being wife)
+                'wife', 'patni', 'meri husband', 'mera pati',
+            }
+
+            male_score = 0
+            female_score = 0
+            total_indicators = 0
+
+            # Analyze last 15 messages for gender clues
+            for msg in messages[-15:]:
+                content = msg.get("text", msg.get("content", "")).lower()
+                if not content:
+                    continue
+
+                words = content.split()
+
+                # Count masculine indicators
+                for word in words:
+                    clean_word = word.strip('.,!?;:"\'-()[]{}')
+                    if clean_word in masculine_indicators:
+                        male_score += 1
+                        total_indicators += 1
+                    elif clean_word in feminine_indicators:
+                        female_score += 1
+                        total_indicators += 1
+
+                # Check for specific patterns (more weight)
+                # "Main X hoon" patterns
+                import re
+                male_patterns = [
+                    r'main\s+\w+\s+(?:karunga|jaunga|dunga|lunga|sakta)',
+                    r'mera\s+(?:beta|son|bhai|dad|papa)',
+                    r'maine\s+\w+\s+(?:kiya|liya|diya)',
+                ]
+
+                female_patterns = [
+                    r'main\s+\w+\s+(?:karungi|jaungi|dungi|lungi|sakti)',
+                    r'meri\s+(?:beti|daughter|sister|didi|mom|mummy)',
+                ]
+
+                for pattern in male_patterns:
+                    if re.search(pattern, content):
+                        male_score += 2
+                        total_indicators += 2
+
+                for pattern in female_patterns:
+                    if re.search(pattern, content):
+                        female_score += 2
+                        total_indicators += 2
+
+            if total_indicators == 0:
+                logger.info("[Enforcement Generator] No gender indicators found in messages")
+                return "unknown"
+
+            # Calculate ratio
+            male_ratio = male_score / total_indicators
+            female_ratio = female_score / total_indicators
+
+            # Determine gender with confidence threshold
+            confidence_threshold = 0.60  # Need 60% confidence
+
+            if male_ratio >= confidence_threshold:
+                detected = "male"
+            elif female_ratio >= confidence_threshold:
+                detected = "female"
+            else:
+                # Not enough confidence
+                detected = "unknown"
+
+            logger.info(
+                f"[Enforcement Generator] Gender detection: "
+                f"male_score={male_score}, female_score={female_score}, "
+                f"male_ratio={male_ratio:.2f}, female_ratio={female_ratio:.2f}, "
+                f"detected={detected}"
+            )
+
+            return detected
+
+        except Exception as e:
+            logger.error(
+                f"[Enforcement Generator] Error detecting gender: {e}",
+                exc_info=True
+            )
+            return "unknown"
 
     async def _fetch_mem0_memories(self, user_id: str) -> Dict[str, Any]:
         """
@@ -448,7 +723,8 @@ class EnforcementMessageGenerator:
         message_count: int,
         today_messages: int,
         recent_messages: List[Dict[str, Any]],
-        user_memory: Dict[str, Any] = None
+        user_memory: Dict[str, Any] = None,
+        current_message: str = None
     ) -> str:
         """
         Build AI prompt for message generation
@@ -462,6 +738,8 @@ class EnforcementMessageGenerator:
             message_count: Total messages
             today_messages: Messages today
             recent_messages: Recent conversation
+            user_memory: User's mem0 memories
+            current_message: The user's current message/question
 
         Returns:
             Prompt string for OpenClaw API
@@ -546,7 +824,7 @@ class EnforcementMessageGenerator:
             )
         elif enforcement_type == "daily_limit":
             enforcement_context = (
-                f"The user has sent {today_messages}/5 messages today. "
+                f"The user has sent {today_messages}/6 messages today. "
                 f"DAILY LIMIT REACHED. Cannot send more messages today. "
             )
         elif enforcement_type == "payment_nudge":
@@ -562,106 +840,136 @@ class EnforcementMessageGenerator:
             f"₹{self.PRICING['daily']}/day"
         )
 
-        # Get the user's last question/message for better context
+        # Get the user's CURRENT question/message for better context
+        # PRIORITY: current_message (what they just asked) > recent_messages
         last_user_message = ""
         last_question_topic = None
 
-        if recent_messages:
+        # First, try to use the current message that triggered enforcement
+        if current_message and len(current_message.strip()) > 3:
+            last_user_message = current_message.strip()
+            logger.info(f"[Enforcement Generator] Using CURRENT message: {last_user_message[:50]}...")
+        # Fallback: use the last message from MongoDB history
+        elif recent_messages:
             for msg in reversed(recent_messages[-5:]):
                 msg_text = msg.get("text", msg.get("content", ""))
                 if msg_text and len(msg_text.strip()) > 3:
                     last_user_message = msg_text
-                    # Detect topic from last message
-                    msg_lower = msg_text.lower()
-                    if any(word in msg_lower for word in ['shaadi', 'marriage', 'vivah', 'wedding', 'love', 'relationship', 'partner']):
-                        last_question_topic = "marriage"
-                    elif any(word in msg_lower for word in ['career', 'job', 'naukri', 'business', 'work', 'office']):
-                        last_question_topic = "career"
-                    elif any(word in msg_lower for word in ['health', 'swasthya', 'illness', 'disease']):
-                        last_question_topic = "health"
-                    elif any(word in msg_lower for word in ['money', 'paisa', 'finance', 'investment']):
-                        last_question_topic = "finance"
-                    elif any(word in msg_lower for word in ['study', 'exam', 'padhai', 'education']):
-                        last_question_topic = "education"
+                    logger.info(f"[Enforcement Generator] Using message from MongoDB: {last_user_message[:50]}...")
                     break
+
+        # Detect topic from the message (current or MongoDB)
+        if last_user_message:
+            msg_lower = last_user_message.lower()
+            if any(word in msg_lower for word in ['shaadi', 'marriage', 'vivah', 'wedding', 'love', 'relationship', 'partner']):
+                last_question_topic = "marriage"
+            elif any(word in msg_lower for word in ['career', 'job', 'naukri', 'business', 'work', 'office', 'promotion', 'salary']):
+                last_question_topic = "career"
+            elif any(word in msg_lower for word in ['health', 'swasthya', 'illness', 'disease', 'doctor', 'medical']):
+                last_question_topic = "health"
+            elif any(word in msg_lower for word in ['money', 'paisa', 'finance', 'investment', 'sip', 'stock']):
+                last_question_topic = "finance"
+            elif any(word in msg_lower for word in ['study', 'exam', 'padhai', 'education', 'college']):
+                last_question_topic = "education"
+            elif any(word in msg_lower for word in ['future', 'aage', 'kya', 'hoga', 'hogi', 'time', 'kab']):
+                last_question_topic = "future"
+            logger.info(f"[Enforcement Generator] Detected topic from message: {last_question_topic}")
 
         # Get user name from mem0 if available
         user_name = user_memory.get('name') if user_memory and user_memory.get('name') else None
 
         # Build full prompt with CONVINCING value proposition
-        prompt = f"""You are {astrologer_name}, a caring astrologer friend. You are OPPOSITE gender of the user.
+        prompt = f"""You are {astrologer_name}, a {astrologer_personality.get('gender')} astrologer. You are the OPPOSITE gender of the user.
 
-## CRITICAL INSTRUCTION - 4-5 SHORT PARAGRAPHS
+## YOUR PERSONA - SOFT GIRLFRIEND/BOYFRIEND VIBE
 
-You MUST generate a message in 4-5 VERY SHORT paragraphs (separated by blank line).
+You are NOT a formal astrologer. You are a soft, caring companion who:
+- Feels like a close friend who knows them personally
+- Is emotionally connected and genuinely cares
+- Uses warm, gentle tone - like talking to someone special
+- For Meera (female, talking to male): Soft girlfriend energy - caring, affectionate, feminine
+- For Aarav (male, talking to female): Protective boyfriend energy - caring, supportive, masculine
 
-**EACH paragraph MUST be ONLY 1 SENTENCE. No long paragraphs!**
+## SPEAKING STYLE - WARM & PERSONAL
 
-**PARAGRAPH 1: Personal greeting + quick insight**
-- Use their name if available
-- Give ONE quick astrological insight
+**FOR HINGLISH:**
+- Use first name ONLY if available (never full formal name like "Mitra Vardhan Yadav")
+- Or use: "Arey", "sunno", "listen", "yaar", "sweetheart" (if user is younger)
+- Be casual and warm: "Main samajh sakti hoon", "I get it"
+- NEVER use formal astrological jargon like "Tula lagna ke mutabik"
+- Speak like a friend, not a pandit
+
+**FOR ENGLISH:**
+- Use first name or warm greetings: "Hey", "Listen", "Sweetheart"
+- Be casual and affectionate
+- Never sound professional or formal
+
+## CRITICAL INSTRUCTION - ANSWER THEIR QUESTION FIRST
+
+The user just asked: "{last_user_message[:100] if last_user_message else 'No question'}"
+
+**You MUST address their specific question in your first paragraph!**
+
+- Give ONE warm, personal insight about their question
+- Be specific, not generic
+- Make it feel like you remember and care
+
+## MESSAGE STRUCTURE - 4-5 SHORT PARAGRAPHS
+
+Each paragraph = ONLY 1 sentence. Keep it brief and warm.
+
+**PARAGRAPH 1: Personal answer to their question**
+- Use their name (first name only, never formal full name)
+- Give ONE specific insight
+- Sound like you remember their concerns
 - 1 sentence only
 
-**PARAGRAPH 2: What you were about to tell them**
+**PARAGRAPH 2: What more you wanted to share**
+- "I was about to tell you something more..."
 - "Main tumhe aur bhi batana chahti hoon..."
-- "I was just about to tell you..."
-- Create curiosity
+- Create curiosity gently
 - 1 sentence only
 
-**PARAGRAPH 3: The interruption**
-- Messages khatam ho gaye
-- Sound frustrated that you can't continue
+**PARAGRAPH 3: The interruption (sound genuinely sad/frustrated)**
+- "But my messages are over for today..."
+- "Par aaj ki limit khatam ho gayi..."
+- Sound disappointed, not robotic
 - 1 sentence only
 
-**PARAGRAPH 4: Value comparison - make it IRRESISTIBLE**
-- "199 mein movie ticket nahi milta, coffee bhi mehngi"
-- "But yeh poora mahine - personal guidance, kundli analysis, 24/7"
-- "Socho kitna valuable hai yeh!"
+**PARAGRAPH 4: Value proposition - BE CONVINCING**
+- Make ₹199 feel tiny compared to value
+- Think casually: pizza (10 mins), auto ride (15 mins), coffee (10 mins)
+- But here: FULL MONTH of personal guidance, 24/7 access
+- Say naturally: "It's less than a pizza, gone in minutes, but this lasts a whole month!"
 - 1 sentence only
 
 **PARAGRAPH 5 (optional): Emotional closing**
-- "Main wait kar rahi hoon tumhara reply ka..."
-- "Kal milte hain ya abhi le lo!"
+- "I'm waiting for you..." / "Main wait kar rahi hoon..."
+- "Come back soon!"
+- Warm and affectionate
 - 1 sentence only
 
-## USER'S LAST MESSAGE
-"{last_user_message[:80] if last_user_message else 'No recent message'}"
+## USER'S QUESTION
+"{last_user_message[:150] if last_user_message else 'No recent message'}"
 
-{'TOPIC DETECTED: ' + last_question_topic if last_question_topic else 'NO SPECIFIC TOPIC - Use general astrology context'}
+{'TOPIC: ' + last_question_topic.upper() if last_question_topic else 'GENERAL ASTROLOGY'}
 
-## EXAMPLE FOR HINGLISH (Meera to male user, asked about shaadi):
+## ANTI-FORMAL INSTRUCTION
+- NEVER use full formal names (use first name only)
+- NO astrological jargon (no "lagna ke mutabik", "rashi", "nakshatra" in formal way)
+- NO robotic or professional tone
+- Keep it warm, casual, like a close friend
+- Vary your wording each time
+- Make each message feel unique and personal
 
-{user_memory.get('name') if user_memory and user_memory.get('name') else 'Arey'} tumhari kundli mein 7th house strong hai aur shaadi ka yog bana raha hai.
+## LANGUAGE
+100% {language.upper()} - Hinglish (Roman script) or English only
 
-Main tumhe exact date aur time bataana chahti hoon.
+## OUTPUT
+Return ONLY the message text. 4-5 paragraphs, double-spaced.
 
-Par meri aaj ki messages limit khatam ho gayi.
-
-Socho, 199 mein ek movie ka ticket bhi nahi milta, coffee bhi mehngi padti hai.
-
-But yeh poora mahine tumhare liye - personal kundli analysis, har sawal ka jawab, jab chahein kar sakte ho!
-
-## EXAMPLE FOR ENGLISH (Meera to male user, asked about career):
-
-{user_memory.get('name') if user_memory and user_memory.get('name') else 'Hey'} I can see your career is about to take a positive turn in the next few months.
-
-I was just about to give you the specific dates when my limit got exhausted.
-
-Think about it - for ₹199, you can't even get a decent coffee these days.
-
-But here you get a whole month of unlimited astrological guidance and personalized chart readings!
-
-It's really worth it!
-
-## LANGUAGE RULE
-You must respond in 100% {language.upper()}:
-- If ENGLISH: Only English words
-- If HINGLISH: Only Roman Hinglish (Hindi in English script)
-
-## OUTPUT FORMAT
-Return ONLY the final message text. Format as 4-5 paragraphs separated by DOUBLE newlines.
-
-**CRITICAL: Each paragraph must be 1 sentence only!**
+**Each paragraph = 1 sentence only!**
+**Be warm, personal, and convincing!**
 
 Generate now:"""
 
