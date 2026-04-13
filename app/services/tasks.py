@@ -409,8 +409,18 @@ async def _fetch_gender_from_mem0(phone: str) -> Optional[str]:
             if response.status_code != 200:
                 return None
 
-            memories = response.json()
-            if not memories or not isinstance(memories, list):
+            # Parse JSON with error handling
+            try:
+                memories = response.json()
+            except Exception:
+                return None
+
+            # Handle None response
+            if memories is None:
+                return None
+
+            # Ensure we have a list
+            if not isinstance(memories, list):
                 return None
 
             # Search through memories for gender

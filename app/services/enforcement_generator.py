@@ -628,8 +628,30 @@ class EnforcementMessageGenerator:
                     )
                     return {}
 
-                data = response.json()
-                memories = data if isinstance(data, list) else data.get("memories", data.get("results", []))
+                # Parse JSON response with error handling
+                try:
+                    data = response.json()
+                except Exception as e:
+                    logger.warning(f"[Enforcement Generator] Failed to parse Mem0 JSON: {e}")
+                    return {}
+
+                # Handle None or unexpected response format
+                if data is None:
+                    logger.warning("[Enforcement Generator] Mem0 returned None response")
+                    return {}
+
+                # Extract memories from response (handle different response formats)
+                if isinstance(data, list):
+                    memories = data
+                elif isinstance(data, dict):
+                    memories = data.get("memories", data.get("results", data.get("data", [])))
+                else:
+                    logger.warning(f"[Enforcement Generator] Unexpected Mem0 response type: {type(data)}")
+                    memories = []
+
+                if not memories:
+                    logger.info("[Enforcement Generator] No memories found in Mem0")
+                    return {}
 
                 logger.info(
                     f"[Enforcement Generator] Fetched {len(memories)} memories from mem0"
