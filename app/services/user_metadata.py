@@ -142,12 +142,17 @@ async def get_user_metadata(phone: str) -> Optional[Dict]:
                 "_original": user_data
             }
 
-            # If gender is missing in MongoDB, try to get from Mem0
-            if not mapped_data.get("gender") or mapped_data.get("gender") == "unknown":
-                mem0_gender = await _get_gender_from_mem0(phone)
-                if mem0_gender:
-                    mapped_data["gender"] = mem0_gender
-                    logger.info(f"[User Metadata] ✅ Got gender from Mem0: {mem0_gender}")
+            # If any birth data is missing in MongoDB, try to fill from Mem0
+            if not all([mapped_data.get("dob"), mapped_data.get("tob"), mapped_data.get("place"), mapped_data.get("gender")]):
+                logger.info(f"[User Metadata] Gaps found in MongoDB data for {clean_phone}, checking Mem0...")
+                mem0_data = await _get_all_info_from_mem0(phone)
+                if mem0_data:
+                    # Fill only missing fields
+                    for key in ["dob", "tob", "place", "gender"]:
+                        if not mapped_data.get(key) or mapped_data.get(key) == "unknown":
+                            if mem0_data.get(key):
+                                mapped_data[key] = mem0_data[key]
+                                logger.info(f"[User Metadata] ✅ Filled {key} from Mem0: {mem0_data[key]}")
 
             return mapped_data
         else:
@@ -172,14 +177,12 @@ async def _get_from_mem0_fallback(phone: str) -> Optional[Dict]:
         Partial user data with gender from Mem0, or None
     """
     try:
-        gender = await _get_gender_from_mem0(phone)
-        if gender:
-            logger.info(f"[User Metadata] ✅ Found user in Mem0 with gender: {gender}")
-            return {
-                "phone": phone,
-                "gender": gender,
-                "source": "mem0"
-            }
+        mem0_data = await _get_all_info_from_mem0(phone)
+        if mem0_data:
+            logger.info(f"[User Metadata] ✅ Found user in Mem0 with data: {list(mem0_data.keys())}")
+            mem0_data["phone"] = phone
+            mem0_data["source"] = "mem0"
+            return mem0_data
         return None
     except Exception as e:
         logger.warning(f"[User Metadata] Mem0 fallback failed: {e}")
@@ -197,7 +200,26 @@ async def _get_gender_from_mem0(phone: str) -> Optional[str]:
         "male", "female", or None
     """
     try:
+        data = await _get_all_info_from_mem0(phone)
+        return data.get("gender") if data else None
+    except Exception as e:
+        logger.warning(f"[User Metadata] Mem0 gender fetch failed: {e}")
+        return None
+
+
+async def _get_all_info_from_mem0(phone: str) -> Optional[Dict]:
+    """
+    Fetch and parse all available info (gender, dob, tob, place) from Mem0.
+
+    Args:
+        phone: User's phone number
+
+    Returns:
+        Dict with available fields, or None if no memories found
+    """
+    try:
         import os
+        import re
         mem0_url = os.getenv("MEM0_URL", MEM0_URL)
         mem0_api_key = os.getenv("MEM0_API_KEY")
 
@@ -225,60 +247,63 @@ async def _get_gender_from_mem0(phone: str) -> Optional[str]:
             if not data:
                 return None
 
-            # Handle Mem0 response format: {success: true, memories: [...], count: N}
             memories = []
             if isinstance(data, list):
                 memories = data
             elif isinstance(data, dict):
-                # Use sequential get with OR to avoid None.get() error
                 memories = data.get("memories") or data.get("results") or data.get("data", [])
-                # Ensure memories is a list, not None
-                if memories is None:
-                    memories = []
+                if memories is None: memories = []
             else:
                 return None
 
             if not memories:
                 return None
 
-            # Search memories for gender
-            import re
+            # Combined info from all memories
+            info = {}
+
+            # Regex patterns for birth details
+            dob_pattern = r'(?:DOB|Date of Birth|Birth Date|dob)[:\s=]+([0-9]{1,4}[-/][0-9]{1,2}[-/][0-9]{1,4})'
+            time_pattern = r'(?:TOB|Time|Birth Time|tob|time)[:\s=]+([0-9]{1,2}:[0-9]{2}(?:\s*[AP]M)?)'
+            place_pattern = r'(?:Place|Birth Place|City|place|sthaan)[:\s=]+([A-Za-z\s]+?)(?:,|\.|\n|$)'
+            gender_pattern = r'gender\s+is\s+(male|female)'
+
             for memory in memories:
-                # Skip None or invalid memory items
                 if memory is None or not isinstance(memory, dict):
                     continue
 
-                # Mem0 uses "memory" field, not "content"
-                # Use 'or ""' to handle cases where field exists but is null (None)
                 raw_content = memory.get("memory") or memory.get("content") or ""
                 content = raw_content.lower()
-                
-                # Safely handle metadata (use 'or {}' to handle null/None)
                 metadata = memory.get("metadata") or {}
 
-                # Check metadata first (most reliable)
-                if metadata.get("gender"):
-                    gender = metadata["gender"].lower()
-                    if gender in ["male", "female"]:
-                        logger.info(f"[User Metadata] Gender from Mem0 metadata: {gender}")
-                        return gender
+                # 1. Check Metadata (Most reliable)
+                for field in ["gender", "dob", "tob", "place"]:
+                    if metadata.get(field) and not info.get(field):
+                        info[field] = metadata[field].lower() if field == "gender" else metadata[field]
 
-                # Check content for "Gender is Male/Female" pattern
-                gender_match = re.search(r'gender\s+is\s+(male|female)', content)
-                if gender_match:
-                    logger.info(f"[User Metadata] Gender from Mem0 content: {gender_match.group(1)}")
-                    return gender_match.group(1)
+                # 2. Check Content via Patterns
+                if not info.get("gender"):
+                    gender_match = re.search(gender_pattern, content)
+                    if gender_match: info["gender"] = gender_match.group(1)
+                    elif "gender is female" in content or "user is female" in content: info["gender"] = "female"
+                    elif "gender is male" in content or "user is male" in content: info["gender"] = "male"
 
-                # Keyword search (fallback)
-                if "gender is female" in content or "user is female" in content:
-                    return "female"
-                elif "gender is male" in content or "user is male" in content:
-                    return "male"
+                if not info.get("dob"):
+                    dob_match = re.search(dob_pattern, raw_content, re.IGNORECASE)
+                    if dob_match: info["dob"] = dob_match.group(1).strip()
 
-            return None
+                if not info.get("tob"):
+                    time_match = re.search(time_pattern, raw_content, re.IGNORECASE)
+                    if time_match: info["tob"] = time_match.group(1).strip()
+
+                if not info.get("place"):
+                    place_match = re.search(place_pattern, raw_content, re.IGNORECASE)
+                    if place_match: info["place"] = place_match.group(1).strip()
+
+            return info if info else None
 
     except Exception as e:
-        logger.warning(f"[User Metadata] Mem0 gender fetch failed: {e}")
+        logger.warning(f"[User Metadata] Mem0 info fetch failed: {e}")
         return None
 
 

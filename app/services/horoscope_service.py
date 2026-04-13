@@ -125,41 +125,6 @@ class HoroscopeService:
             logger.error(f"[Horoscope] Error fetching birth data from MongoDB: {e}")
             return None
 
-    def _parse_birth_details_from_memory(self, memory_text: str) -> Optional[Dict]:
-        """
-        Parse birth details from Mem0 memory text.
-        Handles various formats of stored birth data.
-        """
-        import re
-
-        try:
-            # Pattern to match various formats
-            # Format 1: "User birth details: DOB=1990-05-15, TOB=10:30 AM, Place=Mumbai"
-            # Format 2: "DOB: 1990-05-15, Time: 10:30 AM, Place: Mumbai"
-            # Format 3: "Date of Birth: 15 May 1990, Time: 10:30, Place: Mumbai"
-
-            dob_pattern = r'(?:DOB|Date of Birth|Birth Date|dob)[:\s=]+([0-9]{1,4}[-/][0-9]{1,2}[-/][0-9]{1,4})'
-            time_pattern = r'(?:TOB|Time|Birth Time|tob|time)[:\s=]+([0-9]{1,2}:[0-9]{2}(?:\s*[AP]M)?)'
-            place_pattern = r'(?:Place|Birth Place|City|place|sthaan)[:\s=]+([A-Za-z\s]+?)(?:,|\.|\n|$)'
-
-            dob_match = re.search(dob_pattern, memory_text, re.IGNORECASE)
-            time_match = re.search(time_pattern, memory_text, re.IGNORECASE)
-            place_match = re.search(place_pattern, memory_text, re.IGNORECASE)
-
-            if dob_match and time_match and place_match:
-                return {
-                    "dob": dob_match.group(1).strip(),
-                    "tob": time_match.group(1).strip(),
-                    "place": place_match.group(1).strip()
-                }
-            else:
-                logger.debug(f"[Horoscope] Could not parse all birth details from memory")
-                return None
-
-        except Exception as e:
-            logger.error(f"[Horoscope] Error parsing birth details from memory: {e}")
-            return None
-
     async def generate_horoscope(
         self,
         dob: str,
