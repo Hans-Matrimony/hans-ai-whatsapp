@@ -3823,11 +3823,11 @@ async def _get_recent_conversation_from_mongo(user_id: str, session_data: dict =
             logger.info(f"[Proactive Nudge] No user questions found for {user_id}")
             return result
 
-        # Analyze only last 5 questions (RECENT context matters most!)
-        recent_questions = user_questions[-5:]
+        # Analyze last 50 questions for better topic and language detection
+        recent_questions = user_questions[-50:] if len(user_questions) >= 50 else user_questions
         result["last_questions"] = recent_questions
-        logger.info(f"[Proactive Nudge] Total questions: {len(user_questions)}, analyzing last 5 for recent context")
-        logger.debug(f"[Proactive Nudge] Recent questions: {[q[:50]+'...' if len(q)>50 else q for q in recent_questions]}")
+        logger.info(f"[Proactive Nudge] Total questions: {len(user_questions)}, analyzing last {len(recent_questions)} for context")
+        logger.debug(f"[Proactive Nudge] Recent questions: {[q[:50]+'...' if len(q)>50 else q for q in recent_questions[:5]]}")
 
         # Language detection: Prioritize LAST message for current language preference
         def detect_language(texts):
