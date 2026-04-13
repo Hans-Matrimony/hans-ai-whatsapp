@@ -916,10 +916,16 @@ You MUST generate a message in 4-5 VERY SHORT paragraphs (separated by blank lin
 - Sound frustrated that you can't continue
 - 1 sentence only
 
-**PARAGRAPH 4: Value comparison - make it IRRESISTIBLE**
-- "199 mein movie ticket nahi milta, coffee bhi mehngi"
-- "But yeh poora mahine - personal guidance, kundli analysis, 24/7"
-- "Socho kitna valuable hai yeh!"
+**PARAGRAPH 4: Value comparison - BE CREATIVE, CONVINCE THEM NATURALLY**
+- Make ₹199 feel like a tiny amount compared to the value
+- Think: What else costs ₹200-300 that's gone in minutes?
+  - One pizza (2-3 bites, done)
+  - Auto-rickshaw ride to market (15 minutes, done)
+  - One coffee at cafe (10 minutes, done)
+  - Phone recharge for 2 days (gone)
+  - One movie ticket (3 hours, done)
+- BUT ₹199 here gives you: FULL MONTH of personal astrology guidance, 24/7 access, kundli analysis, career/marriage predictions, health guidance
+- Make it conversational like: "Bas ek pizza ka hai, 10 minute mein khatam, but yeh poora mahine ka hai!"
 - 1 sentence only
 
 **PARAGRAPH 5 (optional): Emotional closing**
@@ -932,29 +938,12 @@ You MUST generate a message in 4-5 VERY SHORT paragraphs (separated by blank lin
 
 {'TOPIC: ' + last_question_topic.upper() if last_question_topic else 'NO SPECIFIC TOPIC - Use general astrology context'}
 
-## EXAMPLE FOR HINGLISH (Meera to male user, asked about shaadi):
-
-Arey! Tumhari shaadi ki baat karun toh, tumhare 7th house mein Venus aur dono mil rahe hain - shaadi ka strong yog hai next year!
-
-Main tumhe exact shaadi ka month aur date bhi bataana chahta hoon.
-
-Par meri aaj ki messages limit khatam ho gayi.
-
-Socho, 199 mein ek movie ka ticket bhi nahi milta, coffee bhi mehngi padti hai.
-
-But yeh poora mahine tumhare liye - personal kundli analysis, har sawal ka jawab, jab chahein kar sakte ho!
-
-## EXAMPLE FOR ENGLISH (Meera to male user, asked about career):
-
-I can see your career is about to take a big turn - there's a promotion opportunity coming in the next 2-3 months!
-
-I was analyzing the specific dates when my message limit got exhausted.
-
-Think about it - for ₹199, you can't even get a decent coffee these days.
-
-But here you get a whole month of unlimited astrological guidance and personalized chart readings!
-
-It's really worth it!
+## ANTI-COPYING INSTRUCTION
+- DO NOT use the exact same phrases every time
+- Vary your examples naturally
+- One time talk about pizza, next time about auto, then coffee, then movie
+- Make each message feel unique and spontaneous
+- Sound like a real friend, not a template bot
 
 ## LANGUAGE RULE
 You must respond in 100% {language.upper()}:
@@ -966,6 +955,7 @@ Return ONLY the final message text. Format as 4-5 paragraphs separated by DOUBLE
 
 **CRITICAL: Each paragraph must be 1 sentence only!**
 **CRITICAL: First paragraph MUST address their specific question!**
+**CRITICAL: Be creative with comparisons - vary them each time!**
 
 Generate now:"""
 
