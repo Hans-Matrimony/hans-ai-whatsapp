@@ -148,31 +148,60 @@ class EnforcementMessageGenerator:
             # Use detected language from conversation instead of passed parameter
             language = detected_language
 
-            # Detect gender from conversation
-            detected_gender = self._detect_gender_from_conversation(recent_messages)
-            logger.info(
-                f"[Enforcement Generator] Detected gender from MongoDB: {detected_gender} "
-                f"(passed gender: {user_gender})"
-            )
-            # Use detected gender if it's more certain than passed parameter
-            if detected_gender in ['male', 'female']:
-                user_gender = detected_gender
-                # Select astrologer based on detected gender (opposite gender)
-                if user_gender == "male":
-                    astrologer_name = "Meera"  # Female astrologer for male user
-                    astrologer_personality = self.PERSONALITIES["Meera"]
-                else:
-                    astrologer_name = "Aarav"  # Male astrologer for female user
-                    astrologer_personality = self.PERSONALITIES["Aarav"]
-                logger.info(
-                    f"[Enforcement Generator] Updated astrologer to {astrologer_name} "
-                    f"based on detected gender: {user_gender}"
-                )
-
-            # Step 1.6: Fetch mem0 memories for personalization
+            # Step 1.6: Fetch mem0 memories FIRST (has user's explicitly stated gender like "Gender: Female")
             user_memory = await self._fetch_mem0_memories(user_id)
             logger.info(
                 f"[Enforcement Generator] User memory from mem0: {list(user_memory.keys())}"
+            )
+
+            # PRIORITY 1: Use gender from mem0 (what user EXPLICITLY stated)
+            mem0_gender = user_memory.get('gender') if user_memory else None
+            if mem0_gender in ['male', 'female']:
+                user_gender = mem0_gender
+                logger.info(
+                    f"[Enforcement Generator] Using gender from mem0 (explicitly stated): {user_gender}"
+                )
+            # PRIORITY 2: Use passed user_gender parameter
+            elif user_gender in ['male', 'female']:
+                logger.info(
+                    f"[Enforcement Generator] Using passed gender parameter: {user_gender}"
+                )
+            # PRIORITY 3: Detect from conversation (LAST RESORT - can be inaccurate)
+            else:
+                detected_gender = self._detect_gender_from_conversation(recent_messages)
+                logger.info(
+                    f"[Enforcement Generator] Detected gender from conversation (last resort): {detected_gender} "
+                    f"(passed gender was: {user_gender})"
+                )
+                if detected_gender in ['male', 'female']:
+                    user_gender = detected_gender
+                    logger.info(
+                        f"[Enforcement Generator] Using detected gender from conversation: {user_gender}"
+                    )
+                else:
+                    # Default to unknown if all methods fail
+                    user_gender = "unknown"
+                    logger.warning(
+                        f"[Enforcement Generator] Could not determine gender, defaulting to unknown"
+                    )
+
+            # Select astrologer based on user_gender (opposite gender)
+            if user_gender == "male":
+                astrologer_name = "Meera"  # Female astrologer for male user
+                astrologer_personality = self.PERSONALITIES["Meera"]
+            elif user_gender == "female":
+                astrologer_name = "Aarav"  # Male astrologer for female user
+                astrologer_personality = self.PERSONALITIES["Aarav"]
+            else:
+                # Default: If gender unknown, default to Meera (female astrologer works for both)
+                astrologer_name = "Meera"
+                astrologer_personality = self.PERSONALITIES["Meera"]
+                logger.info(
+                    f"[Enforcement Generator] Gender unknown, defaulting to {astrologer_name}"
+                )
+            logger.info(
+                f"[Enforcement Generator] Selected astrologer: {astrologer_name} for user_gender: {user_gender} "
+                f"(priority: mem0={mem0_gender}, passed={user_gender})"
             )
 
             # Step 2: Generate context hash for cache key
