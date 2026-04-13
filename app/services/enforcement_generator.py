@@ -681,34 +681,33 @@ class EnforcementMessageGenerator:
                 }
 
                 for memory in memories:
-                    content = memory.get("content", "")
+                    # Mem0 response uses "memory" field, not "content"
+                    content = memory.get("memory", memory.get("content", ""))
                     metadata = memory.get("metadata", {})
 
-                    # Extract name
+                    content_lower = content.lower()
+
+                    # Extract name - look for "Name is X" pattern
                     if not user_info["name"]:
-                        # Look for name patterns
                         import re
-                        name_match = re.search(r'(?:Name|User(?:\s*Name)?)\s*[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)', content, re.IGNORECASE)
+                        name_match = re.search(r'name\s+is\s+([a-z][a-z]+)', content, re.IGNORECASE)
                         if name_match:
-                            user_info["name"] = name_match.group(1)
+                            user_info["name"] = name_match.group(1).capitalize()
 
-                    # Extract gender
+                    # Extract gender - look for "Gender is Male/Female" pattern
                     if not user_info["gender"]:
-                        if any(word in content.lower() for word in ['gender:', 'male', 'female', 'gender']):
-                            # Check for female indicators
-                            if ('female' in content.lower() or 'woman' in content.lower() or
-                                'girl' in content.lower() or 'she is' in content.lower()):
-                                user_info["gender"] = "female"
-                            # Check for male indicators
-                            elif ('male' in content.lower() or 'man' in content.lower() or
-                                  'boy' in content.lower() or 'he is' in content.lower()):
-                                user_info["gender"] = "male"
+                        # Direct pattern: "Gender is Male" or "Gender is Female"
+                        if re.search(r'gender\s+is\s+(male|female)', content, re.IGNORECASE):
+                            gender_match = re.search(r'gender\s+is\s+(male|female)', content, re.IGNORECASE)
+                            if gender_match:
+                                user_info["gender"] = gender_match.group(1).lower()
+                                logger.info(f"[Enforcement Generator] ✅ Found gender from Mem0: {user_info['gender']}")
 
-                        # Also check metadata for explicit gender
-                        if not user_info["gender"] and metadata.get("gender"):
-                            gender_from_meta = metadata["gender"].lower()
-                            if gender_from_meta in ["male", "female"]:
-                                user_info["gender"] = gender_from_meta
+                    # Also check metadata for explicit gender
+                    if not user_info["gender"] and metadata.get("gender"):
+                        gender_from_meta = metadata["gender"].lower()
+                        if gender_from_meta in ["male", "female"]:
+                            user_info["gender"] = gender_from_meta
 
                     # Extract concerns
                     content_lower = content.lower()
