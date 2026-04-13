@@ -11,6 +11,7 @@ import asyncio
 from datetime import datetime
 from typing import Optional, Tuple, List, Dict
 from pathlib import Path
+from urllib.parse import unquote_plus, urlparse, urlunparse, urlencode, parse_qsl
 
 import httpx
 import redis
@@ -1705,7 +1706,6 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
 
             # Transcribe audio to text using Groq (FREE)
             if media_info and media_info.get("base64_data"):
-                import base64
                 # Decode base64 string to bytes
                 audio_bytes = base64.b64decode(media_info["base64_data"])
                 transcribed_text = await transcribe_audio(
@@ -2828,7 +2828,6 @@ Copy your code and share! 💫"""
 
             try:
                 # Parse the PDF request parameters from AI's response
-                import re
                 params = {}
                 for param in ["dob", "tob", "place", "name"]:
                     match = re.search(rf"{param}=([^,\n]+)", clean_reply)
@@ -2880,7 +2879,6 @@ Copy your code and share! 💫"""
                 # Download the image from DALL-E URL
                 try:
                     async with httpx.AsyncClient(timeout=30.0) as dl_client:
-                        from urllib.parse import unquote_plus
                         url_to_fetch = media_item["value"]
 
                         # [VERSION_MARKER] v2.1 - Smart signature-only decoding
@@ -2899,8 +2897,7 @@ Copy your code and share! 💫"""
 
                             # Smart decode: Only decode the signature parameter, not the entire URL
                             # This preserves legitimate URL encoding in path/query while fixing over-encoded signatures
-                            from urllib.parse import urlparse, urlunparse, urlencode, parse_qsl
-
+                            
                             parsed = urlparse(url_to_fetch)
                             query_params = dict(parse_qsl(parsed.query))
 
