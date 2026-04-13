@@ -63,64 +63,70 @@ class HoroscopeService:
 
     async def get_user_birth_data(self, phone: str) -> Optional[Dict]:
         """
-        Get user birth data from Mem0.
+        Get user birth data from Mem0 using the same approach as Kundli system.
         Returns dict with dob, tob, place if found, None otherwise.
+
+        Uses: GET /memory/{user_id} endpoint (same as enforcement_generator.py:621)
         """
         try:
             import httpx
 
             # Get Mem0 URL from environment
-            mem0_url = os.getenv("MEM0_URL")
+            mem0_url = os.getenv("MEM0_URL", "https://rg4g0gkk0wwkk4cc00g4sg0c.api.hansastro.com")
+
+            logger.info(f"[Horoscope] Using MEM0_URL: {mem0_url}")  # DEBUG
 
             if not mem0_url:
                 logger.warning(f"[Horoscope] MEM0_URL not configured")
                 return None
 
-            # Format user ID with + prefix for Mem0
+            # Normalize user_id (ensure + prefix) - same as enforcement_generator.py
             user_id = f"+{phone}" if not phone.startswith("+") else phone
 
-            # Search Mem0 for birth details
-            search_url = f"{mem0_url}/v1/memories/search"
-            query = "birth details DOB date of birth time place"
-
-            payload = {
-                "query": query,
-                "user_id": user_id,
-                "limit": 5
+            # Prepare headers - same as enforcement_generator.py:612-617
+            headers = {
+                "Content-Type": "application/json"
             }
 
-            logger.info(f"[Horoscope] Searching Mem0 for birth data - user: {user_id}")
+            # Add Authorization if API key is available
+            mem0_api_key = os.getenv("MEM0_API_KEY")
+            if mem0_api_key:
+                headers["Authorization"] = f"Token {mem0_api_key}"
 
+            logger.info(f"[Horoscope] Fetching memories from Mem0 - user: {user_id}")
+
+            # Use GET /memory/{user_id}?limit=20 - same as enforcement_generator.py:621
             async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.post(
-                    search_url,
-                    json=payload,
-                    headers={"Content-Type": "application/json"}
+                response = await client.get(
+                    f"{mem0_url}/memory/{user_id}?limit=20",
+                    headers=headers
                 )
 
                 if response.status_code == 200:
                     memories = response.json()
 
                     if memories and len(memories) > 0:
+                        logger.info(f"[Horoscope] Found {len(memories)} memories for {user_id}")
+
                         # Search through memories for birth details
                         for memory in memories:
                             memory_text = memory.get("memory", "")
-                            logger.info(f"[Horoscope] Found memory: {memory_text[:100]}...")
+                            logger.info(f"[Horoscope] Checking memory: {memory_text[:100]}...")
 
                             # Parse birth details from memory text
                             birth_data = self._parse_birth_details_from_memory(memory_text)
 
                             if birth_data and all(birth_data.values()):
-                                logger.info(f"[Horoscope] Successfully parsed birth data from Mem0 for {phone}")
+                                logger.info(f"[Horoscope] ✅ Successfully parsed birth data from Mem0 for {phone}")
                                 return birth_data
 
-                        logger.info(f"[Horoscope] No valid birth data found in Mem0 memories for {phone}")
+                        logger.info(f"[Horoscope] ❌ No valid birth data found in {len(memories)} memories for {phone}")
                         return None
                     else:
-                        logger.info(f"[Horoscope] No memories found in Mem0 for {phone}")
+                        logger.info(f"[Horoscope] No memories found for {user_id}")
                         return None
                 else:
-                    logger.error(f"[Horoscope] Mem0 search failed: {response.status_code} - {response.text}")
+                    logger.error(f"[Horoscope] Mem0 request failed: {response.status_code} - {response.text}")
                     return None
 
         except Exception as e:
