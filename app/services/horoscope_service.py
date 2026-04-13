@@ -162,7 +162,7 @@ Rules:
 
             payload = {
                 "model": "agent:astrologer",
-                "message": prompt,
+                "input": prompt,
                 "user": f"+{phone_id}"
             }
 
