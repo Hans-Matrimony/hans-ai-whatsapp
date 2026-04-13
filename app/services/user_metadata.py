@@ -71,11 +71,27 @@ async def get_user_metadata(phone: str) -> Optional[Dict]:
     Returns:
         User metadata dict or None if not found
     """
-    global _users_collection
+    global _users_collection, MONGO_LOGGER_URL, _db
 
     if not _users_collection:
-        logger.warning("[User Metadata] Service not initialized, skipping MongoDB lookup")
-        return None
+        # Lazy initialization - try to initialize if not already done
+        import os
+        mongo_url = os.getenv("MONGO_LOGGER_URL")
+        if mongo_url and mongo_url.startswith(("mongodb://", "mongodb+srv://")):
+            logger.info("[User Metadata] Lazy initialization triggered...")
+            try:
+                from pymongo import MongoClient
+                client = MongoClient(mongo_url)
+                _db = client.hans_ai_whatsapp
+                _users_collection = _db.users
+                MONGO_LOGGER_URL = mongo_url
+                logger.info("[User Metadata] Lazy initialization successful")
+            except Exception as e:
+                logger.warning(f"[User Metadata] Lazy initialization failed: {e}")
+                return None
+        else:
+            logger.warning("[User Metadata] Service not initialized, skipping MongoDB lookup")
+            return None
 
     try:
         # Clean phone number
