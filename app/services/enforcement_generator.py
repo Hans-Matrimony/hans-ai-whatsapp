@@ -332,12 +332,26 @@ class EnforcementMessageGenerator:
                             all_messages.extend(session_messages)
                         messages = all_messages
 
+                # CRITICAL: Filter to ONLY user messages (role: "user")
+                # This prevents AI assistant messages from being used as "user context"
+                all_user_messages = []
+                for msg in messages:
+                    # Check role field
+                    if msg.get("role") == "user":
+                        all_user_messages.append(msg)
+                    # Also check if there's no explicit role but looks like user message
+                    elif "role" not in msg and msg.get("text", "").strip():
+                        # Basic heuristic: short messages (< 300 chars) are likely user
+                        text = msg.get("text", "")
+                        if len(text) < 300:
+                            all_user_messages.append(msg)
+
                 # Take the last 'limit' messages (most recent first)
-                user_messages = messages[:limit]
+                user_messages = all_user_messages[:limit]
 
                 logger.info(
                     f"[Enforcement Generator] Fetched {len(user_messages)} user messages "
-                    f"from {len(messages)} total messages"
+                    f"from {len(messages)} total messages (filtered from {len(all_user_messages)} user msgs)"
                 )
 
                 return user_messages
@@ -628,8 +642,30 @@ class EnforcementMessageGenerator:
                     )
                     return {}
 
-                data = response.json()
-                memories = data if isinstance(data, list) else data.get("memories", data.get("results", []))
+                # Parse JSON response with error handling
+                try:
+                    data = response.json()
+                except Exception as e:
+                    logger.warning(f"[Enforcement Generator] Failed to parse Mem0 JSON: {e}")
+                    return {}
+
+                # Handle None or unexpected response format
+                if data is None:
+                    logger.warning("[Enforcement Generator] Mem0 returned None response")
+                    return {}
+
+                # Extract memories from response (handle different response formats)
+                if isinstance(data, list):
+                    memories = data
+                elif isinstance(data, dict):
+                    memories = data.get("memories", data.get("results", data.get("data", [])))
+                else:
+                    logger.warning(f"[Enforcement Generator] Unexpected Mem0 response type: {type(data)}")
+                    memories = []
+
+                if not memories:
+                    logger.info("[Enforcement Generator] No memories found in Mem0")
+                    return {}
 
                 logger.info(
                     f"[Enforcement Generator] Fetched {len(memories)} memories from mem0"
@@ -645,24 +681,33 @@ class EnforcementMessageGenerator:
                 }
 
                 for memory in memories:
-                    content = memory.get("content", "")
+                    # Mem0 response uses "memory" field, not "content"
+                    content = memory.get("memory", memory.get("content", ""))
                     metadata = memory.get("metadata", {})
 
-                    # Extract name
-                    if not user_info["name"]:
-                        # Look for name patterns
-                        import re
-                        name_match = re.search(r'(?:Name|User(?:\s*Name)?)\s*[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)', content, re.IGNORECASE)
-                        if name_match:
-                            user_info["name"] = name_match.group(1)
+                    content_lower = content.lower()
 
-                    # Extract gender
+                    # Extract name - look for "Name is X" pattern
+                    if not user_info["name"]:
+                        import re
+                        name_match = re.search(r'name\s+is\s+([a-z][a-z]+)', content, re.IGNORECASE)
+                        if name_match:
+                            user_info["name"] = name_match.group(1).capitalize()
+
+                    # Extract gender - look for "Gender is Male/Female" pattern
                     if not user_info["gender"]:
-                        if any(word in content.lower() for word in ['gender:', 'male', 'female', 'gender']):
-                            if 'female' in content.lower() or 'woman' in content.lower() or girl in content.lower():
-                                user_info["gender"] = "female"
-                            elif 'male' in content.lower() or 'man' in content.lower() or 'boy' in content.lower():
-                                user_info["gender"] = "male"
+                        # Direct pattern: "Gender is Male" or "Gender is Female"
+                        if re.search(r'gender\s+is\s+(male|female)', content, re.IGNORECASE):
+                            gender_match = re.search(r'gender\s+is\s+(male|female)', content, re.IGNORECASE)
+                            if gender_match:
+                                user_info["gender"] = gender_match.group(1).lower()
+                                logger.info(f"[Enforcement Generator] ✅ Found gender from Mem0: {user_info['gender']}")
+
+                    # Also check metadata for explicit gender
+                    if not user_info["gender"] and metadata.get("gender"):
+                        gender_from_meta = metadata["gender"].lower()
+                        if gender_from_meta in ["male", "female"]:
+                            user_info["gender"] = gender_from_meta
 
                     # Extract concerns
                     content_lower = content.lower()
@@ -878,14 +923,37 @@ class EnforcementMessageGenerator:
         if current_message and len(current_message.strip()) > 3:
             last_user_message = current_message.strip()
             logger.info(f"[Enforcement Generator] Using CURRENT message: {last_user_message[:50]}...")
-        # Fallback: use the last message from MongoDB history
+        # Fallback: use the last USER message from MongoDB history
+        # IMPORTANT: Only use user messages, NOT assistant messages (to avoid repeating AI's own responses)
         elif recent_messages:
-            for msg in reversed(recent_messages[-5:]):
+            # Filter to only USER messages and exclude AI corrections/noise
+            noise_phrases = [
+                "seems to be incorrect", "spelling", "wrong", "incorrect",
+                "confirm kar", "let me check", "i'll confirm", "abhi confirm",
+                "namaste", "hello", "hi", "hey", "achaarya", "astrologer"
+            ]
+
+            for msg in reversed(recent_messages[-10:]):  # Check last 10 messages
+                # Only use user messages
+                if msg.get("role") != "user":
+                    continue
+
                 msg_text = msg.get("text", msg.get("content", ""))
-                if msg_text and len(msg_text.strip()) > 3:
-                    last_user_message = msg_text
-                    logger.info(f"[Enforcement Generator] Using message from MongoDB: {last_user_message[:50]}...")
-                    break
+                if not msg_text or len(msg_text.strip()) <= 3:
+                    continue
+
+                # Skip messages that look like AI responses or corrections
+                msg_lower = msg_text.lower()
+                if any(phrase in msg_lower for phrase in noise_phrases):
+                    continue
+
+                # Skip very long messages (likely AI responses mistakenly marked as user)
+                if len(msg_text) > 300:
+                    continue
+
+                last_user_message = msg_text
+                logger.info(f"[Enforcement Generator] Using USER message from MongoDB: {last_user_message[:50]}...")
+                break
 
         # Detect topic from the message (current or MongoDB)
         if last_user_message:
