@@ -1560,21 +1560,27 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
         logger.info(f"[Audio] Received audio message from {phone}")
 
         try:
-            # Import audio processor (directory has hyphen, need importlib + sys.path)
+            # Import audio processor directly from file path to avoid __init__.py dependencies
             import sys
             import os
-            import importlib
-            # Add project root to sys.path for skills module import
+            import importlib.util
+            # Get the transcribe module file path
             project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-            if project_root not in sys.path:
-                sys.path.insert(0, project_root)
-            transcribe_module = importlib.import_module('skills.audio-processor.transcribe')
+            transcribe_path = os.path.join(project_root, 'skills', 'audio-processor', 'transcribe.py')
+            # Load module directly from file (bypasses __init__.py which imports google)
+            spec = importlib.util.spec_from_file_location("transcribe_module", transcribe_path)
+            transcribe_module = importlib.util.module_from_spec(spec)
+            sys.modules["transcribe_module"] = transcribe_module
+            spec.loader.exec_module(transcribe_module)
             transcribe_audio = transcribe_module.transcribe_audio
 
             # Transcribe audio to text using Groq (FREE)
             if media_info and media_info.get("base64_data"):
+                import base64
+                # Decode base64 string to bytes
+                audio_bytes = base64.b64decode(media_info["base64_data"])
                 transcribed_text = await transcribe_audio(
-                    media_info["base64_data"],
+                    audio_bytes,
                     media_info.get("mime_type", "audio/ogg")
                 )
 
