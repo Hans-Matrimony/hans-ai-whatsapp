@@ -409,69 +409,73 @@ async def _fetch_gender_from_mem0(phone: str) -> Optional[str]:
 
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(
-                f"{mem0_url}/memory/{user_id}?limit=20",
+                f"{mem0_url}/memory/{user_id}",
                 headers=headers
             )
 
             if response.status_code != 200:
+                logger.warning(f"[Gender Detection] Mem0 returned {response.status_code}")
                 return None
 
             # Parse JSON with error handling
             try:
-                memories = response.json()
-            except Exception:
+                data = response.json()
+            except Exception as e:
+                logger.warning(f"[Gender Detection] Mem0 JSON parse error: {e}")
                 return None
 
             # Handle None response
-            if memories is None:
+            if data is None:
+                logger.warning("[Gender Detection] Mem0 returned None")
                 return None
 
-            # Ensure we have a list
-            if not isinstance(memories, list):
+            # Handle Mem0 response format: {success: true, memories: [...], count: N}
+            memories = []
+            if isinstance(data, list):
+                memories = data
+            elif isinstance(data, dict):
+                memories = data.get("memories", data.get("results", data.get("data", [])))
+            else:
+                logger.warning(f"[Gender Detection] Unexpected Mem0 response type: {type(data)}")
+                return None
+
+            if not memories:
+                logger.info(f"[Gender Detection] No memories found in Mem0 for {user_id}")
                 return None
 
             # Search through memories for gender
+            import re
             for memory in memories:
-                content = memory.get("content", "").lower()
+                # Mem0 uses "memory" field, not "content"
+                content = memory.get("memory", memory.get("content", "")).lower()
                 metadata = memory.get("metadata", {})
 
                 # Check metadata first (more reliable)
                 if metadata.get("gender"):
                     gender = metadata["gender"].lower()
                     if gender in ["male", "female"]:
-                        logger.info(f"[Gender Detection] Found gender in Mem0 metadata for {user_id}: {gender}")
+                        logger.info(f"[Gender Detection] ✅ Found gender in Mem0 metadata: {gender}")
                         return gender
 
-                # Check content for explicit gender mentions
-                # Look for patterns like "Gender: female", "gender: male", "User is female", etc.
-                import re
-                gender_patterns = [
-                    r"gender\s*[:\s]\s*(male|female)",
-                    r"gender\s+(male|female)",
-                    r"user\s+(is|:)\s*(male|female)",
-                    r"(?:he|she)\s+is\s+(?:a\s+)?(?:man|woman)",
-                ]
-
-                for pattern in gender_patterns:
-                    match = re.search(pattern, content)
-                    if match:
-                        detected = match.group(1) if match.group(1) else None
-                        if detected:
-                            logger.info(f"[Gender Detection] Found gender in Mem0 content for {user_id}: {detected}")
-                            return detected
+                # Check content for "Gender is Male/Female" pattern
+                gender_match = re.search(r'gender\s+is\s+(male|female)', content)
+                if gender_match:
+                    logger.info(f"[Gender Detection] ✅ Found gender in Mem0 content: {gender_match.group(1)}")
+                    return gender_match.group(1)
 
                 # Simple keyword search (more aggressive)
-                if any(phrase in content for phrase in ["gender: female", "gender-female", "user is female", "she is a"]):
-                    logger.info(f"[Gender Detection] Detected female from Mem0 keywords for {user_id}")
+                if "gender is female" in content or "user is female" in content:
+                    logger.info(f"[Gender Detection] ✅ Detected female from Mem0 keywords")
                     return "female"
-                elif any(phrase in content for phrase in ["gender: male", "gender-male", "user is male", "he is a"]):
-                    logger.info(f"[Gender Detection] Detected male from Mem0 keywords for {user_id}")
+                elif "gender is male" in content or "user is male" in content:
+                    logger.info(f"[Gender Detection] ✅ Detected male from Mem0 keywords")
                     return "male"
 
+            logger.info(f"[Gender Detection] No gender found in {len(memories)} Mem0 memories")
             return None
 
     except Exception as e:
-        logger.warning(f"[Gender Detection] Mem0 lookup failed: {e}")
+        logger.error(f"[Gender Detection] Mem0 lookup error: {e}")
         return None
 
 
