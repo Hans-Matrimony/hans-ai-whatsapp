@@ -434,7 +434,11 @@ async def _fetch_gender_from_mem0(phone: str) -> Optional[str]:
             if isinstance(data, list):
                 memories = data
             elif isinstance(data, dict):
-                memories = data.get("memories", data.get("results", data.get("data", [])))
+                # Use sequential get with OR to avoid None.get() error
+                memories = data.get("memories") or data.get("results") or data.get("data", [])
+                # Ensure memories is a list, not None
+                if memories is None:
+                    memories = []
             else:
                 logger.warning(f"[Gender Detection] Unexpected Mem0 response type: {type(data)}")
                 return None

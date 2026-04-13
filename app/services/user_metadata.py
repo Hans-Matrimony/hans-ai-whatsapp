@@ -92,7 +92,7 @@ async def get_user_metadata(phone: str) -> Optional[Dict]:
     """
     global _users_collection, _db
 
-    if not _users_collection:
+    if _users_collection is None:
         # Lazy initialization - try to initialize if not already done
         import os
         # mongo_url = os.getenv("MONGO_LOGGER_URL") or os.getenv("MONGO_METADATA_URL")
@@ -230,7 +230,11 @@ async def _get_gender_from_mem0(phone: str) -> Optional[str]:
             if isinstance(data, list):
                 memories = data
             elif isinstance(data, dict):
-                memories = data.get("memories", data.get("results", data.get("data", [])))
+                # Use sequential get with OR to avoid None.get() error
+                memories = data.get("memories") or data.get("results") or data.get("data", [])
+                # Ensure memories is a list, not None
+                if memories is None:
+                    memories = []
             else:
                 return None
 
@@ -298,7 +302,7 @@ async def save_user_metadata(
     """
     global _users_collection
 
-    if not _users_collection:
+    if _users_collection is None:
         logger.warning("[User Metadata] Service not initialized, skipping save")
         return False
 
@@ -369,7 +373,7 @@ async def update_user_metadata(phone: str, updates: Dict) -> bool:
     """
     global _users_collection
 
-    if not _users_collection:
+    if _users_collection is None:
         logger.warning("[User Metadata] Service not initialized, skipping update")
         return False
 
@@ -423,7 +427,7 @@ async def increment_user_questions(phone: str) -> bool:
     """
     global _users_collection
 
-    if not _users_collection:
+    if _users_collection is None:
         return False
 
     try:
@@ -460,7 +464,7 @@ async def add_topic_discussed(phone: str, topic: str) -> bool:
     """
     global _users_collection
 
-    if not _users_collection:
+    if _users_collection is None:
         return False
 
     try:
@@ -493,7 +497,7 @@ async def get_all_users_count() -> int:
     """
     global _users_collection
 
-    if not _users_collection:
+    if _users_collection is None:
         return 0
 
     try:
@@ -512,7 +516,7 @@ async def get_user_stats() -> Dict:
     """
     global _users_collection
 
-    if not _users_collection:
+    if _users_collection is None:
         return {}
 
     try:
