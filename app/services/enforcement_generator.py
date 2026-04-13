@@ -107,7 +107,8 @@ class EnforcementMessageGenerator:
         language: str,
         message_count: int = 0,
         today_messages: int = 0,
-        mongo_logger_url: Optional[str] = None
+        mongo_logger_url: Optional[str] = None,
+        current_message: str = None
     ) -> Optional[str]:
         """
         Generate AI-powered contextual enforcement message
@@ -123,6 +124,7 @@ class EnforcementMessageGenerator:
             message_count: Total messages sent by user
             today_messages: Messages sent today
             mongo_logger_url: MongoDB URL for fetching conversation context
+            current_message: The user's current message/question that triggered enforcement
 
         Returns:
             Generated message or None if generation failed
@@ -207,7 +209,8 @@ class EnforcementMessageGenerator:
                 message_count=message_count,
                 today_messages=today_messages,
                 recent_messages=recent_messages,
-                user_memory=user_memory
+                user_memory=user_memory,
+                current_message=current_message
             )
 
             # Step 5: Call OpenClaw API
@@ -720,7 +723,8 @@ class EnforcementMessageGenerator:
         message_count: int,
         today_messages: int,
         recent_messages: List[Dict[str, Any]],
-        user_memory: Dict[str, Any] = None
+        user_memory: Dict[str, Any] = None,
+        current_message: str = None
     ) -> str:
         """
         Build AI prompt for message generation
@@ -734,6 +738,8 @@ class EnforcementMessageGenerator:
             message_count: Total messages
             today_messages: Messages today
             recent_messages: Recent conversation
+            user_memory: User's mem0 memories
+            current_message: The user's current message/question
 
         Returns:
             Prompt string for OpenClaw API
@@ -834,28 +840,40 @@ class EnforcementMessageGenerator:
             f"₹{self.PRICING['daily']}/day"
         )
 
-        # Get the user's last question/message for better context
+        # Get the user's CURRENT question/message for better context
+        # PRIORITY: current_message (what they just asked) > recent_messages
         last_user_message = ""
         last_question_topic = None
 
-        if recent_messages:
+        # First, try to use the current message that triggered enforcement
+        if current_message and len(current_message.strip()) > 3:
+            last_user_message = current_message.strip()
+            logger.info(f"[Enforcement Generator] Using CURRENT message: {last_user_message[:50]}...")
+        # Fallback: use the last message from MongoDB history
+        elif recent_messages:
             for msg in reversed(recent_messages[-5:]):
                 msg_text = msg.get("text", msg.get("content", ""))
                 if msg_text and len(msg_text.strip()) > 3:
                     last_user_message = msg_text
-                    # Detect topic from last message
-                    msg_lower = msg_text.lower()
-                    if any(word in msg_lower for word in ['shaadi', 'marriage', 'vivah', 'wedding', 'love', 'relationship', 'partner']):
-                        last_question_topic = "marriage"
-                    elif any(word in msg_lower for word in ['career', 'job', 'naukri', 'business', 'work', 'office']):
-                        last_question_topic = "career"
-                    elif any(word in msg_lower for word in ['health', 'swasthya', 'illness', 'disease']):
-                        last_question_topic = "health"
-                    elif any(word in msg_lower for word in ['money', 'paisa', 'finance', 'investment']):
-                        last_question_topic = "finance"
-                    elif any(word in msg_lower for word in ['study', 'exam', 'padhai', 'education']):
-                        last_question_topic = "education"
+                    logger.info(f"[Enforcement Generator] Using message from MongoDB: {last_user_message[:50]}...")
                     break
+
+        # Detect topic from the message (current or MongoDB)
+        if last_user_message:
+            msg_lower = last_user_message.lower()
+            if any(word in msg_lower for word in ['shaadi', 'marriage', 'vivah', 'wedding', 'love', 'relationship', 'partner']):
+                last_question_topic = "marriage"
+            elif any(word in msg_lower for word in ['career', 'job', 'naukri', 'business', 'work', 'office', 'promotion', 'salary']):
+                last_question_topic = "career"
+            elif any(word in msg_lower for word in ['health', 'swasthya', 'illness', 'disease', 'doctor', 'medical']):
+                last_question_topic = "health"
+            elif any(word in msg_lower for word in ['money', 'paisa', 'finance', 'investment', 'sip', 'stock']):
+                last_question_topic = "finance"
+            elif any(word in msg_lower for word in ['study', 'exam', 'padhai', 'education', 'college']):
+                last_question_topic = "education"
+            elif any(word in msg_lower for word in ['future', 'aage', 'kya', 'hoga', 'hogi', 'time', 'kab']):
+                last_question_topic = "future"
+            logger.info(f"[Enforcement Generator] Detected topic from message: {last_question_topic}")
 
         # Get user name from mem0 if available
         user_name = user_memory.get('name') if user_memory and user_memory.get('name') else None
@@ -863,21 +881,34 @@ class EnforcementMessageGenerator:
         # Build full prompt with CONVINCING value proposition
         prompt = f"""You are {astrologer_name}, a caring astrologer friend. You are OPPOSITE gender of the user.
 
+## CRITICAL INSTRUCTION - ANSWER THE USER'S QUESTION FIRST
+
+The user just asked: "{last_user_message[:100] if last_user_message else 'No question'}"
+
+**You MUST address their specific question in your first paragraph!**
+
+If they asked about marriage → Talk about their marriage timing
+If they asked about career → Talk about their career prospects
+If they asked about health → Talk about their health concerns
+If they asked about something else → Address that specific topic
+
+**DO NOT give generic kundli answers. BE SPECIFIC to their question!**
+
 ## CRITICAL INSTRUCTION - 4-5 SHORT PARAGRAPHS
 
 You MUST generate a message in 4-5 VERY SHORT paragraphs (separated by blank line).
 
 **EACH paragraph MUST be ONLY 1 SENTENCE. No long paragraphs!**
 
-**PARAGRAPH 1: Personal greeting + quick insight**
-- Use their name if available
-- Give ONE quick astrological insight
+**PARAGRAPH 1: Answer their SPECIFIC question**
+- Address what they just asked about
+- Give ONE specific insight about their topic
 - 1 sentence only
 
 **PARAGRAPH 2: What you were about to tell them**
 - "Main tumhe aur bhi batana chahti hoon..."
 - "I was just about to tell you..."
-- Create curiosity
+- Create curiosity about more details
 - 1 sentence only
 
 **PARAGRAPH 3: The interruption**
@@ -896,16 +927,16 @@ You MUST generate a message in 4-5 VERY SHORT paragraphs (separated by blank lin
 - "Kal milte hain ya abhi le lo!"
 - 1 sentence only
 
-## USER'S LAST MESSAGE
-"{last_user_message[:80] if last_user_message else 'No recent message'}"
+## USER'S QUESTION (MOST IMPORTANT - ADDRESS THIS!)
+"{last_user_message[:150] if last_user_message else 'No recent message'}"
 
-{'TOPIC DETECTED: ' + last_question_topic if last_question_topic else 'NO SPECIFIC TOPIC - Use general astrology context'}
+{'TOPIC: ' + last_question_topic.upper() if last_question_topic else 'NO SPECIFIC TOPIC - Use general astrology context'}
 
 ## EXAMPLE FOR HINGLISH (Meera to male user, asked about shaadi):
 
-{user_memory.get('name') if user_memory and user_memory.get('name') else 'Arey'} tumhari kundli mein 7th house strong hai aur shaadi ka yog bana raha hai.
+Arey! Tumhari shaadi ki baat karun toh, tumhare 7th house mein Venus aur dono mil rahe hain - shaadi ka strong yog hai next year!
 
-Main tumhe exact date aur time bataana chahti hoon.
+Main tumhe exact shaadi ka month aur date bhi bataana chahta hoon.
 
 Par meri aaj ki messages limit khatam ho gayi.
 
@@ -915,9 +946,9 @@ But yeh poora mahine tumhare liye - personal kundli analysis, har sawal ka jawab
 
 ## EXAMPLE FOR ENGLISH (Meera to male user, asked about career):
 
-{user_memory.get('name') if user_memory and user_memory.get('name') else 'Hey'} I can see your career is about to take a positive turn in the next few months.
+I can see your career is about to take a big turn - there's a promotion opportunity coming in the next 2-3 months!
 
-I was just about to give you the specific dates when my limit got exhausted.
+I was analyzing the specific dates when my message limit got exhausted.
 
 Think about it - for ₹199, you can't even get a decent coffee these days.
 
@@ -934,6 +965,7 @@ You must respond in 100% {language.upper()}:
 Return ONLY the final message text. Format as 4-5 paragraphs separated by DOUBLE newlines.
 
 **CRITICAL: Each paragraph must be 1 sentence only!**
+**CRITICAL: First paragraph MUST address their specific question!**
 
 Generate now:"""
 

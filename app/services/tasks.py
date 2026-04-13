@@ -2040,7 +2040,8 @@ Copy your code and share! 💫"""
                                 language=user_language,
                                 message_count=total_messages,
                                 today_messages=today_messages,
-                                mongo_logger_url=MONGO_LOGGER_URL
+                                mongo_logger_url=MONGO_LOGGER_URL,
+                                current_message=message  # Pass current user message
                             )
                             if limit_message:
                                 logger.info(f"[Enforcement] ✅ Successfully generated AI message for daily limit")
@@ -2269,7 +2270,8 @@ Copy your code and share! 💫"""
                     language=user_language,
                     message_count=total_messages,
                     today_messages=today_messages,
-                    mongo_logger_url=MONGO_LOGGER_URL
+                    mongo_logger_url=MONGO_LOGGER_URL,
+                    current_message=message  # Pass current user message
                 )
                 if payment_message:
                     logger.info(f"[Subscription] Successfully generated AI message for payment nudge")
@@ -2409,7 +2411,8 @@ Copy your code and share! 💫"""
                                     language=user_language,
                                     message_count=limit_check.get("messageCount", 40),
                                     today_messages=0,
-                                    mongo_logger_url=MONGO_LOGGER_URL
+                                    mongo_logger_url=MONGO_LOGGER_URL,
+                                    current_message=message  # Pass current user message
                                 )
 
                                 if ai_message:
