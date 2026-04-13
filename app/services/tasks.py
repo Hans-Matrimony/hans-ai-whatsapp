@@ -377,11 +377,92 @@ def detect_gender_from_name(name: str) -> Optional[str]:
     return None
 
 
+async def _fetch_gender_from_mem0(phone: str) -> Optional[str]:
+    """
+    Fetch user gender from Mem0 memories (fallback for old users).
+
+    Args:
+        phone: User's phone number
+
+    Returns:
+        "male", "female", or None if not found
+    """
+    try:
+        mem0_url = os.getenv("MEM0_URL", "https://rg4g0gkk0wwkk4cc00g4sg0c.api.hansastro.com")
+        mem0_api_key = os.getenv("MEM0_API_KEY")
+
+        if not mem0_url:
+            return None
+
+        user_id = f"+{phone}" if not phone.startswith("+") else f"+{phone.replace('+', '')}"
+
+        headers = {"Content-Type": "application/json"}
+        if mem0_api_key:
+            headers["Authorization"] = f"Token {mem0_api_key}"
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                f"{mem0_url}/memory/{user_id}?limit=20",
+                headers=headers
+            )
+
+            if response.status_code != 200:
+                return None
+
+            memories = response.json()
+            if not memories or not isinstance(memories, list):
+                return None
+
+            # Search through memories for gender
+            for memory in memories:
+                content = memory.get("content", "").lower()
+                metadata = memory.get("metadata", {})
+
+                # Check metadata first (more reliable)
+                if metadata.get("gender"):
+                    gender = metadata["gender"].lower()
+                    if gender in ["male", "female"]:
+                        logger.info(f"[Gender Detection] Found gender in Mem0 metadata for {user_id}: {gender}")
+                        return gender
+
+                # Check content for explicit gender mentions
+                # Look for patterns like "Gender: female", "gender: male", "User is female", etc.
+                import re
+                gender_patterns = [
+                    r"gender\s*[:\s]\s*(male|female)",
+                    r"gender\s+(male|female)",
+                    r"user\s+(is|:)\s*(male|female)",
+                    r"(?:he|she)\s+is\s+(?:a\s+)?(?:man|woman)",
+                ]
+
+                for pattern in gender_patterns:
+                    match = re.search(pattern, content)
+                    if match:
+                        detected = match.group(1) if match.group(1) else None
+                        if detected:
+                            logger.info(f"[Gender Detection] Found gender in Mem0 content for {user_id}: {detected}")
+                            return detected
+
+                # Simple keyword search (more aggressive)
+                if any(phrase in content for phrase in ["gender: female", "gender-female", "user is female", "she is a"]):
+                    logger.info(f"[Gender Detection] Detected female from Mem0 keywords for {user_id}")
+                    return "female"
+                elif any(phrase in content for phrase in ["gender: male", "gender-male", "user is male", "he is a"]):
+                    logger.info(f"[Gender Detection] Detected male from Mem0 keywords for {user_id}")
+                    return "male"
+
+            return None
+
+    except Exception as e:
+        logger.warning(f"[Gender Detection] Mem0 lookup failed: {e}")
+        return None
+
+
 async def get_user_gender(phone: str, message: str) -> str:
     """
-    Get user gender from MongoDB, cache, or detect from message.
+    Get user gender from MongoDB, Mem0 (fallback), cache, or detect from message.
 
-    Priority: MongoDB > Cache > Detection
+    Priority: MongoDB > Mem0 > Cache > Detection > Default
 
     Args:
         phone: User's phone number
@@ -406,7 +487,22 @@ async def get_user_gender(phone: str, message: str) -> str:
     except Exception as e:
         logger.warning(f"[Gender Detection] MongoDB lookup failed: {e}")
 
-    # PRIORITY 2: Check cache
+    # PRIORITY 2: Check Mem0 (fallback for old users who don't have MongoDB data)
+    try:
+        mem0_gender = await _fetch_gender_from_mem0(phone)
+        if mem0_gender:
+            # Update cache for next time
+            _user_gender_cache[user_id] = mem0_gender
+            # Save to MongoDB for next time (async, don't wait)
+            try:
+                asyncio.create_task(user_metadata.update_user_metadata(phone, {"gender": mem0_gender}))
+            except Exception:
+                pass
+            return mem0_gender
+    except Exception as e:
+        logger.warning(f"[Gender Detection] Mem0 lookup failed: {e}")
+
+    # PRIORITY 3: Check cache
     if user_id in _user_gender_cache:
         logger.info(f"[Gender Detection] Found gender in cache for {user_id}: {_user_gender_cache[user_id]}")
         return _user_gender_cache[user_id]

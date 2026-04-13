@@ -659,10 +659,20 @@ class EnforcementMessageGenerator:
                     # Extract gender
                     if not user_info["gender"]:
                         if any(word in content.lower() for word in ['gender:', 'male', 'female', 'gender']):
-                            if 'female' in content.lower() or 'woman' in content.lower() or girl in content.lower():
+                            # Check for female indicators
+                            if ('female' in content.lower() or 'woman' in content.lower() or
+                                'girl' in content.lower() or 'she is' in content.lower()):
                                 user_info["gender"] = "female"
-                            elif 'male' in content.lower() or 'man' in content.lower() or 'boy' in content.lower():
+                            # Check for male indicators
+                            elif ('male' in content.lower() or 'man' in content.lower() or
+                                  'boy' in content.lower() or 'he is' in content.lower()):
                                 user_info["gender"] = "male"
+
+                        # Also check metadata for explicit gender
+                        if not user_info["gender"] and metadata.get("gender"):
+                            gender_from_meta = metadata["gender"].lower()
+                            if gender_from_meta in ["male", "female"]:
+                                user_info["gender"] = gender_from_meta
 
                     # Extract concerns
                     content_lower = content.lower()
