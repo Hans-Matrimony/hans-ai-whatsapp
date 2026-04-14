@@ -57,9 +57,8 @@ class EnforcementMessageGenerator:
 
     # Pricing information (update from .env or settings if needed)
     PRICING = {
-        "monthly": 199,
-        "yearly": 1999,
-        "daily": 10
+        "monthly": 99,
+        "daily": 9
     }
 
     def __init__(
@@ -943,7 +942,6 @@ class EnforcementMessageGenerator:
         # Pricing info
         pricing_info = (
             f"Pricing: ₹{self.PRICING['monthly']}/month, "
-            f"₹{self.PRICING['yearly']}/year (best value), "
             f"₹{self.PRICING['daily']}/day"
         )
 

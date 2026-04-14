@@ -4,6 +4,7 @@ import sys
 
 # Configure API to point to your local Node instance (we'll start it)
 os.environ["MONGO_LOGGER_URL"] = "http://localhost:5000"
+os.environ["MEM0_URL"] = "" # Disable mem0 fallback for this test
 
 # Add parent directory to path so we can import the app modules
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
