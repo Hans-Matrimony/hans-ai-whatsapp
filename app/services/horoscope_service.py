@@ -250,7 +250,7 @@ Rules:
 📆 *Lucky Day:* {horoscope.get('lucky_day', 'N/A')}
 
 ---
-🔥 *100% Accurate* - Daily Vedic Insights"""
+🔮 Daily Vedic Insights"""
         return message
 
     def get_birth_details_request_message(self, language: str = "english") -> str:

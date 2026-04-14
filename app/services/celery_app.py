@@ -3,6 +3,7 @@ Celery application for background task processing
 """
 import os
 from celery import Celery
+from celery.schedules import crontab
 
 # Get Redis URL from environment
 redis_url = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
@@ -52,6 +53,11 @@ celery_app.conf.beat_schedule = {
     'proactive-nudge-every-5-minutes': {
         'task': 'app.services.tasks.proactive_nudge_task',
         'schedule': 300.0,  # 5 minutes
+    },
+    # Daily horoscope at 7:00 AM IST (runs daily)
+    'daily-horoscope-7am-ist': {
+        'task': 'app.services.tasks.daily_horoscope_task',
+        'schedule': crontab(minute=0, hour=7),  # 7:00 AM daily
     },
 }
 

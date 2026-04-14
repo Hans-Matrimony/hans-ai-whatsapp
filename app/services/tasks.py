@@ -4134,3 +4134,326 @@ async def _get_recent_conversation_from_mongo(user_id: str, session_data: dict =
     except Exception as e:
         logger.error(f"[Proactive Nudge] Error extracting conversation: {e}", exc_info=True)
         return result
+
+
+# ===================================================================
+# Daily Horoscope Task - Runs at 7 AM IST daily
+# ===================================================================
+
+@celery_app.task(bind=True, max_retries=2, default_retry_delay=300)
+def daily_horoscope_task():
+    """
+    Send daily horoscope to all users with birth details at 7 AM IST.
+    ONLY RUNS ONCE PER DAY - uses Redis global lock for deduplication.
+    Fetches birth details from user_metadata (primary) or Mem0 (fallback).
+    Detects language from MongoDB conversations (Hinglish or English).
+    """
+    import asyncio
+    from datetime import datetime
+    import pytz
+
+    try:
+        logger.info("[Daily Horoscope] ===== TASK STARTED =====")
+
+        # Get current IST time
+        ist = pytz.timezone('Asia/Kolkata')
+        now_ist = datetime.now(ist)
+        today_date = now_ist.strftime('%Y-%m-%d')
+        current_hour = now_ist.hour
+        current_minute = now_ist.minute
+
+        logger.info(f"[Daily Horoscope] Current time: {now_ist.strftime('%Y-%m-%d %H:%M:%S')} IST")
+
+        # GLOBAL LOCK: Check if already ran today
+        global_lock_key = f"daily_horoscope_global_lock:{today_date}"
+        if _nudge_redis:
+            try:
+                if _nudge_redis.exists(global_lock_key):
+                    logger.info(f"[Daily Horoscope] ✋ Already ran today ({today_date}), skipping to prevent duplicate sends")
+                    return {"status": "already_ran_today", "date": today_date}
+            except Exception as redis_err:
+                logger.warning(f"[Daily Horoscope] Redis global lock check failed: {redis_err}")
+
+        # STRICT TIME CHECK: Only run at exactly 7:00 AM IST (with 15-minute grace window)
+        # This ensures the task only runs once per day at the scheduled time
+        is_seven_am = (current_hour == 7 and current_minute < 15)
+
+        # Allow test mode to bypass time check
+        test_mode = os.getenv("DAILY_HOROSCOPE_TEST_NUMBER")
+
+        if not is_seven_am and not test_mode:
+            logger.info(f"[Daily Horoscope] Not 7:00 AM (currently {current_hour}:{current_minute:02d} IST), skipping")
+            return {"status": "not_scheduled_time", "current_time": f"{current_hour}:{current_minute:02d}"}
+
+        logger.info(f"[Daily Horoscope] ✅ Time check passed - running for {today_date}")
+
+        # Set global lock for today (expires in 26 hours to cover any edge cases)
+        if _nudge_redis:
+            try:
+                lock_ttl = 26 * 3600  # 26 hours - ensures it lasts until tomorrow
+                _nudge_redis.setex(global_lock_key, lock_ttl, "1")
+                logger.info(f"[Daily Horoscope] 🔒 Global lock set for {today_date} (expires in 26h)")
+            except Exception as redis_err:
+                logger.warning(f"[Daily Horoscope] Failed to set global lock: {redis_err}")
+
+        # Run the main async function
+        result = asyncio.run(_send_daily_horoscope(today_date))
+
+        logger.info("[Daily Horoscope] ===== TASK COMPLETED =====")
+        logger.info(f"[Daily Horoscope] Result: {result}")
+        return result
+
+    except Exception as e:
+        logger.error(f"[Daily Horoscope] ===== TASK FAILED =====", exc_info=True)
+        logger.error(f"[Daily Horoscope] Error: {e}")
+        return {"error": str(e)}
+
+
+async def _send_daily_horoscope(today_date: str = None):
+    """
+    Send daily horoscope to all users with birth details.
+
+    Args:
+        today_date: Today's date in YYYY-MM-DD format for deduplication keys
+    """
+    if not MONGO_LOGGER_URL:
+        logger.error("[Daily Horoscope] MONGO_LOGGER_URL not configured!")
+        return {"error": "MongoDB URL not configured"}
+
+    # Use today's date for dedup keys
+    if not today_date:
+        from datetime import datetime
+        import pytz
+        ist = pytz.timezone('Asia/Kolkata')
+        today_date = datetime.now(ist).strftime('%Y-%m-%d')
+
+    logger.info(f"[Daily Horoscope] Fetching users from {MONGO_LOGGER_URL}/messages")
+    logger.info(f"[Daily Horoscope] Using date key: {today_date}")
+
+    # Test mode: Only send to specific number if configured
+    test_number = os.getenv("DAILY_HOROSCOPE_TEST_NUMBER")
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        # Get all users from MongoDB Logger
+        try:
+            response = await client.get(f"{MONGO_LOGGER_URL}/messages")
+            logger.info(f"[Daily Horoscope] MongoDB response status: {response.status_code}")
+
+            if response.status_code != 200:
+                logger.error(f"[Daily Horoscope] Failed to fetch users: {response.status_code} - {response.text}")
+                return {"error": f"Failed to fetch users: {response.status_code}"}
+
+            data = response.json()
+            users = data.get("users", [])
+            logger.info(f"[Daily Horoscope] Total users found: {len(users)}")
+
+        except Exception as e:
+            logger.error(f"[Daily Horoscope] Exception fetching users: {e}", exc_info=True)
+            return {"error": f"Exception fetching users: {e}"}
+
+        # Initialize Horoscope Service
+        from app.services.horoscope_service import HoroscopeService
+        horoscope_service = HoroscopeService()
+
+        # Process users
+        sent_count = 0
+        skipped_count = 0
+        error_count = 0
+        users_checked = 0
+
+        for user in users:
+            user_id = user.get("userId", "")
+            if not user_id or not user_id.startswith("+"):
+                continue
+
+            # Extract phone number (remove +)
+            phone = user_id.replace("+", "")
+
+            # TEST MODE: Skip if not test number
+            if test_number:
+                if user_id != test_number and phone != test_number and user_id != f"+{test_number}":
+                    logger.debug(f"[Daily Horoscope] TESTING MODE: Skipping {user_id}")
+                    continue
+                logger.info(f"[Daily Horoscope] ✓ Processing {user_id} (matches test number)")
+
+            users_checked += 1
+
+            try:
+                # DEDUP CHECK: Skip if horoscope was already sent today
+                # Uses today_date parameter from the main task (consistent across all users)
+                dedup_key = f"daily_horoscope_sent:{user_id}:{today_date}"
+
+                if _nudge_redis:
+                    try:
+                        if _nudge_redis.exists(dedup_key):
+                            logger.info(f"[Daily Horoscope] {user_id}: ✅ Already sent today ({today_date}), skipping")
+                            skipped_count += 1
+                            continue
+                    except Exception as redis_err:
+                        logger.warning(f"[Daily Horoscope] Redis check failed for {user_id}: {redis_err}")
+                else:
+                    # Fallback: Log warning but continue (no Redis = no dedup)
+                    logger.warning(f"[Daily Horoscope] No Redis connection - dedup disabled for {user_id}")
+
+                # Get birth details from user_metadata (MongoDB primary, Mem0 fallback)
+                logger.info(f"[Daily Horoscope] Checking birth data for {user_id}")
+                birth_data = await user_metadata.get_user_metadata(phone)
+
+                if not birth_data:
+                    logger.info(f"[Daily Horoscope] {user_id}: No birth data found, skipping")
+                    skipped_count += 1
+                    continue
+
+                dob = birth_data.get("dob")
+                tob = birth_data.get("tob")
+                place = birth_data.get("place")
+
+                # Check if we have complete birth details
+                if not all([dob, tob, place]):
+                    logger.info(f"[Daily Horoscope] {user_id}: Incomplete birth data (dob={dob}, tob={tob}, place={place}), skipping")
+                    skipped_count += 1
+                    continue
+
+                logger.info(f"[Daily Horoscope] {user_id}: ✅ Birth data found - DOB={dob}, Place={place}")
+
+                # Detect language from MongoDB conversations
+                detected_language = await _detect_language_for_user(user_id, client)
+                logger.info(f"[Daily Horoscope] {user_id}: Detected language: {detected_language}")
+
+                # Generate daily horoscope
+                logger.info(f"[Daily Horoscope] {user_id}: Generating horoscope...")
+                horoscope_data = await horoscope_service.generate_horoscope(
+                    dob=dob,
+                    tob=tob,
+                    place=place,
+                    language=detected_language,
+                    phone=phone
+                )
+
+                if not horoscope_data:
+                    logger.error(f"[Daily Horoscope] {user_id}: Failed to generate horoscope")
+                    error_count += 1
+                    continue
+
+                # Format the horoscope message
+                horoscope_message = horoscope_service.format_horoscope_message(horoscope_data)
+
+                # Send via WhatsApp
+                logger.info(f"[Daily Horoscope] {user_id}: Sending horoscope...")
+                await _send_whatsapp_message(client, phone, horoscope_message)
+                sent_count += 1
+                logger.info(f"[Daily Horoscope] {user_id}: ✅ Horoscope sent successfully!")
+
+                # Mark as sent in Redis (26-hour expiry - ensures it lasts until tomorrow)
+                if _nudge_redis:
+                    try:
+                        _nudge_redis.setex(dedup_key, 26 * 3600, "1")  # 26 hours TTL
+                        logger.info(f"[Daily Horoscope] 🔒 Set dedup key for {user_id} (expires in 26h)")
+                    except Exception as redis_err:
+                        logger.warning(f"[Daily Horoscope] Redis set failed for {user_id}: {redis_err}")
+
+            except Exception as e:
+                logger.error(f"[Daily Horoscope] {user_id}: Error processing - {e}", exc_info=True)
+                error_count += 1
+                continue
+
+        logger.info(f"[Daily Horoscope] ===== SUMMARY =====")
+        logger.info(f"[Daily Horoscope] Users checked: {users_checked}")
+        logger.info(f"[Daily Horoscope] Sent: {sent_count}")
+        logger.info(f"[Daily Horoscope] Skipped (no birth data): {skipped_count}")
+        logger.info(f"[Daily Horoscope] Errors: {error_count}")
+
+        return {
+            "status": "completed",
+            "users_checked": users_checked,
+            "sent": sent_count,
+            "skipped": skipped_count,
+            "errors": error_count
+        }
+
+
+async def _detect_language_for_user(user_id: str, client: httpx.AsyncClient) -> str:
+    """
+    Detect user's language from their MongoDB conversations.
+    Returns 'hinglish' or 'english'.
+    """
+    try:
+        # Fetch recent messages from MongoDB
+        response = await client.get(
+            f"{MONGO_LOGGER_URL}/messages",
+            params={"userId": user_id, "role": "user", "limit": 20}
+        )
+
+        if response.status_code != 200:
+            logger.warning(f"[Daily Horoscope] Failed to fetch messages for language detection: {response.status_code}")
+            return "english"  # Default to English
+
+        data = response.json()
+        messages = data.get("messages", [])
+
+        if not messages:
+            return "english"  # Default to English
+
+        # Hinglish keywords (Roman script Hindi)
+        hinglish_keywords = {
+            'mai', 'me', 'main', 'mera', 'meri', 'mera', 'tera', 'teri', 'tum', 'tumhara',
+            'ap', 'aap', 'aapka', 'aapki', 'hamara', 'hamari', 'uska', 'uski',
+            'hai', 'hain', 'ho', 'hoga', 'hogi', 'hon', 'tha', 'thi', 'the',
+            'kar', 'ke', 'ki', 'ko', 'se', 'mein', 'me', 'par', 'liye', 'wajahse',
+            'karta', 'karti', 'karte', 'sakta', 'sakti', 'sake', 'chahta', 'chahti',
+            'chaiye', 'lena', 'dene', 'de', 'diya', 'dijiye', 'kijiye', 'batana',
+            'bata', 'bolo', 'bol', 'aana', 'jana', 'ana', 'ja', 'raha', 'rahi', 'rahe',
+            'karunga', 'karegi', 'karenge', 'karun', 'kar', 'rakha', 'rakhi',
+            'abhi', 'ab', 'kal', 'aaj', 'aj', 'pehli', 'pichli', 'baad', 'mein',
+            'kabhi', 'kab', 'kahan', 'kaise', 'kitna', 'kitni', 'kitne', 'itna',
+            'itni', 'bahut', 'bohot', 'zyada', 'kam', 'thoda', 'kaafi',
+            'kya', 'kyun', 'kyunki', 'kisko', 'kiska', 'kaun', 'kaunsa', 'kahan',
+            'aur', 'or', 'lekin', 'magar', 'par', 'toh', 'to', 'bhi', 'hi', 'tak',
+            'acha', 'achha', 'theek', 'thik', 'sahi', 'galat', 'maza', 'dushman',
+            'dost', 'pyaar', 'pyar', 'love', 'hate', 'ghussa', 'gussa', 'khush',
+            'udaas', 'naraaz', 'khushi', 'gussaa', 'dard', 'pain',
+            'mummy', 'papa', 'mummyji', 'papaaji', 'maa', 'baap', 'beti', 'beta',
+            'bhai', 'behen', 'didi', 'bhaiya', 'family', 'ghar', 'gharpe',
+            'kundli', 'rashi', 'lagna', 'grah', 'nakshatra', 'dasha', 'mahadasha',
+            'vivah', 'shaadi', 'marriage', 'janam', 'patrika',
+            'ji', 'jii', 'sahij', 'sahi', 'bilkul', 'pakka', 'shayad', 'hmm',
+            'haan', 'haanji', 'hanji', 'na', 'nahi', 'nahee', 'ok', 'okay',
+            'sorry', 'thank', 'thanks', 'welcome', 'please', 'kripaya',
+            'dekhna', 'dekho', 'sunna', 'suno', 'samajhna', 'samajh', 'samjho',
+            'pata', 'maloom', 'chal', 'chalo', 'ruk', 'ruko', 'wait', 'karo',
+            'ek', 'do', 'teen', 'char', 'paanch', 'cheh', 'saath', 'aath', 'nau', 'das',
+        }
+
+        # Analyze last 10 user messages
+        hinglish_count = 0
+        total_words = 0
+
+        for msg in messages[-10:]:
+            content = msg.get("text", msg.get("content", ""))
+            if not content:
+                continue
+
+            words = content.lower().split()
+            total_words += len(words)
+
+            # Count Hinglish keywords
+            for word in words:
+                clean_word = word.strip('.,!?;:"\'-()[]{}')
+                if clean_word in hinglish_keywords:
+                    hinglish_count += 1
+
+        if total_words == 0:
+            return "english"
+
+        # Calculate Hinglish ratio (8% threshold)
+        hinglish_ratio = hinglish_count / total_words
+        is_hinglish = hinglish_ratio > 0.08
+
+        detected = "hinglish" if is_hinglish else "english"
+        logger.debug(f"[Daily Horoscope] Language detection: {hinglish_count}/{total_words} = {hinglish_ratio:.2%} -> {detected}")
+
+        return detected
+
+    except Exception as e:
+        logger.warning(f"[Daily Horoscope] Language detection error: {e}")
+        return "english"  # Default to English on error
