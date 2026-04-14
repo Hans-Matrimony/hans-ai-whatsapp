@@ -1317,6 +1317,76 @@ async def _download_whatsapp_media_file(media_id: str) -> dict:
         return None
 
 
+def _filter_error_messages(text: str) -> str:
+    """
+    Filter out technical error messages from OpenClaw agent responses
+    and replace them with user-friendly fallback messages.
+
+    This ONLY filters technical errors like "No response from OpenClaw".
+    Natural friendly endings like "Theek hai na" are preserved.
+
+    Args:
+        text: The raw response text from OpenClaw
+
+    Returns:
+        Filtered text (either original if no errors, or friendly fallback)
+    """
+    if not text:
+        return text
+
+    # Check for TECHNICAL error indicators (not natural phrases)
+    technical_error_indicators = [
+        "no response from openclaw",
+        "error from openclaw",
+        "openclaw api error",
+        "service unavailable",
+        "failed to generate",
+        "unable to respond",
+        "api timeout",
+        "rate limit exceeded",
+        "technical error",
+        "system error",
+        "internal server error",
+        "gateway error"
+    ]
+
+    text_lower = text.lower()
+    has_technical_error = any(error in text_lower for error in technical_error_indicators)
+
+    if has_technical_error:
+        # Check if the response is SHORT (likely just an error message)
+        # OR if it starts with technical error language
+        if len(text.strip()) < 100 or text_lower.startswith(("error:", "no response", "failed:", "unable:", "api ")):
+            logger.warning(f"[ERROR_FILTER] Detected technical error: {text[:100]}")
+            # Return a friendly generic message
+            return "Sorry, I'm having some technical difficulties right now. Please try again in a moment. I'll be back to help you shortly! ⭐️"
+
+    # Check for ROBOTIC repetitive endings (irritating ones) that should be removed
+    # These are specifically the "try karke batao" type endings
+    irritating_endings = [
+        "try karke batao",
+        "try karke batana",
+        "try karke dekhna",
+        "karke dekho",
+        "karke batao",
+        "kya kehte hain",
+        "kya bolte ho",
+        "check karein"
+    ]
+
+    # Check if the LAST line contains an irritating ending and remove it
+    lines = text.split('\n')
+    if lines:
+        last_line_lower = lines[-1].strip().lower()
+        for ending in irritating_endings:
+            if ending in last_line_lower:
+                # Remove the last line containing the irritating ending
+                logger.info(f"[ERROR_FILTER] Removed irritating ending: {ending}")
+                return '\n'.join(lines[:-1]).strip()
+
+    return text
+
+
 def _extract_media_from_reply(text: str) -> Tuple[str, List[dict]]:
     """Parse MEDIA: tokens and MEDIA_BASE64: tokens from agent response text.
     Returns (clean_text, list_of_media_items).
@@ -2823,6 +2893,13 @@ Copy your code and share! 💫"""
         logger.info(f"[DEBUG] Raw reply from agent (first 500 chars): {reply[:500]}...")
         clean_reply, media_items = _extract_media_from_reply(reply)
         logger.info(f"[DEBUG] Extracted {len(media_items)} media items, clean_reply length: {len(clean_reply)}")
+
+        # ===================================================================
+        # FILTER ERROR MESSAGES - Replace technical errors with friendly messages
+        # ===================================================================
+        clean_reply = _filter_error_messages(clean_reply)
+        if clean_reply != reply:
+            logger.warning(f"[ERROR_FILTER] Replaced error message with friendly fallback")
 
         # ===================================================================
         # DETECT PDF REQUESTS FROM AI AGENT RESPONSE

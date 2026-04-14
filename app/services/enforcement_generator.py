@@ -217,11 +217,33 @@ class EnforcementMessageGenerator:
             cached_message = self.redis.get(cache_key)
 
             if cached_message:
-                logger.info(
-                    f"[Enforcement Generator] Cache HIT for {enforcement_type} - "
-                    f"returning cached message"
-                )
-                return cached_message
+                # Validate cached message is not an error response
+                # (in case error responses were cached before the fix)
+                error_responses = [
+                    "no response from openclaw",
+                    "error from openclaw",
+                    "failed to generate",
+                    "unable to respond",
+                    "api error",
+                    "service unavailable",
+                    "an error occurred"
+                ]
+
+                cached_lower = cached_message.lower()
+                if any(error in cached_lower for error in error_responses) or len(cached_message) < 20:
+                    logger.warning(
+                        f"[Enforcement Generator] Cached message is invalid/error: {cached_message[:100]}"
+                    )
+                    # Invalidate the bad cache entry
+                    self.redis.delete(cache_key)
+                    logger.info(f"[Enforcement Generator] Invalidated bad cache entry")
+                    cached_message = None
+                else:
+                    logger.info(
+                        f"[Enforcement Generator] Cache HIT for {enforcement_type} - "
+                        f"returning cached message"
+                    )
+                    return cached_message
 
             logger.info(
                 f"[Enforcement Generator] Cache MISS for {enforcement_type} - "
@@ -1094,55 +1116,158 @@ Generate now:"""
 
     async def _call_openclaw_api(self, prompt: str) -> Optional[str]:
         """
-        Call OpenClaw API to generate the message.
+        Call OpenClaw API to generate the message with retry logic.
+
+        Handles intermittent failures by retrying with exponential backoff.
         """
-        try:
-            # We must pass the operator scope since OpenClaw blocks 
-            # direct model generation via Gateway without it.
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.openclaw_token}",
-                "x-openclaw-scopes": "operator.admin,operator.write"
-            }
+        import asyncio
 
-            payload = {
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                "max_tokens": 300,
-                "temperature": 0.8,
-                "model": "openclaw"
-            }
+        max_retries = 3
+        base_delay = 1.0  # seconds
 
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(
-                    f"{self.openclaw_url}/v1/chat/completions",
-                    json=payload,
-                    headers=headers
-                )
+        for attempt in range(max_retries):
+            try:
+                # We must pass the operator scope since OpenClaw blocks
+                # direct model generation via Gateway without it.
+                headers = {
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {self.openclaw_token}",
+                    "x-openclaw-scopes": "operator.admin,operator.write"
+                }
 
-                if response.status_code != 200:
-                    logger.error(
-                        f"[Enforcement Generator] OpenClaw API error: "
-                        f"{response.status_code} - {response.text[:200]}"
+                # Use Google Gemini 3.1 Flash model (as configured in openclaw.json)
+                payload = {
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": prompt
+                        }
+                    ],
+                    "max_tokens": 300,
+                    "temperature": 0.8,
+                    "model": "google/gemini-3.1-flash"
+                }
+
+                # Increase timeout for retries
+                timeout = self.timeout * (1 + attempt * 0.5)
+
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    response = await client.post(
+                        f"{self.openclaw_url}/v1/chat/completions",
+                        json=payload,
+                        headers=headers
                     )
-                    return None
 
-                data = response.json()
+                    if response.status_code != 200:
+                        logger.warning(
+                            f"[Enforcement Generator] OpenClaw API error (attempt {attempt + 1}/{max_retries}): "
+                            f"{response.status_code} - {response.text[:200]}"
+                        )
 
-                if "choices" in data and len(data["choices"]) > 0:
-                    message = data["choices"][0]["message"]["content"].strip()
-                    return message
-                else:
-                    logger.error("[Enforcement Generator] Invalid OpenClaw API response format")
-                    return None
+                        # Don't retry on client errors (4xx)
+                        if 400 <= response.status_code < 500:
+                            logger.error(f"[Enforcement Generator] Client error, not retrying")
+                            return None
 
-        except Exception as e:
-            logger.error(f"[Enforcement Generator] Error calling OpenClaw: {e}", exc_info=True)
-            return None
+                        # Retry on server errors (5xx) or timeouts
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(base_delay * (2 ** attempt))
+                            continue
+                        return None
+
+                    data = response.json()
+
+                    # Log the full response for debugging
+                    logger.debug(
+                        f"[Enforcement Generator] OpenClaw API response: {str(data)[:500]}"
+                    )
+
+                    if "choices" in data and len(data["choices"]) > 0:
+                        message = data["choices"][0]["message"]["content"].strip()
+
+                        # Validate the message is not an error response
+                        # OpenClaw sometimes returns error messages as valid content
+                        error_responses = [
+                            "no response from openclaw",
+                            "error from openclaw",
+                            "failed to generate",
+                            "unable to respond",
+                            "api error",
+                            "service unavailable",
+                            "an error occurred",
+                            "timeout",
+                            "rate limit"
+                        ]
+
+                        message_lower = message.lower()
+                        if any(error in message_lower for error in error_responses):
+                            logger.warning(
+                                f"[Enforcement Generator] OpenClaw returned error response (attempt {attempt + 1}/{max_retries}): {message[:100]}"
+                            )
+
+                            # Retry on error responses
+                            if attempt < max_retries - 1:
+                                await asyncio.sleep(base_delay * (2 ** attempt))
+                                continue
+                            return None
+
+                        # Also check for suspiciously short/generic responses
+                        if len(message) < 20:
+                            logger.warning(
+                                f"[Enforcement Generator] OpenClaw response too short (attempt {attempt + 1}/{max_retries}): {message[:100]}"
+                            )
+
+                            # Retry on short responses
+                            if attempt < max_retries - 1:
+                                await asyncio.sleep(base_delay * (2 ** attempt))
+                                continue
+                            return None
+
+                        logger.info(
+                            f"[Enforcement Generator] ✅ Success on attempt {attempt + 1}/{max_retries}"
+                        )
+                        return message
+                    else:
+                        logger.error(
+                            f"[Enforcement Generator] Invalid OpenClaw API response format (attempt {attempt + 1}/{max_retries})"
+                        )
+
+                        # Retry on invalid format
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(base_delay * (2 ** attempt))
+                            continue
+                        return None
+
+            except asyncio.TimeoutError as e:
+                logger.warning(
+                    f"[Enforcement Generator] Timeout on attempt {attempt + 1}/{max_retries}: {e}"
+                )
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(base_delay * (2 ** attempt))
+                    continue
+                return None
+
+            except httpx.TimeoutException as e:
+                logger.warning(
+                    f"[Enforcement Generator] HTTP timeout on attempt {attempt + 1}/{max_retries}: {e}"
+                )
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(base_delay * (2 ** attempt))
+                    continue
+                return None
+
+            except Exception as e:
+                logger.error(
+                    f"[Enforcement Generator] Error calling OpenClaw (attempt {attempt + 1}/{max_retries}): {e}",
+                    exc_info=True
+                )
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(base_delay * (2 ** attempt))
+                    continue
+                return None
+
+        logger.error(f"[Enforcement Generator] Failed after {max_retries} attempts")
+        return None
 
 
 # Helper function to create generator instance
@@ -1195,3 +1320,66 @@ def create_enforcement_generator(
             exc_info=True
         )
         return None
+
+
+def clear_bad_enforcement_cache(redis_url: str, dry_run: bool = True) -> int:
+    """
+    Clear all bad/error enforcement messages from Redis cache.
+
+    This is useful for cleaning up error responses like "No response from OpenClaw"
+    that may have been cached before the validation fix was applied.
+
+    Args:
+        redis_url: Redis connection URL
+        dry_run: If True, only report what would be deleted (don't actually delete)
+
+    Returns:
+        Number of bad cache entries found (and deleted if dry_run=False)
+    """
+    import redis
+
+    error_responses = [
+        "no response from openclaw",
+        "error from openclaw",
+        "failed to generate",
+        "unable to respond",
+        "api error",
+        "service unavailable",
+        "an error occurred"
+    ]
+
+    try:
+        redis_client = redis.from_url(redis_url, decode_responses=True)
+        redis_client.ping()
+
+        # Scan for all enforcement cache keys
+        bad_keys = []
+        for key in redis_client.scan_iter(match="enforcement:*"):
+            value = redis_client.get(key)
+            if value:
+                value_lower = value.lower()
+                if any(error in value_lower for error in error_responses) or len(value) < 20:
+                    bad_keys.append(key)
+                    logger.warning(
+                        f"[Enforcement Generator] Bad cache entry found: {key} = {value[:100]}"
+                    )
+
+        if not dry_run:
+            for key in bad_keys:
+                redis_client.delete(key)
+            logger.info(
+                f"[Enforcement Generator] Cleared {len(bad_keys)} bad cache entries"
+            )
+        else:
+            logger.info(
+                f"[Enforcement Generator] Found {len(bad_keys)} bad cache entries (dry run, not deleted)"
+            )
+
+        return len(bad_keys)
+
+    except Exception as e:
+        logger.error(
+            f"[Enforcement Generator] Error clearing bad cache: {e}",
+            exc_info=True
+        )
+        return 0
