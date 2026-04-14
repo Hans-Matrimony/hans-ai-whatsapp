@@ -1890,42 +1890,12 @@ Copy your code and share! 💫"""
                 logger.error(f"[Button Parse] Failed to parse plan number from: {parts[2]}")
                 pass
 
-    # REMOVED: elif message.strip().isdigit() - this was causing false positives
-    # Users sending numbers in chat were incorrectly treated as plan selection
-    # Plan selection should ONLY come from button clicks or explicit plan names
-
-    else:
-        # Try to match plan name from user message
-        # Fetch plans to match against
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as fetch_client:
-                plans_response = await fetch_client.get(
-                    f"{SUBSCRIPTIONS_URL}/plans?active_only=true"
-                )
-                if plans_response.status_code == 200:
-                    plans_data = plans_response.json()
-                    plans = plans_data.get("plans", [])
-
-                    # Normalize user message for matching
-                    user_message_lower = message.strip().lower()
-
-                    # Try to match plan name (case-insensitive, partial match)
-                    for idx, plan in enumerate(plans):
-                        plan_name = plan.get("name", "").lower()
-                        plan_id = plan.get("planId", "").lower()
-
-                        # Check if user message contains plan name or plan ID
-                        if (user_message_lower in plan_name or
-                            plan_name in user_message_lower or
-                            user_message_lower in plan_id or
-                            plan_id in user_message_lower):
-                            plan_number = idx + 1  # Convert to 1-based index
-                            plan_id_from_name = plan.get("planId")
-                            logger.info(f"Matched plan by name: {plan.get('name')} (plan_number={plan_number})")
-                            break
-        except Exception as e:
-            logger.error(f"Error matching plan by name: {e}")
-            # Continue to plan_number check below
+    # REMOVED: All text-based plan detection
+    # Plan selection should ONLY come from button clicks (buy_plan_X format)
+    # NO plan selection from:
+    # - numeric messages (like "1894") - REMOVED
+    # - plan names in text (like "monthly plan") - REMOVED below
+    # Payment/plan selection happens ONLY through button clicks!
 
     if plan_number is not None:
 
