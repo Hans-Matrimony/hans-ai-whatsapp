@@ -1889,8 +1889,11 @@ Copy your code and share! 💫"""
             except ValueError:
                 logger.error(f"[Button Parse] Failed to parse plan number from: {parts[2]}")
                 pass
-    elif message.strip().isdigit():
-        plan_number = int(message.strip())
+
+    # REMOVED: elif message.strip().isdigit() - this was causing false positives
+    # Users sending numbers in chat were incorrectly treated as plan selection
+    # Plan selection should ONLY come from button clicks or explicit plan names
+
     else:
         # Try to match plan name from user message
         # Fetch plans to match against
