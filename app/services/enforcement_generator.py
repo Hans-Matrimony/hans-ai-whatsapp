@@ -1133,7 +1133,7 @@ Generate now:"""
                     "x-openclaw-scopes": "operator.admin,operator.write"
                 }
 
-                # Use Google Gemini 3.1 Flash model (as configured in openclaw.json)
+                # Use OpenClaw model for generation
                 payload = {
                     "messages": [
                         {
@@ -1143,7 +1143,7 @@ Generate now:"""
                     ],
                     "max_tokens": 300,
                     "temperature": 0.8,
-                    "model": "google/gemini-3.1-flash"
+                    "model": "openclaw"
                 }
 
                 # Increase timeout for retries
