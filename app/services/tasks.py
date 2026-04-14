@@ -42,26 +42,22 @@ MEM0_URL = os.getenv("MEM0_URL", "https://rg4g0gkk0wwkk4cc00g4sg0c.api.hansastro
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 MAX_MESSAGES_PER_MINUTE_PER_USER = 10  # WhatsApp's actual limit is around 20-60/min per user
 
-# Initialize user metadata service if MongoDB URL is available
-# Priority: MONGO_METADATA_URL > MONGO_LOGGER_URL (if it's a direct connection)
-metadata_url = MONGO_METADATA_URL or MONGO_LOGGER_URL
+# Initialize user metadata service via API Dashboard
+# Priority: MONGO_LOGGER_URL (API mode)
+metadata_url = MONGO_LOGGER_URL
 
-if metadata_url and metadata_url.startswith(("mongodb://", "mongodb+srv://")):
+if metadata_url:
     try:
         init_result = user_metadata.init_user_metadata_service(metadata_url)
         if init_result:
-            logger.info(f"[User Metadata] Service initialized successfully using: {'MONGO_METADATA_URL' if MONGO_METADATA_URL else 'MONGO_LOGGER_URL'}")
+            logger.info(f"[User Metadata] API Service initialized successfully using: {metadata_url}")
         else:
-            logger.warning("[User Metadata] Failed to initialize service")
+            logger.warning("[User Metadata] Failed to initialize API service")
     except Exception as e:
-        logger.warning(f"[User Metadata] Failed to initialize service: {e}")
-elif metadata_url:
-    logger.warning(f"[User Metadata] URL is set but is not a direct MongoDB connection (HTTP URL detected): {metadata_url[:50]}...")
-    logger.warning("[User Metadata] User metadata features disabled - requires mongodb:// or mongodb+srv:// URL")
-    logger.warning("[User Metadata] Set MONGO_METADATA_URL environment variable with MongoDB connection string")
+        logger.warning(f"[User Metadata] Failed to initialize API service: {e}")
 else:
-    logger.warning("[User Metadata] No MongoDB URL configured (MONGO_METADATA_URL or MONGO_LOGGER_URL with mongodb:// prefix)")
-    logger.warning("[User Metadata] User metadata features disabled - gender/birth details will not persist")
+    logger.warning("[User Metadata] No MONGO_LOGGER_URL configured")
+    logger.warning("[User Metadata] User metadata API features disabled - gender/birth details will not persist")
 
 # Subscription Service Configuration
 SUBSCRIPTIONS_URL = os.getenv("SUBSCRIPTIONS_URL")

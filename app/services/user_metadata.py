@@ -1,31 +1,21 @@
 """
-MongoDB User Metadata Service
+MongoDB User Metadata Service (HTTP API Client)
 
 Stores user birth details (name, DOB, time, place, gender) for fast lookups.
-Uses existing AstrologyBotDB.user_profiles collection.
+Uses the Node.js openclaw_mongo_logger API instead of direct pymongo.
 Falls back to Mem0 for old users who don't have data in MongoDB.
-
-Collection: AstrologyBotDB.user_profiles
-Field Mapping:
-- userId (MongoDB) ← → phone (code)
-- dateOfBirth (MongoDB) ← → dob (code)
-- birthPlace (MongoDB) ← → place (code)
-- gender (MongoDB) ← → gender (code)
-- name (MongoDB) ← → name (code)
 """
 import logging
 from datetime import datetime
 from typing import Optional, Dict
-from pymongo import MongoClient, UpdateOne
-from pymongo.errors import DuplicateKeyError
 import httpx
+import os
+import re
 
 logger = logging.getLogger(__name__)
 
-# MongoDB connection
+# Note: We now talk to MongoDB via the openclaw_mongo_logger HTTP API.
 MONGO_LOGGER_URL = None
-_db = None
-_users_collection = None
 
 # Mem0 configuration
 MEM0_URL = "https://rg4g0gkk0wwkk4cc00g4sg0c.api.hansastro.com"
@@ -34,117 +24,65 @@ MEM0_API_KEY = None  # Set via environment variable
 
 def init_user_metadata_service(mongo_url: str):
     """
-    Initialize the user metadata service with MongoDB connection.
+    Initialize the user metadata service with the logger API URL.
 
     Args:
-        mongo_url: MongoDB connection string (must start with mongodb:// or mongodb+srv://)
+        mongo_url: The base HTTP URL of the mongo logger service
     """
-    global MONGO_LOGGER_URL, _db, _users_collection
+    global MONGO_LOGGER_URL
 
-    # Validate URL format
     if not mongo_url or not isinstance(mongo_url, str):
-        logger.error("[User Metadata] Invalid MongoDB URL: URL is empty or not a string")
+        logger.error("[User Metadata] Invalid API URL")
         return False
-
-    if not mongo_url.startswith(("mongodb://", "mongodb+srv://")):
-        logger.error(f"[User Metadata] Invalid MongoDB URL format: '{mongo_url}'")
-        logger.error("[User Metadata] URL must start with 'mongodb://' or 'mongodb+srv://'")
-        logger.error("[User Metadata] User metadata service will be disabled")
-        return False
-
-    MONGO_LOGGER_URL = mongo_url
-
-    try:
-        client = MongoClient(mongo_url)
-        _db = client.AstrologyBotDB  # Use existing database
-        _users_collection = _db.user_profiles  # Use existing collection
-
-        # Create indexes for faster queries
-        try:
-            _users_collection.create_index("userId", unique=True)
-            _users_collection.create_index("createdAt")
-            _users_collection.create_index("gender")
-            logger.info("[User Metadata] Indexes created/verified")
-        except Exception as e:
-            logger.warning(f"[User Metadata] Index creation warning: {e}")
-
-        logger.info("[User Metadata] Service initialized successfully")
-        logger.info(f"[User Metadata] Database: {_db.name}")
-        logger.info(f"[User Metadata] Collection: {_users_collection.name}")
-        return True
-
-    except Exception as e:
-        logger.error(f"[User Metadata] Failed to initialize: {e}")
-        logger.error("[User Metadata] User metadata service will be disabled")
-        return False
+        
+    # Standardize url for httpx requests 
+    MONGO_LOGGER_URL = mongo_url.rstrip("/")
+    logger.info(f"[User Metadata] API Client initialized successfully using {MONGO_LOGGER_URL}")
+    return True
 
 
 async def get_user_metadata(phone: str) -> Optional[Dict]:
     """
-    Get user metadata from MongoDB (FAST lookup!).
-    Falls back to Mem0 for gender if not found in MongoDB.
-
-    Args:
-        phone: User's phone number (with or without +)
-
-    Returns:
-        User metadata dict with standardized field names, or None if not found
+    Get user metadata from the Mongo API Dashboard (FAST lookup!).
+    Falls back to Mem0 for gender if not found in MongoDB via the API.
     """
-    global _users_collection, _db
+    global MONGO_LOGGER_URL
 
-    if _users_collection is None:
-        # Lazy initialization - try to initialize if not already done
-        import os
-        # mongo_url = os.getenv("MONGO_LOGGER_URL") or os.getenv("MONGO_METADATA_URL")
-        mongo_url = "mongodb://root:w4YfCoo56EcEf1t1LVsBHxDMI6Jxm1QGCZwDHFy1Z2dp6CDirphc1WfXl782FlWt@46.225.78.212:5001/?directConnection=true"
-        if mongo_url and mongo_url.startswith(("mongodb://", "mongodb+srv://")):
-            logger.info("[User Metadata] Lazy initialization triggered...")
-            try:
-                client = MongoClient(mongo_url)
-                _db = client.AstrologyBotDB
-                _users_collection = _db.user_profiles
-                logger.info("[User Metadata] Lazy initialization successful")
-            except Exception as e:
-                logger.warning(f"[User Metadata] Lazy initialization failed: {e}")
-        else:
-            logger.warning("[User Metadata] Service not initialized, skipping MongoDB lookup")
-            return await _get_from_mem0_fallback(phone)
+    if not MONGO_LOGGER_URL:
+        logger.warning("[User Metadata] Service API URL not initialized, falling back to Mem0")
+        return await _get_from_mem0_fallback(phone)
 
     try:
-        # Clean phone number - normalize to match MongoDB format
         clean_phone = phone.replace("+", "").replace(" ", "")
+        user_id = f"+{clean_phone}"
 
-        # Try both formats: with and without + prefix
-        user_data = _users_collection.find_one({"userId": f"+{clean_phone}"})
-        if not user_data:
-            user_data = _users_collection.find_one({"userId": clean_phone})
-        if not user_data:
-            user_data = _users_collection.find_one({"phoneNumber": clean_phone})
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(f"{MONGO_LOGGER_URL}/metadata/{user_id}")
+            
+            if response.status_code == 200:
+                user_data = response.json()
+            else:
+                user_data = None
 
         if user_data:
-            logger.info(f"[User Metadata] Found user in MongoDB: {clean_phone}")
-
-            # Convert ObjectId to string for JSON serialization
-            if "_id" in user_data:
-                user_data["_id"] = str(user_data["_id"])
+            logger.info(f"[User Metadata] Found user via API: {user_id}")
 
             # Map MongoDB field names to code expectations
             mapped_data = {
                 "phone": user_data.get("userId", user_data.get("phoneNumber")),
                 "name": user_data.get("name"),
                 "dob": user_data.get("dateOfBirth"),
-                "tob": user_data.get("timeOfBirth"),  # Field may not exist yet
+                "tob": user_data.get("timeOfBirth"), 
                 "place": user_data.get("birthPlace"),
                 "gender": user_data.get("gender"),
                 "rashi": user_data.get("rashi"),
                 "lagna": user_data.get("lagna"),
-                # Also include original fields for reference
                 "_original": user_data
             }
 
             # If any birth data is missing in MongoDB, try to fill from Mem0
             if not all([mapped_data.get("dob"), mapped_data.get("tob"), mapped_data.get("place"), mapped_data.get("gender")]):
-                logger.info(f"[User Metadata] Gaps found in MongoDB data for {clean_phone}, checking Mem0...")
+                logger.info(f"[User Metadata] Gaps found in MongoDB data for {user_id}, checking Mem0...")
                 mem0_data = await _get_all_info_from_mem0(phone)
                 if mem0_data:
                     # Fill only missing fields
@@ -156,26 +94,16 @@ async def get_user_metadata(phone: str) -> Optional[Dict]:
 
             return mapped_data
         else:
-            logger.info(f"[User Metadata] User not found in MongoDB: {clean_phone}")
-            # Try Mem0 fallback for old users
+            logger.info(f"[User Metadata] User not found via API: {user_id}")
             return await _get_from_mem0_fallback(phone)
 
     except Exception as e:
-        logger.error(f"[User Metadata] Error fetching user: {e}")
-        # Try Mem0 as fallback
+        logger.error(f"[User Metadata] Error fetching user via API: {e}")
         return await _get_from_mem0_fallback(phone)
 
 
 async def _get_from_mem0_fallback(phone: str) -> Optional[Dict]:
-    """
-    Fallback to Mem0 for users not in MongoDB (old users).
-
-    Args:
-        phone: User's phone number
-
-    Returns:
-        Partial user data with gender from Mem0, or None
-    """
+    """Fallback to Mem0 for users not in MongoDB (old users)."""
     try:
         mem0_data = await _get_all_info_from_mem0(phone)
         if mem0_data:
@@ -190,15 +118,7 @@ async def _get_from_mem0_fallback(phone: str) -> Optional[Dict]:
 
 
 async def _get_gender_from_mem0(phone: str) -> Optional[str]:
-    """
-    Fetch gender from Mem0 memories.
-
-    Args:
-        phone: User's phone number
-
-    Returns:
-        "male", "female", or None
-    """
+    """Fetch gender from Mem0 memories."""
     try:
         data = await _get_all_info_from_mem0(phone)
         return data.get("gender") if data else None
@@ -208,18 +128,8 @@ async def _get_gender_from_mem0(phone: str) -> Optional[str]:
 
 
 async def _get_all_info_from_mem0(phone: str) -> Optional[Dict]:
-    """
-    Fetch and parse all available info (gender, dob, tob, place) from Mem0.
-
-    Args:
-        phone: User's phone number
-
-    Returns:
-        Dict with available fields, or None if no memories found
-    """
+    """Fetch and parse all available info (gender, dob, tob, place) from Mem0."""
     try:
-        import os
-        import re
         mem0_url = os.getenv("MEM0_URL", MEM0_URL)
         mem0_api_key = os.getenv("MEM0_API_KEY")
 
@@ -259,15 +169,10 @@ async def _get_all_info_from_mem0(phone: str) -> Optional[Dict]:
             if not memories:
                 return None
 
-            # Combined info from all memories
             info = {}
 
-            # 2. Check Content via Patterns (Fuzzy Regex)
-            # dob_pattern: Handles "DOB is 1990-05-15", "Born on 15/05/1990", "Birth Date: 1990-05-15"
             dob_pattern = r'(?:dob|date\s+of\s+birth|birth\s+date|born\s+on)(?:\s+of\s+birth)?(?:\s+is|\s+on)?[:\s=]+([0-9]{1,4}[-/][A-Za-z0-9/]+[-/][0-9]{1,4})'
-            # time_pattern: Handles "TOB is 10:30 AM", "Born at 14:30", "Birth Time: 10:30:00"
             time_pattern = r'(?:tob|time\s+of\s+birth|birth\s+time|born\s+at)(?:\s+of\s+birth)?(?:\s+is|\s+at)?[:\s=]+([0-9]{1,2}[:.][0-9]{2}(?::[0-9]{2})?(?:\s*[ap]m)?)'
-            # place_pattern: Handles "Place of Birth is Mumbai", "Born in Delhi", "City: Meerut"
             place_pattern = r'(?:place|birth\s+place|city|sthaan|born\s+in)(?:\s+of\s+birth|\s+is)?[:\s=]+([a-z\s]{2,30})(?:,|\.|\n|$)'
 
             for memory in memories:
@@ -278,12 +183,12 @@ async def _get_all_info_from_mem0(phone: str) -> Optional[Dict]:
                 content = raw_content.lower()
                 metadata = memory.get("metadata") or {}
 
-                # 1. Check Metadata (Most reliable)
+                # 1. Check Metadata
                 for field in ["gender", "dob", "tob", "place"]:
                     if metadata.get(field) and not info.get(field):
                         info[field] = metadata[field].lower() if field == "gender" else metadata[field]
 
-                # 2. Check Content via Patterns
+                # 2. Check Content
                 if not info.get("gender"):
                     gender_match = re.search(r'gender\s+is\s+(male|female)', content)
                     if gender_match: info["gender"] = gender_match.group(1)
@@ -304,9 +209,7 @@ async def _get_all_info_from_mem0(phone: str) -> Optional[Dict]:
 
             # 3. Post-Processing Cleanup
             if info.get("place"):
-                # Remove leading filler words that might have been captured
                 info["place"] = re.sub(r'^(is|in|of\s+birth\s+is)\s+', '', info["place"], flags=re.IGNORECASE).strip()
-                # Clean up "of Birth is Meerut" -> "Meerut"
                 info["place"] = re.sub(r'^(of\s+Birth\s+is)\s+', '', info["place"], flags=re.IGNORECASE).strip()
             
             return info if info else None
@@ -326,106 +229,60 @@ async def save_user_metadata(
     rashi: Optional[str] = None,
     lagna: Optional[str] = None
 ) -> bool:
-    """
-    Save or update user metadata in MongoDB.
+    """Save or update user metadata via the logger API."""
+    global MONGO_LOGGER_URL
 
-    Args:
-        phone: User's phone number
-        name: User's name
-        dob: Date of birth (YYYY-MM-DD)
-        tob: Time of birth (HH:MM)
-        place: Birth place
-        gender: User's gender (male/female/unknown)
-        rashi: Calculated Rashi (optional)
-        lagna: Calculated Lagna (optional)
-
-    Returns:
-        True if successful, False otherwise
-    """
-    global _users_collection
-
-    if _users_collection is None:
-        logger.warning("[User Metadata] Service not initialized, skipping save")
+    if not MONGO_LOGGER_URL:
+        logger.warning("[User Metadata] Service API URL not initialized, skipping save")
         return False
 
     try:
-        # Clean phone number
         clean_phone = phone.replace("+", "").replace(" ", "")
         user_id = f"+{clean_phone}"
 
-        # Build document with MongoDB field names
-        user_doc = {
-            "updatedAt": datetime.utcnow()
+        payload = {
+            "userId": user_id,
+            "phoneNumber": clean_phone
         }
 
-        # Map code field names to MongoDB field names
-        if name:
-            user_doc["name"] = name
-        if dob:
-            user_doc["dateOfBirth"] = dob
-        if tob:
-            user_doc["timeOfBirth"] = tob  # New field, may not exist in old records
-        if place:
-            user_doc["birthPlace"] = place
-        if gender:
-            user_doc["gender"] = gender
-        if rashi:
-            user_doc["rashi"] = rashi
-        if lagna:
-            user_doc["lagna"] = lagna
+        if name: payload["name"] = name
+        if dob: payload["dateOfBirth"] = dob
+        if tob: payload["timeOfBirth"] = tob
+        if place: payload["birthPlace"] = place
+        if gender: payload["gender"] = gender
+        if rashi: payload["rashi"] = rashi
+        if lagna: payload["lagna"] = lagna
 
-        # Upsert (insert if not exists, update if exists)
-        result = _users_collection.update_one(
-            {"userId": user_id},
-            {"$set": user_doc, "$setOnInsert": {
-                "userId": user_id,
-                "phoneNumber": clean_phone,
-                "createdAt": datetime.utcnow(),
-                "onboardingStage": 1,
-                "totalMessagesSent": 0,
-                "freemiumMessagesUsed": 0,
-                "hasReachedPaywall": False,
-                "dailyFreeMessagesRemaining": 5
-            }},
-            upsert=True
-        )
-
-        if result.upserted_count:
-            logger.info(f"[User Metadata] Created new user: {user_id}")
-        else:
-            logger.info(f"[User Metadata] Updated user: {user_id}")
-
-        return True
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.post(f"{MONGO_LOGGER_URL}/metadata", json=payload)
+            if response.status_code == 200:
+                logger.info(f"[User Metadata] Successfully updated API for: {user_id}")
+                return True
+            else:
+                logger.warning(f"[User Metadata] API failed to save user: {response.text}")
+                return False
 
     except Exception as e:
-        logger.error(f"[User Metadata] Error saving user: {e}")
+        logger.error(f"[User Metadata] Error saving user details via API: {e}")
         return False
 
 
 async def update_user_metadata(phone: str, updates: Dict) -> bool:
-    """
-    Update specific fields in user metadata.
+    """Update specific fields via the logger API."""
+    global MONGO_LOGGER_URL
 
-    Args:
-        phone: User's phone number
-        updates: Dict of fields to update (e.g., {"gender": "male"})
-
-    Returns:
-        True if successful, False otherwise
-    """
-    global _users_collection
-
-    if _users_collection is None:
-        logger.warning("[User Metadata] Service not initialized, skipping update")
+    if not MONGO_LOGGER_URL:
         return False
 
     try:
-        # Clean phone number
         clean_phone = phone.replace("+", "").replace(" ", "")
         user_id = f"+{clean_phone}"
 
-        # Map code field names to MongoDB field names
-        mongo_updates = {}
+        payload = {
+            "userId": user_id,
+            "phoneNumber": clean_phone
+        }
+
         field_mapping = {
             "dob": "dateOfBirth",
             "tob": "timeOfBirth",
@@ -434,158 +291,84 @@ async def update_user_metadata(phone: str, updates: Dict) -> bool:
 
         for key, value in updates.items():
             mongo_key = field_mapping.get(key, key)
-            mongo_updates[mongo_key] = value
+            payload[mongo_key] = value
 
-        # Add timestamp
-        mongo_updates["updatedAt"] = datetime.utcnow()
-
-        # Update only specified fields
-        result = _users_collection.update_one(
-            {"userId": user_id},
-            {"$set": mongo_updates}
-        )
-
-        if result.modified_count:
-            logger.info(f"[User Metadata] Updated user {user_id}: {list(mongo_updates.keys())}")
-            return True
-        else:
-            logger.warning(f"[User Metadata] User not found for update: {user_id}")
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.post(f"{MONGO_LOGGER_URL}/metadata", json=payload)
+            if response.status_code == 200:
+                logger.info(f"[User Metadata] Successfully updated via API for: {user_id}")
+                return True
             return False
 
     except Exception as e:
-        logger.error(f"[User Metadata] Error updating user: {e}")
+        logger.error(f"[User Metadata] Error updating user via API: {e}")
         return False
 
 
 async def increment_user_questions(phone: str) -> bool:
-    """
-    Increment the total_questions counter for a user.
-
-    Args:
-        phone: User's phone number
-
-    Returns:
-        True if successful, False otherwise
-    """
-    global _users_collection
-
-    if _users_collection is None:
-        return False
+    """Increment the total_questions counter via the API."""
+    global MONGO_LOGGER_URL
+    if not MONGO_LOGGER_URL: return False
 
     try:
-        # Clean phone number
         clean_phone = phone.replace("+", "").replace(" ", "")
         user_id = f"+{clean_phone}"
 
-        # Increment counter and update last_seen
-        result = _users_collection.update_one(
-            {"phone": user_id},
-            {
-                "$inc": {"total_questions": 1},
-                "$set": {"last_seen": datetime.utcnow()}
-            }
-        )
-
-        return result.modified_count > 0 or result.matched_count > 0
-
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.post(f"{MONGO_LOGGER_URL}/metadata/increment-questions", json={"userId": user_id})
+            return response.status_code == 200
+            
     except Exception as e:
-        logger.error(f"[User Metadata] Error incrementing questions: {e}")
+        logger.error(f"[User Metadata] Error incrementing questions via API: {e}")
         return False
 
 
 async def add_topic_discussed(phone: str, topic: str) -> bool:
-    """
-    Add a topic to the user's topics_discussed array.
-
-    Args:
-        phone: User's phone number
-        topic: Topic to add (e.g., "marriage", "career")
-
-    Returns:
-        True if successful, False otherwise
-    """
-    global _users_collection
-
-    if _users_collection is None:
-        return False
+    """Add a topic to the user's tracked topics via the API."""
+    global MONGO_LOGGER_URL
+    if not MONGO_LOGGER_URL: return False
 
     try:
-        # Clean phone number
         clean_phone = phone.replace("+", "").replace(" ", "")
         user_id = f"+{clean_phone}"
 
-        # Add topic to array (avoid duplicates)
-        result = _users_collection.update_one(
-            {"phone": user_id},
-            {
-                "$addToSet": {"topics_discussed": topic},
-                "$set": {"last_seen": datetime.utcnow()}
-            }
-        )
-
-        return result.modified_count > 0 or result.matched_count > 0
-
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.post(f"{MONGO_LOGGER_URL}/metadata/topic", json={"userId": user_id, "topic": topic})
+            return response.status_code == 200
+            
     except Exception as e:
-        logger.error(f"[User Metadata] Error adding topic: {e}")
+        logger.error(f"[User Metadata] Error adding topic via API: {e}")
         return False
 
-
+        
 async def get_all_users_count() -> int:
-    """
-    Get total count of users in MongoDB.
-
-    Returns:
-        Number of users
-    """
-    global _users_collection
-
-    if _users_collection is None:
-        return 0
+    """Get total count of users via API."""
+    global MONGO_LOGGER_URL
+    if not MONGO_LOGGER_URL: return 0
 
     try:
-        return _users_collection.count_documents({})
-    except Exception as e:
-        logger.error(f"[User Metadata] Error counting users: {e}")
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(f"{MONGO_LOGGER_URL}/metadata-stats")
+            if response.status_code == 200:
+                return response.json().get("total_users", 0)
         return 0
-
+    except Exception as e:
+        return 0
 
 async def get_user_stats() -> Dict:
-    """
-    Get user statistics from MongoDB.
-
-    Returns:
-        Dict with stats like total_users, gender_distribution, etc.
-    """
-    global _users_collection
-
-    if _users_collection is None:
-        return {}
-
+    """Get user statistics via API."""
+    global MONGO_LOGGER_URL
+    if not MONGO_LOGGER_URL: return {}
+    
     try:
-        total_users = _users_collection.count_documents({})
-
-        # Gender distribution
-        male_count = _users_collection.count_documents({"gender": "male"})
-        female_count = _users_collection.count_documents({"gender": "female"})
-        unknown_gender = total_users - male_count - female_count
-
-        # New users in last 7 days
-        from datetime import timedelta
-        week_ago = datetime.utcnow() - timedelta(days=7)
-        new_users_week = _users_collection.count_documents({
-            "created_at": {"$gte": week_ago}
-        })
-
-        return {
-            "total_users": total_users,
-            "male_users": male_count,
-            "female_users": female_count,
-            "unknown_gender": unknown_gender,
-            "new_users_last_7_days": new_users_week,
-            "database": "MongoDB",
-            "collection": "users"
-        }
-
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(f"{MONGO_LOGGER_URL}/metadata-stats")
+            if response.status_code == 200:
+                data = response.json()
+                data["database"] = "MongoDB via API"
+                data["collection"] = "user_profiles"
+                return data
+            return {}
     except Exception as e:
-        logger.error(f"[User Metadata] Error getting stats: {e}")
+        logger.error(f"[User Metadata] Error getting stats via API: {e}")
         return {}
