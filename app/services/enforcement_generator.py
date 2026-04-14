@@ -152,6 +152,9 @@ class EnforcementMessageGenerator:
             language = detected_language
 
             # Step 1.6: Fetch user gender from MongoDB FIRST (FAST!), Mem0 as fallback
+            # Initialize user_memory to avoid UnboundLocalError
+            user_memory = None
+
             # PRIORITY 1: MongoDB user_metadata (FAST 5-20ms, has migrated data)
             mongo_gender = await self._fetch_gender_from_mongodb(user_id)
             if mongo_gender in ['male', 'female']:
@@ -159,6 +162,8 @@ class EnforcementMessageGenerator:
                 logger.info(
                     f"[Enforcement Generator] Using gender from MongoDB (fast lookup): {user_gender}"
                 )
+                # Still fetch user_memory for prompt context
+                user_memory = await self._fetch_mem0_memories(user_id)
             # PRIORITY 2: Mem0 fallback (for users not yet migrated, slower 200-500ms)
             else:
                 user_memory = await self._fetch_mem0_memories(user_id)
