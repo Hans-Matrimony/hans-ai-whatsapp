@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 """
-Send astrofriend_intro_template to users inactive for 20+ hours
+Send astrofriend_intro_template to users inactive for 22+ hours
 This script runs the same logic as the admin endpoint but standalone
+
+Template: astrofriend_intro_template
+Body: "Mai Astrofriend Aapka Astrology Dost Jahan aap jaan sakte hain
+      apne Garh ke baare kundali ke baare mai or aap mujhse koi bhi
+      baat share kar sakte hain 🙂"
+Button: "Hey Astrofriend"
 """
 
 import os
@@ -36,7 +42,7 @@ WHATSAPP_PHONE_ID = os.getenv("WHATSAPP_PHONE_ID")
 WHATSAPP_ACCESS_TOKEN = os.getenv("WHATSAPP_ACCESS_TOKEN")
 
 async def send_inactive_template():
-    """Send template to all users inactive for 20+ hours"""
+    """Send template to all users inactive for 22+ hours"""
 
     print("=" * 70)
     print("🚀 SENDING WHATSAPP TEMPLATE TO INACTIVE USERS")
@@ -57,9 +63,9 @@ async def send_inactive_template():
     print(f"   Phone ID: {WHATSAPP_PHONE_ID}")
 
     now = datetime.now(timezone.utc)
-    threshold = now - timedelta(hours=20)
+    threshold = now - timedelta(hours=22)
 
-    print(f"\n⏰ Inactivity Threshold: 20+ hours")
+    print(f"\n⏰ Inactivity Threshold: 22+ hours")
     print(f"   Last message before: {threshold.strftime('%Y-%m-%d %H:%M:%S')} UTC")
     print(f"   Template: astrofriend_intro_template")
     print(f"   Language: en")
@@ -110,7 +116,7 @@ async def send_inactive_template():
                     # Calculate inactive hours
                     inactive_hours = (now - last_msg_time).total_seconds() / 3600
 
-                    if inactive_hours >= 20:
+                    if inactive_hours >= 22:
                         inactive_users.append({
                             "user_id": user_id,
                             "inactive_hours": round(inactive_hours, 1)
@@ -119,7 +125,7 @@ async def send_inactive_template():
                 except Exception as e:
                     continue
 
-        print(f"✅ Found {len(inactive_users)} users inactive for 20+ hours")
+        print(f"✅ Found {len(inactive_users)} users inactive for 22+ hours")
 
         if not inactive_users:
             print("\n✨ No eligible users found. Done!")
@@ -139,6 +145,21 @@ async def send_inactive_template():
             access_token=WHATSAPP_ACCESS_TOKEN
         )
 
+        # Template components with button
+        template_components = [
+            {
+                "type": "button",
+                "sub_type": "quick_reply",
+                "index": 0,
+                "parameters": [
+                    {
+                        "type": "payload",
+                        "payload": "hey_astrofriend"
+                    }
+                ]
+            }
+        ]
+
         templates_sent = 0
         errors = []
 
@@ -156,6 +177,7 @@ async def send_inactive_template():
                 message_id = await whatsapp_api.send_template(
                     to=phone,
                     template_name="astrofriend_intro_template",
+                    components=template_components,
                     language_code="en"
                 )
 
