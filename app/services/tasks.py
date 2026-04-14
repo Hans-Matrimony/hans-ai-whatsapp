@@ -110,7 +110,8 @@ if ENABLE_AI_ENFORCEMENT and OPENCLAW_URL and OPENCLAW_GATEWAY_TOKEN:
             cache_ttl=AI_ENFORCEMENT_CACHE_TTL,
             timeout=AI_ENFORCEMENT_TIMEOUT,
             mem0_url=os.getenv("MEM0_URL"),
-            mem0_api_key=os.getenv("MEM0_API_KEY")
+            mem0_api_key=os.getenv("MEM0_API_KEY"),
+            mongo_logger_url=os.getenv("MONGO_LOGGER_URL")
         )
         if _enforcement_generator:
             logger.info("[Enforcement Generator] ✅ Successfully initialized AI enforcement generator")

@@ -229,42 +229,134 @@ async def save_user_metadata(
     rashi: Optional[str] = None,
     lagna: Optional[str] = None
 ) -> bool:
-    """Save or update user metadata via the logger API."""
-    global MONGO_LOGGER_URL
+    """
+    Save or update user metadata.
 
-    if not MONGO_LOGGER_URL:
-        logger.warning("[User Metadata] Service API URL not initialized, skipping save")
-        return False
+    Saves to BOTH:
+    1. MongoDB user_metadata (NEW - for fast lookup)
+    2. Mem0 (EXISTING - keeps working as before!)
 
-    try:
-        clean_phone = phone.replace("+", "").replace(" ", "")
-        user_id = f"+{clean_phone}"
+    This way existing functionality is NOT hindered at all.
+    """
+    global MONGO_LOGGER_URL, MEM0_URL, MEM0_API_KEY
 
-        payload = {
-            "userId": user_id,
-            "phoneNumber": clean_phone
-        }
+    clean_phone = phone.replace("+", "").replace(" ", "")
+    user_id = f"+{clean_phone}"
 
-        if name: payload["name"] = name
-        if dob: payload["dateOfBirth"] = dob
-        if tob: payload["timeOfBirth"] = tob
-        if place: payload["birthPlace"] = place
-        if gender: payload["gender"] = gender
-        if rashi: payload["rashi"] = rashi
-        if lagna: payload["lagna"] = lagna
+    success_count = 0
 
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.post(f"{MONGO_LOGGER_URL}/metadata", json=payload)
-            if response.status_code == 200:
-                logger.info(f"[User Metadata] Successfully updated API for: {user_id}")
-                return True
+    # Step 1: Save to MongoDB user_metadata (NEW - for fast lookups)
+    if MONGO_LOGGER_URL:
+        try:
+            payload = {
+                "userId": user_id,
+                "phoneNumber": clean_phone
+            }
+
+            if name: payload["name"] = name
+            if dob: payload["dateOfBirth"] = dob
+            if tob: payload["timeOfBirth"] = tob
+            if place: payload["birthPlace"] = place
+            if gender: payload["gender"] = gender
+            if rashi: payload["rashi"] = rashi
+            if lagna: payload["lagna"] = lagna
+
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.post(f"{MONGO_LOGGER_URL}/metadata", json=payload)
+                if response.status_code == 200:
+                    logger.info(f"[User Metadata] Successfully saved to MongoDB for: {user_id}")
+                    success_count += 1
+                else:
+                    logger.warning(f"[User Metadata] MongoDB API failed: {response.text}")
+
+        except Exception as e:
+            logger.warning(f"[User Metadata] Error saving to MongoDB (continuing): {e}")
+
+    # Step 2: ALSO save to Mem0 (EXISTING functionality - keep working!)
+    # This ensures Mem0 continues to work exactly as before
+    if dob or tob or place or gender:
+        try:
+            mem0_url = os.getenv("MEM0_URL", MEM0_URL)
+            if not mem0_url:
+                logger.debug("[User Metadata] Mem0 URL not configured")
             else:
-                logger.warning(f"[User Metadata] API failed to save user: {response.text}")
-                return False
+                # Build memory text
+                memory_parts = []
+                if name: memory_parts.append(f"Name: {name}")
+                if dob: memory_parts.append(f"DOB: {dob}")
+                if tob: memory_parts.append(f"TOB: {tob}")
+                if place: memory_parts.append(f"Place: {place}")
+                if gender: memory_parts.append(f"Gender: {gender}")
 
-    except Exception as e:
-        logger.error(f"[User Metadata] Error saving user details via API: {e}")
-        return False
+                memory_text = " | ".join(memory_parts)
+
+                headers = {"Content-Type": "application/json"}
+                if MEM0_API_KEY:
+                    headers["Authorization"] = f"Token {MEM0_API_KEY}"
+
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    # Use upsert to avoid duplicates
+                    search_payload = {
+                        "query": "birth details",
+                        "user_id": user_id,
+                        "limit": 5
+                    }
+
+                    # Search for existing birth data memories
+                    search_response = await client.post(
+                        f"{mem0_url}/memory/search",
+                        headers=headers,
+                        json=search_payload
+                    )
+
+                    # Delete existing birth data memories (for upsert)
+                    if search_response.status_code == 200:
+                        search_data = search_response.json()
+                        results = search_data.get("results") or search_data.get("memories") or []
+
+                        for memory in results:
+                            mem_id = memory.get("id") or memory.get("memory_id")
+                            if mem_id:
+                                try:
+                                    await client.delete(
+                                        f"{mem0_url}/memory/{mem_id}",
+                                        headers=headers,
+                                        timeout=5.0
+                                    )
+                                except:
+                                    pass  # Ignore delete failures, continue
+
+                    # Add new memory
+                    add_payload = {
+                        "user_id": user_id,
+                        "memory": memory_text,
+                        "metadata": {
+                            "source": "whatsapp_service",
+                            "dob": dob or "",
+                            "tob": tob or "",
+                            "place": place or "",
+                            "gender": gender or "",
+                            "name": name or ""
+                        }
+                    }
+
+                    add_response = await client.post(
+                        f"{mem0_url}/memory",
+                        headers=headers,
+                        json=add_payload
+                    )
+
+                    if add_response.status_code in [200, 201]:
+                        logger.info(f"[User Metadata] Successfully saved to Mem0 for: {user_id}")
+                        success_count += 1
+                    else:
+                        logger.warning(f"[User Metadata] Mem0 save failed (non-critical)")
+
+        except Exception as e:
+            logger.warning(f"[User Metadata] Error saving to Mem0 (non-critical): {e}")
+
+    # Return success if at least one worked
+    return success_count > 0
 
 
 async def update_user_metadata(phone: str, updates: Dict) -> bool:

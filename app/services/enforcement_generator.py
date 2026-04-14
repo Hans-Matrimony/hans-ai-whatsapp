@@ -69,7 +69,8 @@ class EnforcementMessageGenerator:
         cache_ttl: int = 86400,  # 24 hours
         timeout: float = 10.0,
         mem0_url: str = None,
-        mem0_api_key: str = None
+        mem0_api_key: str = None,
+        mongo_logger_url: str = None
     ):
         """
         Initialize enforcement message generator
@@ -80,19 +81,22 @@ class EnforcementMessageGenerator:
             redis_client: Redis client for caching
             cache_ttl: Cache TTL in seconds (default: 24 hours)
             timeout: AI generation timeout in seconds
-            mem0_url: Mem0 server URL (optional)
+            mem0_url: Mem0 server URL (optional, fallback only)
             mem0_api_key: Mem0 API key (optional)
+            mongo_logger_url: MongoDB Logger API URL (primary data source)
         """
         self.openclaw_url = openclaw_url
         self.openclaw_token = openclaw_token
         self.redis = redis_client
         self.cache_ttl = cache_ttl
         self.timeout = timeout
+        self.mongo_logger_url = mongo_logger_url or os.getenv("MONGO_LOGGER_URL")
         self.mem0_url = mem0_url or os.getenv("MEM0_URL", "https://rg4g0gkk0wwkk4cc00g4sg0c.api.hansastro.com")
         self.mem0_api_key = mem0_api_key or os.getenv("MEM0_API_KEY")
 
         logger.info(
-            f"[Enforcement Generator] Initialized with cache_ttl={cache_ttl}s, timeout={timeout}s, mem0_enabled={bool(self.mem0_api_key)}"
+            f"[Enforcement Generator] Initialized with cache_ttl={cache_ttl}s, timeout={timeout}s, "
+            f"mongo_enabled={bool(self.mongo_logger_url)}, mem0_enabled={bool(self.mem0_api_key)}"
         )
 
     async def generate_enforcement_message(
@@ -147,42 +151,46 @@ class EnforcementMessageGenerator:
             # Use detected language from conversation instead of passed parameter
             language = detected_language
 
-            # Step 1.6: Fetch mem0 memories FIRST (has user's explicitly stated gender like "Gender: Female")
-            user_memory = await self._fetch_mem0_memories(user_id)
-            logger.info(
-                f"[Enforcement Generator] User memory from mem0: {list(user_memory.keys())}"
-            )
-
-            # PRIORITY 1: Use gender from mem0 (what user EXPLICITLY stated)
-            mem0_gender = user_memory.get('gender') if user_memory else None
-            if mem0_gender in ['male', 'female']:
-                user_gender = mem0_gender
+            # Step 1.6: Fetch user gender from MongoDB FIRST (FAST!), Mem0 as fallback
+            # PRIORITY 1: MongoDB user_metadata (FAST 5-20ms, has migrated data)
+            mongo_gender = await self._fetch_gender_from_mongodb(user_id)
+            if mongo_gender in ['male', 'female']:
+                user_gender = mongo_gender
                 logger.info(
-                    f"[Enforcement Generator] Using gender from mem0 (explicitly stated): {user_gender}"
+                    f"[Enforcement Generator] Using gender from MongoDB (fast lookup): {user_gender}"
                 )
-            # PRIORITY 2: Use passed user_gender parameter
-            elif user_gender in ['male', 'female']:
-                logger.info(
-                    f"[Enforcement Generator] Using passed gender parameter: {user_gender}"
-                )
-            # PRIORITY 3: Detect from conversation (LAST RESORT - can be inaccurate)
+            # PRIORITY 2: Mem0 fallback (for users not yet migrated, slower 200-500ms)
             else:
-                detected_gender = self._detect_gender_from_conversation(recent_messages)
-                logger.info(
-                    f"[Enforcement Generator] Detected gender from conversation (last resort): {detected_gender} "
-                    f"(passed gender was: {user_gender})"
-                )
-                if detected_gender in ['male', 'female']:
-                    user_gender = detected_gender
+                user_memory = await self._fetch_mem0_memories(user_id)
+                mem0_gender = user_memory.get('gender') if user_memory else None
+                if mem0_gender in ['male', 'female']:
+                    user_gender = mem0_gender
                     logger.info(
-                        f"[Enforcement Generator] Using detected gender from conversation: {user_gender}"
+                        f"[Enforcement Generator] Using gender from Mem0 fallback: {user_gender}"
                     )
+                # PRIORITY 3: Use passed user_gender parameter
+                elif user_gender in ['male', 'female']:
+                    logger.info(
+                        f"[Enforcement Generator] Using passed gender parameter: {user_gender}"
+                    )
+                # PRIORITY 4: Detect from conversation (LAST RESORT - can be inaccurate)
                 else:
-                    # Default to unknown if all methods fail
-                    user_gender = "unknown"
-                    logger.warning(
-                        f"[Enforcement Generator] Could not determine gender, defaulting to unknown"
+                    detected_gender = self._detect_gender_from_conversation(recent_messages)
+                    logger.info(
+                        f"[Enforcement Generator] Detected gender from conversation (last resort): {detected_gender} "
+                        f"(passed gender was: {user_gender})"
                     )
+                    if detected_gender in ['male', 'female']:
+                        user_gender = detected_gender
+                        logger.info(
+                            f"[Enforcement Generator] Using detected gender from conversation: {user_gender}"
+                        )
+                    else:
+                        # Default to unknown if all methods fail
+                        user_gender = "unknown"
+                        logger.warning(
+                            f"[Enforcement Generator] Could not determine gender from any source, defaulting to unknown"
+                        )
 
             # Select astrologer based on user_gender (opposite gender)
             if user_gender == "male":
@@ -625,6 +633,51 @@ class EnforcementMessageGenerator:
                 exc_info=True
             )
             return "unknown"
+
+    async def _fetch_gender_from_mongodb(self, user_id: str) -> Optional[str]:
+        """
+        Fetch user gender from MongoDB user_metadata (FAST!)
+
+        This is the PRIMARY data source for gender lookup.
+        MongoDB lookup takes 5-20ms vs 200-500ms for Mem0.
+
+        Args:
+            user_id: User's phone number
+
+        Returns:
+            Gender string ('male', 'female') or None if not found
+        """
+        if not hasattr(self, 'mongo_logger_url') or not self.mongo_logger_url:
+            logger.debug("[Enforcement Generator] MongoDB logger URL not configured")
+            return None
+
+        try:
+            # Normalize user_id (ensure it has + prefix)
+            normalized_id = user_id if user_id.startswith('+') else f"+{user_id}"
+
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.get(
+                    f"{self.mongo_logger_url}/metadata/{normalized_id}"
+                )
+
+                if response.status_code == 200:
+                    user_data = response.json()
+                    if user_data and user_data.get("gender"):
+                        gender = user_data.get("gender")
+                        if gender in ['male', 'female']:
+                            logger.info(
+                                f"[Enforcement Generator] Found gender in MongoDB: {gender}"
+                            )
+                            return gender
+
+                logger.debug("[Enforcement Generator] No gender found in MongoDB")
+                return None
+
+        except Exception as e:
+            logger.warning(
+                f"[Enforcement Generator] Error fetching gender from MongoDB: {e}"
+            )
+            return None
 
     async def _fetch_mem0_memories(self, user_id: str) -> Dict[str, Any]:
         """
@@ -1276,7 +1329,8 @@ def create_enforcement_generator(
     cache_ttl: int = 86400,
     timeout: float = 10.0,
     mem0_url: str = None,
-    mem0_api_key: str = None
+    mem0_api_key: str = None,
+    mongo_logger_url: str = None
 ) -> Optional[EnforcementMessageGenerator]:
     """
     Create enforcement message generator instance
@@ -1287,8 +1341,9 @@ def create_enforcement_generator(
         redis_url: Redis URL
         cache_ttl: Cache TTL in seconds
         timeout: AI generation timeout
-        mem0_url: Mem0 server URL (optional)
+        mem0_url: Mem0 server URL (optional, fallback only)
         mem0_api_key: Mem0 API key (optional)
+        mongo_logger_url: MongoDB Logger API URL (primary data source)
 
     Returns:
         EnforcementMessageGenerator instance or None if initialization fails
@@ -1298,7 +1353,7 @@ def create_enforcement_generator(
         redis_client = redis.from_url(redis_url, decode_responses=True)
         redis_client.ping()
 
-        # Create generator with mem0 integration
+        # Create generator with MongoDB primary, Mem0 fallback
         generator = EnforcementMessageGenerator(
             openclaw_url=openclaw_url,
             openclaw_token=openclaw_token,
@@ -1306,7 +1361,8 @@ def create_enforcement_generator(
             cache_ttl=cache_ttl,
             timeout=timeout,
             mem0_url=mem0_url,
-            mem0_api_key=mem0_api_key
+            mem0_api_key=mem0_api_key,
+            mongo_logger_url=mongo_logger_url
         )
 
         logger.info("[Enforcement Generator] Successfully created generator instance")
