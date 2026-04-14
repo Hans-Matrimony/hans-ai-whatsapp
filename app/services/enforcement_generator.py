@@ -208,7 +208,7 @@ class EnforcementMessageGenerator:
                 )
             logger.info(
                 f"[Enforcement Generator] Selected astrologer: {astrologer_name} for user_gender: {user_gender} "
-                f"(priority: mem0={mem0_gender}, passed={user_gender})"
+                f"(source: MongoDB/Mem0 fallback)"
             )
 
             # Step 2: Generate context hash for cache key
