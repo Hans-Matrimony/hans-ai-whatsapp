@@ -104,6 +104,7 @@ class RazorpayWhatsAppPaymentSender:
                 return False
 
             # Send intro message only if requested (for standalone use)
+            session_id = f"enforcement_{enforcement_type}_{user_id}"
             if send_intro_message:
                 message = await self._build_message(
                     astrologer_name=astrologer_name,
@@ -113,6 +114,16 @@ class RazorpayWhatsAppPaymentSender:
                     mongo_logger_url=mongo_logger_url
                 )
                 await self._send_text_message(phone, message)
+                # Log intro message to MongoDB
+                if mongo_logger_url:
+                    await self._log_to_mongo(
+                        mongo_logger_url=mongo_logger_url,
+                        session_id=session_id,
+                        user_id=user_id,
+                        role="assistant",
+                        text=message,
+                        channel="whatsapp"
+                    )
 
             # Send each plan with Razorpay payment button
             for idx, plan in enumerate(plans, 1):
@@ -121,13 +132,25 @@ class RazorpayWhatsAppPaymentSender:
                     user_id=user_id,
                     plan=plan,
                     plan_number=idx,
-                    language=language
+                    language=language,
+                    mongo_logger_url=mongo_logger_url,
+                    session_id=session_id
                 )
 
             # Send footer message only if intro was sent (for standalone use)
             if send_intro_message:
                 footer = await self._build_footer(language)
                 await self._send_text_message(phone, footer)
+                # Log footer message to MongoDB
+                if mongo_logger_url:
+                    await self._log_to_mongo(
+                        mongo_logger_url=mongo_logger_url,
+                        session_id=session_id,
+                        user_id=user_id,
+                        role="assistant",
+                        text=footer,
+                        channel="whatsapp"
+                    )
 
             logger.info(
                 f"[Razorpay WhatsApp] Sent {enforcement_type} with {len(plans)} Razorpay buttons to {phone}"
@@ -271,7 +294,9 @@ class RazorpayWhatsAppPaymentSender:
         user_id: str,
         plan: Dict[str, Any],
         plan_number: int,
-        language: str
+        language: str,
+        mongo_logger_url: str = None,
+        session_id: str = None
     ) -> None:
         """
         Send plan with Razorpay payment button
@@ -351,6 +376,17 @@ class RazorpayWhatsAppPaymentSender:
             logger.debug(
                 f"[Razorpay WhatsApp] Sent {'Native' if self.use_native_whatsapp_flow else 'Hybrid'} button: {button_text} to {phone}"
             )
+
+            # Log payment button to MongoDB for conversation context
+            if mongo_logger_url and session_id:
+                await self._log_to_mongo(
+                    mongo_logger_url=mongo_logger_url,
+                    session_id=session_id,
+                    user_id=user_id,
+                    role="assistant",
+                    text=f"💳 Payment Button: {message.strip()}",
+                    channel="whatsapp"
+                )
 
         except Exception as e:
             logger.error(f"[Razorpay WhatsApp] Error sending plan button: {e}", exc_info=True)
@@ -506,6 +542,53 @@ class RazorpayWhatsAppPaymentSender:
                 if response2.status_code == 200:
                     logger.info(f"[WhatsApp Payment] ✅ Payment link sent to {phone}")
                 response2.raise_for_status()
+
+    async def _log_to_mongo(
+        self,
+        mongo_logger_url: str,
+        session_id: str,
+        user_id: str,
+        role: str,
+        text: str,
+        channel: str = "whatsapp"
+    ) -> None:
+        """
+        Log payment button message to MongoDB for conversation context.
+
+        Args:
+            mongo_logger_url: MongoDB Logger URL
+            session_id: Session ID
+            user_id: User's phone number
+            role: Message role (assistant)
+            text: Message text
+            channel: Channel name
+        """
+        if not mongo_logger_url:
+            return
+
+        try:
+            payload = {
+                "sessionId": session_id,
+                "userId": user_id,
+                "role": role,
+                "text": text,
+                "channel": channel,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.post(
+                    f"{mongo_logger_url}/webhook",
+                    json=payload,
+                    headers={"Content-Type": "application/json"}
+                )
+
+                if response.status_code == 200:
+                    logger.info(f"[MongoDB Log] ✅ Logged payment button to MongoDB for {user_id}")
+                else:
+                    logger.warning(f"[MongoDB Log] Failed to log: {response.status_code}")
+        except Exception as e:
+            logger.warning(f"[MongoDB Log] Error logging payment button: {e}")
 
     async def _track_button_click(
         self,

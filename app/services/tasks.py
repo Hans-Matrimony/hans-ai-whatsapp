@@ -1746,6 +1746,9 @@ async def _process_message_async(phone: str, message: str, message_id: str, mess
             referral_confirm_msg = referral_result.get("message", "Referral code applied! You'll get 1 month FREE premium when you subscribe.")
             async with httpx.AsyncClient(timeout=30.0) as client:
                 await _send_whatsapp_message(client, phone, referral_confirm_msg)
+            # Log referral confirmation to MongoDB
+            await _log_to_mongo(session_id, user_id, "assistant", referral_confirm_msg, "whatsapp")
+            logger.info(f"[Referral] Logged referral confirmation to MongoDB for {phone}")
     except Exception as e:
         logger.warning(f"[Referral] Referral code check failed: {e}")
 
@@ -3775,6 +3778,9 @@ async def _check_inactive_users():
                     if "whatsapp" not in channel:
                         continue
 
+                    # Get session ID for logging
+                    session_id = session.get("sessionId", f"whatsapp:{user_id}")
+
                     # Get last message time
                     last_msg_str = session.get("lastMessageTime", "")
                     if not last_msg_str:
@@ -3824,6 +3830,18 @@ async def _check_inactive_users():
                         phone = user_id.replace("+", "")
                         await _send_whatsapp_message(client, phone, nudge_message)
                         nudges_sent += 1
+
+                        # Log nudge to MongoDB for conversation context
+                        await _log_to_mongo(
+                            session_id=session_id,
+                            user_id=user_id,
+                            role="assistant",
+                            text=nudge_message,
+                            channel="whatsapp",
+                            message_type="text",
+                            nudge_level=1
+                        )
+                        logger.info(f"[Proactive Nudge] Logged nudge to MongoDB for {user_id}")
 
                         # DEDUP SET: Mark this user as nudged with 8-hour expiry
                         if _nudge_redis:
@@ -4338,11 +4356,28 @@ async def _send_daily_horoscope(today_date: str = None):
                 # Format the horoscope message
                 horoscope_message = horoscope_service.format_horoscope_message(horoscope_data)
 
+                # Get session_id for logging (use first WhatsApp session)
+                session_id = f"daily_horoscope:{user_id}"
+                for session in user.get("sessions", []):
+                    if "whatsapp" in session.get("channel", "").lower():
+                        session_id = session.get("sessionId", session_id)
+                        break
+
                 # Send via WhatsApp
                 logger.info(f"[Daily Horoscope] {user_id}: Sending horoscope...")
                 await _send_whatsapp_message(client, phone, horoscope_message)
                 sent_count += 1
                 logger.info(f"[Daily Horoscope] {user_id}: ✅ Horoscope sent successfully!")
+
+                # Log horoscope to MongoDB for conversation context
+                await _log_to_mongo(
+                    session_id=session_id,
+                    user_id=user_id,
+                    role="assistant",
+                    text=horoscope_message,
+                    channel="whatsapp"
+                )
+                logger.info(f"[Daily Horoscope] Logged horoscope to MongoDB for {user_id}")
 
                 # Mark as sent in Redis (26-hour expiry - ensures it lasts until tomorrow)
                 if _nudge_redis:
