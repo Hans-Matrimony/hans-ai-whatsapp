@@ -329,6 +329,9 @@ class RazorpayWhatsAppPaymentSender:
                 logger.error(f"[Razorpay WhatsApp] Failed to create payment link")
                 return
 
+            # Track button click event (non-blocking)
+            await self._track_button_click(user_id, plan_id, int(plan.get("price", 0)))
+
             # Send button based on mode
             if self.use_native_whatsapp_flow:
                 # Native mode: WhatsApp Flow (requires partnership)
@@ -503,6 +506,37 @@ class RazorpayWhatsAppPaymentSender:
                 if response2.status_code == 200:
                     logger.info(f"[WhatsApp Payment] ✅ Payment link sent to {phone}")
                 response2.raise_for_status()
+
+    async def _track_button_click(
+        self,
+        user_id: str,
+        plan_id: str,
+        amount: int
+    ) -> None:
+        """
+        Track when payment button is sent/shown to user.
+
+        This is non-blocking - failures won't affect payment flow.
+        """
+        try:
+            if not self.subscriptions_url:
+                return
+
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                await client.post(
+                    f"{self.subscriptions_url}/analytics/track-event",
+                    json={
+                        "event_type": "button_click",
+                        "user_id": user_id,
+                        "plan_id": plan_id,
+                        "amount": amount,
+                        "channel": "whatsapp"
+                    }
+                )
+                logger.debug(f"[Analytics] Tracked button click: {user_id} -> {plan_id}")
+        except Exception as e:
+            # Non-blocking - don't affect payment flow if tracking fails
+            logger.warning(f"[Analytics] Failed to track button click: {e}")
 
     async def _send_cta_url_button(
         self,
