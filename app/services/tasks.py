@@ -2716,16 +2716,20 @@ Copy your code and share! 💫"""
         # Detect user gender for personality adaptation
         user_gender = await get_user_gender(phone, message)
 
-        # DEBUG: Log gender detection
-        logger.info(f"[GENDER DEBUG] User: +{phone}, Message: {message[:50]}, Detected Gender: {user_gender}")
+        # Detect user language from current message
+        detected_language = _detect_language(message)
 
-        # Create envelope with gender context for AI personality
+        # DEBUG: Log gender and language detection
+        logger.info(f"[GENDER DEBUG] User: +{phone}, Message: {message[:50]}, Detected Gender: {user_gender}, Language: {detected_language}")
+
+        # Create envelope with gender and language context for AI personality
         timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 
-        # IMPORTANT: Inject gender into the envelope so AI can see it
+        # IMPORTANT: Inject gender and language into the envelope so AI can see it
         # This is required because OpenCLAW doesn't automatically inject metadata into system prompt
         gender_context = f" [Gender: {user_gender}]" if user_gender != "unknown" else ""
-        envelope = f"[From: WhatsApp User (+{phone}){gender_context} at {timestamp}]"
+        language_context = f" [Language: {detected_language}]" if detected_language else ""
+        envelope = f"[From: WhatsApp User (+{phone}){gender_context}{language_context} at {timestamp}]"
 
         # Build context text (no image data in text — that goes via input_image)
         if message_type != "text" and media_info:
@@ -2790,6 +2794,7 @@ Copy your code and share! 💫"""
             "user": f"+{phone}",
             "metadata": {
                 "user_gender": user_gender,
+                "user_language": detected_language,
             }
         }
 
