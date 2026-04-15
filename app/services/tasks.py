@@ -1997,70 +1997,219 @@ Copy your code and share! 💫"""
     # ==================== HELPER FUNCTIONS ====================
 
     def _detect_language(text: str) -> str:
-        """Detect if text is English, Hindi, or Hinglish (Roman script with Hindi words)."""
+        """Detect if text is English, Hindi/Hinglish, Telugu/Telugish, Tamil/Tamilish, Gujarati/Gujjarish, Kannada/Kannadish, Malayalam/Malayalish, Marathi/Marathish, or Bengali/Benglish."""
         if not text:
             return "english"
 
-        # Common Hinglish words (Roman script Hindi)
+        # ========== HINGLISH WORDS (Roman script Hindi) ==========
         hinglish_words = {
-            # Common words
             'namaste', 'kaise', 'ho', 'kya', 'hai', 'hain', 'nahi', 'ji', 'acha',
-            'theek', 'hai', 'hain', 'kar', 'ke', 'ka', 'ki', 'ko', 'se', 'mein', 'mera',
-            'tera', 'apna', 'karna', 'sakta', 'sakti', 'sakta', 'hai', 'hoga', 'hogi',
-            'please', 'thank', 'you', 'sorry', 'maf', 'kijiye', 'ga', 'bhai', 'behen',
-            'yeh', 'voh', 'yah', 'yahin', 'wahan', 'kya', 'kisko', 'kiske', 'kab',
-            'kabhi', 'kahan', 'kaise', 'kitna', 'kitni', 'kitne', 'sab', 'sabse',
-            'ek', 'do', 'teen', 'char', 'paanch', 'cheh', 'saath', 'aath', 'nau', 'das',
-            'bohot', 'bahut', 'zyada', 'kam', 'accha', 'achha', 'bilkul', 'pakka',
-            'shayad', 'haan', 'haanji', 'ji', 'nahi', 'na', 'toh', 'to', 'aur', 'or',
-            'lekin', 'magar', 'par', 'kyunki', 'kyun', 'kyun', 'isliye', 'liye',
-            'wajah', 'wajahse', 'batao', 'batana', 'bata', 'suno', 'sunna', 'samjha',
-            'samjhi', 'samajh', 'samjh', 'pata', 'maloom', 'chal', 'chalo', 'ruko',
-            'rukho', 'aa', 'aao', 'jao', 'jayiye', 'jiyega', 'jiyegi', 'hoga', 'hogi',
-            # Time/relations
-            'abhi', 'ab', 'kal', 'aaj', 'aj', 'parson', 'neste', 'subah', 'shaam',
-            'dophar', 'raat', 'morning', 'evening', 'night', 'dinner', 'lunch',
-            'mom', 'dad', 'papa', 'mummy', 'maa', 'baap', 'beti', 'beta', 'bhai',
-            'behen', 'didi', 'bhaiya', 'family', 'ghar', 'gharpe', 'office',
-            # Astrology specific
-            'kundli', 'horoscope', 'rashi', 'lagna', 'planets', 'grah', 'nakshatra',
-            'dasha', 'mahadasha', 'antardasha', 'vivah', 'shaadi', 'marriage', 'career',
-            'naukri', 'job', 'business', 'paisa', 'paisaye', 'rupaye', 'investment',
-            # Feelings
-            'pyaar', 'love', 'dil', 'dilse', 'mann', 'mannki', 'feel', 'feeling',
-            'khush', 'gussa', 'naraaz', 'udaas', 'happy', 'sad', 'excited', 'tension',
-            'problem', 'solution', 'mamla', 'baat', 'baaten', 'chinta', 'worry',
-            # Common connectors
-            'hmm', 'haan', 'ok', 'okay', 'thik', 'theek', 'sahi', 'galat', 'wrong',
-            'right', 'correct', 'sach', 'truth', 'jhooth', 'lie', 'batao', 'bolo'
+            'theek', 'kar', 'ke', 'ka', 'ki', 'ko', 'se', 'mein', 'mera', 'tera',
+            'apna', 'karna', 'sakta', 'sakti', 'hoga', 'hogi', 'kijiye', 'ga',
+            'bhai', 'behen', 'yeh', 'voh', 'yah', 'wahan', 'kisko', 'kiske',
+            'kab', 'kabhi', 'kahan', 'kaise', 'kitna', 'kitni', 'kitne', 'sab',
+            'sabse', 'ek', 'do', 'teen', 'char', 'paanch', 'cheh', 'saath',
+            'aath', 'nau', 'das', 'bohot', 'bahut', 'zyada', 'kam', 'accha',
+            'achha', 'bilkul', 'pakka', 'shayad', 'haan', 'haanji', 'toh', 'to',
+            'aur', 'or', 'lekin', 'magar', 'par', 'kyunki', 'kyun', 'isliye',
+            'liye', 'wajah', 'batao', 'batana', 'bata', 'suno', 'sunna',
+            'samjha', 'samjhi', 'samajh', 'pata', 'maloom', 'chal', 'chalo',
+            'ruko', 'rukho', 'aa', 'aao', 'jao', 'jayiye', 'jiyega', 'jiyegi',
+            'abhi', 'ab', 'kal', 'aaj', 'aj', 'parson', 'subah', 'shaam',
+            'dophar', 'raat', 'mom', 'dad', 'papa', 'mummy', 'maa', 'baap',
+            'beti', 'beta', 'didi', 'bhaiya', 'family', 'ghar', 'gharpe',
+            'kundli', 'horoscope', 'rashi', 'lagna', 'planets', 'grah',
+            'nakshatra', 'dasha', 'mahadasha', 'antardasha', 'vivah', 'shaadi',
+            'marriage', 'career', 'naukri', 'job', 'business', 'paisa', 'paisaye',
+            'rupaye', 'investment', 'pyaar', 'love', 'dil', 'dilse', 'mann',
+            'feel', 'feeling', 'khush', 'gussa', 'naraaz', 'udaas', 'happy',
+            'sad', 'excited', 'tension', 'problem', 'solution', 'mamla', 'baat',
+            'baaten', 'chinta', 'worry', 'hmm', 'ok', 'okay', 'thik', 'sahi',
+            'galat', 'wrong', 'right', 'correct', 'sach', 'truth'
         }
 
-        # Convert to lowercase for checking
-        text_lower = text.lower()
+        # ========== TELUGISH WORDS (Roman script Telugu) ==========
+        telugish_words = {
+            'namaskaram', 'bagunnara', 'emi', 'chesthunnav', 'elaa', 'untaru',
+            'chala', 'bagundi', 'kritam', 'sarigga', 'ledu', 'kastam', 'vasthundi',
+            'cheppandi', 'cheppu', 'telusa', 'telusukundi', 'navvuthunnav',
+            'andalukunte', 'mundu', 'taruvatha', 'inka', 'anni', 'evi', 'ekkada',
+            'ventane', 'tagalamaa', 'baboi', 'ayina', 'kani', 'enduku', 'antanu',
+            'maa', 'nuvvu', 'mee', 'athanu', 'adhi', 'idi', 'evadu', 'evaru',
+            'amma', 'nanna', 'akka', 'tammudu', 'pinni', 'babai', 'attha',
+            'mamayya', 'vodaru', 'koduku', 'thammudu', 'garu', 'andi', 'le',
+            'undi', 'unda', 'cheyyali', 'cheyyanu', 'vasthanu', 'pothanu',
+            'vachanindi', 'ayyindi', 'jatakam', 'rasi', 'phalalu', 'lagnam',
+            'vivaham', 'vela', 'dhana', 'gruham', 'grahalu', 'dasa', 'antardasa'
+        }
 
-        # Count Hinglish words in the text
-        hinglish_count = 0
-        words = text_lower.split()
-        for word in words:
-            # Remove punctuation for matching
-            clean_word = word.strip('.,!?;:"\'-')
-            if clean_word in hinglish_words:
-                hinglish_count += 1
+        # ========== TAMILISH WORDS (Roman script Tamil) ==========
+        tamilish_words = {
+            'vanakkam', 'eppadi', 'irukkinga', 'enna', 'panra', 'semaya', 'illai',
+            'kastam', 'neram', 'sollu', 'sollunga', 'theriyuma', 'theriyumaa',
+            'nallavaru', 'romba', 'nallavaru', 'evvalavu', 'evlo', 'engayo',
+            'inga', 'anga', 'po', 'vaa', 'varren', 'pogiren', 'vandhirukken',
+            'padichen', 'kizhamai', 'naal', 'mani', 'neram', 'pagal', 'malai',
+            'iravu', 'amma', 'appan', 'akka', 'thambi', 'periyamma', 'mama',
+            'chithappa', 'athai', 'nanban', 'jathagam', 'rasipalan', 'jothidam',
+            'kalyanam', 'velai', 'panam', 'thozhil', 'poru', 'illam', 'veedu',
+            'aalayam', 'kovil', 'kadavul', 'sami', 'namaskaram', 'nandri',
+            'mithivi', 'sowkyam', 'paathiram', 'saappadu', 'unavu', 'thanni'
+        }
 
-        # Count Devanagari characters (Hindi script)
+        # ========== GUJJARISH WORDS (Roman script Gujarati) ==========
+        gujjarish_words = {
+            'namaskar', 'kem', 'cho', 'kamaal', 'che', 'majabat', 'nathi',
+            'tamari', 'thayu', 'chhe', 'chal', 'aavu', 'j', 'hashu', 'kari',
+            'laakh', 'shu', 'aa', 'pachi', 'pehla', 'babat', 'vaaste', 'bahu',
+            'sarva', 'koi', 'nai', 'bhai', 'ben', 'bapu', 'ba', 'maa', 'dada',
+            'fui', 'kaka', 'mami', 'fua', 'thai', 'thaijar', 'temaj', 'lakh',
+            'kari', 'shu', 'ku', 'ke', 'rite', 'par', 'tyare', 'pachi', 'ahi',
+            'tya', 'bija', 'enaa', 'ena', 'kaik', 'kai', 'laai', 'de', 'levu',
+            'malyu', 'fari', 'phari', 'saru', 'sachu', 'thik', 'che', 'hathi',
+            'rahu', 'jagya', 'thayo', 'kari', 'shake', 'chiye', 'heto', 'bar',
+            'nathi', 'che', 'kundali', 'rashi', 'bhavishya', 'lagna', 'vivah',
+            'vyavsay', 'dhan', 'gruha', 'sampatti', 'aay', 'vyay', 'maalam',
+            'fari', 'nava', 'jogan', 'halar', 'halaru', 'thavu'
+        }
+
+        # ========== KANNADISH WORDS (Roman script Kannada) ==========
+        kannadish_words = {
+            'namaskara', 'hegiddira', 'yenu', 'madtidira', 'chennagide', 'illa',
+            'kashtha', 'heliri', 'gottilla', 'doddavadu', 'svalpa', 'neevu',
+            'naanu', 'namma', 'imba', 'ava', 'adara', 'aaru', 'ee', 'avu',
+            'baru', 'hogi', 'banni', 'nodi', 'kelusa', 'mukhyam', 'sadhya',
+            'yaru', 'yaaru', 'elli', 'yelli', 'yaake', 'anke', 'beda', 'beku',
+            'agutte', 'aagutaare', 'hogutte', 'hogutatre', 'barutte', 'barutatre',
+            'keli', 'ge', 'inda', 'inda', 'mele', 'kelage', 'bali', 'alli',
+            'hinglisi', 'kannada', 'tamil', 'telugu', 'malayalam', 'hindhi',
+            'kundali', 'rashi', 'bhavishya', 'vivaha', 'vela', 'kelasa',
+            'dhan', 'sampatha', 'graha', 'dosa', 'antardosa', 'jataka', 'phala',
+            'amma', 'thamma', 'ajji', 'ajja', 'anna', 'akka', 'tamma', 'chikkappa'
+        }
+
+        # ========== MALAYALISH WORDS (Roman script Malayalam) ==========
+        malayalish_words = {
+            'namaskaram', 'sugamano', 'enthundu', 'chingathanam', 'sowkyam',
+            'enth', 'aaru', 'enu', 'cheyyunnu', 'cheyyuka', 'cheyyunna',
+            'parayu', 'parayuka', 'parayunnu', 'ariyamo', 'ariyilla', 'illa',
+            'venam', 'kazhiyilla', 'kashtam', 'easo', 'nallonam', 'poli',
+            'manasilaayi', 'manasilaaku', 'sramikkuka', 'pattu', 'kitti',
+            'vannu', 'poyi', 'varunnu', 'verum', 'enthinu', 'kittan', 'ennal',
+            'ningal', 'njan', 'aan', 'aval', 'adar', 'amma', 'achan', 'chechi',
+            'chettan', 'ammavan', 'ammayi', 'mohan', 'jathakam', 'rasi',
+            'phalam', 'lagnam', 'vivaham', 'jeevitham', 'avakaasham', 'dhana',
+            'rovaka', 'pithru', 'mathru', 'sahodaran', 'sahodari', 'putran',
+            'putri', 'grabham', 'grahangal', 'dasa', 'antardasa', 'bhagyam',
+            'ishtam', 'priyam', 'premam', 'sneham', 'sthiram', 'asantwana'
+        }
+
+        # ========== MARATHISH WORDS (Roman script Marathi) ==========
+        marathish_words = {
+            'namaskar', 'kase', 'ahes', 'kay', 'karaycha', 'aha', 'hote',
+            'nhi', 'nahi', 'mhanje', 'mhanun', 'tar', 'mag', 'karn', 'karne',
+            'sakto', 'saktil', 'hot', 'hote', 'asach', 'kiva', 'kiva',
+            'kuth', 'ekdum', 'khup', 'thoda', 'bahet', 'hi', 'he', 'tya',
+            'tyache', 'tyanna', 'mala', 'majhya', 'amhi', 'aplyaa', 'aamhala',
+            'tumhi', 'tumhala', 'to', 'ti', 'te', 'tun', 'tun', 'kay', 'karu',
+            'kara', 'karaych', 'ahe', 'aahe', 'asun', 'denaar', 'ghun',
+            'ya', 'ye', 'hi', 'tya', 'khi', 'kon', 'koni', 'kase', 'kasha',
+            'kita', 'kiti', 'kithe', 'kuthun', 'jawal', 'phiran', 'raahil',
+            'aai', 'vaju', 'mulgi', 'mula', 'bahin', 'dada', 'bhau', 'jijji',
+            'aunty', 'mama', 'mami', 'kundali', 'rashi', 'bhavishya', 'vivah',
+            'lagna', 'naukri', 'service', 'vyavasay', 'dhani', 'gar', 'gada',
+            'gruh', 'sampati', 'dhan', 'paisa', 'rong', 'rong', 'sukh', 'druk'
+        }
+
+        # ========== BENGLISH WORDS (Roman script Bengali) ==========
+        benglish_words = {
+            'namaskar', 'kemon', 'acho', 'ki', 'kortecho', 'bhalo', 'na',
+            'kotha', 'bolchi', 'bujhtecho', 'ki', 'kore', 'hobe', 'parbe',
+            'apni', 'tumi', 'ami', 'tar', 'tara', 'ei', 'oi', 'ta', 'ti',
+            'hochche', 'theko', 'ashbe', 'jabo', 'kije', 'kono', 'ekta',
+            'kichu', 'boba', 'joss', 'goppa', 'valo', 'kharap', 'ebar',
+            'tokhoni', 'takhon', 'sathe', 'sthe', 'keno', 'keno', 'kokhon',
+            'kibhabe', 'kivabe', 'kothay', 'ke', 'keu', 'kar', 'kora',
+            'nei', 'ache', 'thake', 'chen', 'mama', 'bhai', 'bon', 'didi',
+            'ma', 'baba', 'kaka', 'jamaibabu', 'bhagni', 'bhagnibaba',
+            'janma', 'patri', 'rashi', 'fal', 'vivaha', 'byabasaya', 'chakri',
+            'aay', 'byay', 'dhan', 'sampad', 'bri', 'hingsla', 'kop', 'sukh',
+            'dukkho', 'prem', 'bhalobasha', 'mon', 'kache', 'dure', 'bichar'
+        }
+
+        # ========== NATIVE SCRIPT CHARACTER SETS ==========
         hindi_chars = set('अआइईउऊऋएऐओऔकखगघङचछजझञटडणतथदधनपफबभमयरलवशषसह')
-        hindi_char_count = sum(1 for char in text if char in hindi_chars)
+        telugu_chars = set('అఆఇఈఉఊఋఌఎఏఐఒఓఔకఖగఘఙచఛజఝఞటఠడఢణతథదధనపఫబభమయరఱలవశషసహళ')
+        tamil_chars = set('அஆஇஈஉஊஎஏஐஒஓஔகஙசஜஞடணதநபமயரறலளழவஶஷஸஹ')
+        gujarati_chars = set('અઆઇઈઉઊઋએઐઓઔકખગઘઙચછજઝઞટઠડઢણતથદધનપફબભમયરલવશષસહ')
+        kannada_chars = set('ಅಆಇಈಉಊಋಌಎಏಐಒಓಔಕಖಗಘಙಚಛಜಝಞಟಠಡಢಣತಥದಧನಪಫಬಭಮಯರಱಲವಶಷಸಹಳ')
+        malayalam_chars = set('അആഇഈഉഊഋഌഎഏഐഒഓഔകഖഗഘങചഛജഝഞടഠഡഢണതഥദധനപഫബഭമയരലവശഷസഹള')
+        bengali_chars = set('অআইঈউঊঋএঐওঔকখগঘঙচছজঝঞটঠডঢণতথদধনপফবভমযরলশষসহ')
 
-        # Decision logic:
-        # 1. If has Devanagari characters → Hindi
-        if hindi_char_count > 0:
-            return "hindi"
+        # ========== DETECTION ALGORITHM ==========
+        text_lower = text.lower()
+        words = text_lower.split()
 
-        # 2. If more than 15% Hinglish words → Hinglish
-        if hinglish_count > 0 and hinglish_count > len(words) * 0.15:
-            return "hinglish"
+        # Initialize scores for all languages
+        scores = {
+            'hindi': 0, 'hinglish': 0,
+            'telugu': 0, 'telugish': 0,
+            'tamil': 0, 'tamilish': 0,
+            'gujarati': 0, 'gujjarish': 0,
+            'kannada': 0, 'kannadish': 0,
+            'malayalam': 0, 'malayalish': 0,
+            'marathi': 0, 'marathish': 0,
+            'bengali': 0, 'benglish': 0,
+        }
 
-        # 3. Otherwise → English
+        # STEP 1: Check native scripts (highest priority - 100 points per character)
+        for char in text:
+            if char in hindi_chars:
+                scores['hindi'] += 100
+            if char in telugu_chars:
+                scores['telugu'] += 100
+            if char in tamil_chars:
+                scores['tamil'] += 100
+            if char in gujarati_chars:
+                scores['gujarati'] += 100
+            if char in kannada_chars:
+                scores['kannada'] += 100
+            if char in malayalam_chars:
+                scores['malayalam'] += 100
+            if char in bengali_chars:
+                scores['bengali'] += 100
+
+        # STEP 2: Check Roman script words (1 point per word match)
+        for word in words:
+            clean_word = word.strip('.,!?;:"\'-')
+
+            if clean_word in hinglish_words:
+                scores['hinglish'] += 1
+            if clean_word in telugish_words:
+                scores['telugish'] += 1
+            if clean_word in tamilish_words:
+                scores['tamilish'] += 1
+            if clean_word in gujjarish_words:
+                scores['gujjarish'] += 1
+            if clean_word in kannadish_words:
+                scores['kannadish'] += 1
+            if clean_word in malayalish_words:
+                scores['malayalish'] += 1
+            if clean_word in marathish_words:
+                scores['marathish'] += 1
+            if clean_word in benglish_words:
+                scores['benglish'] += 1
+
+        # STEP 3: Find best scoring language
+        best_language = max(scores, key=scores.get)
+        best_score = scores[best_language]
+
+        # STEP 4: Return language if above threshold (10% of words)
+        threshold = max(len(words) * 0.10, 2)  # At least 2 matches or 10% of words
+        if best_score >= threshold:
+            return best_language
+
+        # STEP 5: Default to English
         return "english"
 
     def _get_today_start_ist() -> str:
