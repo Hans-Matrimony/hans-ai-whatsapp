@@ -104,7 +104,8 @@ class RazorpayWhatsAppPaymentSender:
                 return False
 
             # Send intro message only if requested (for standalone use)
-            session_id = f"enforcement_{enforcement_type}_{user_id}"
+            # IMPORTANT: Use same session_id as main conversation to avoid creating separate session in dashboard
+            session_id = f"whatsapp:{user_id}"
             if send_intro_message:
                 message = await self._build_message(
                     astrologer_name=astrologer_name,
