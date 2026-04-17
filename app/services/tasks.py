@@ -4264,7 +4264,7 @@ async def _get_recent_conversation_from_mongo(user_id: str, session_data: dict =
 # ===================================================================
 
 @celery_app.task(bind=True, max_retries=2, default_retry_delay=300)
-def daily_horoscope_task():
+def daily_horoscope_task(self):
     """
     Send daily horoscope to all users with birth details at 7 AM IST.
     ONLY RUNS ONCE PER DAY - uses Redis global lock for deduplication.
