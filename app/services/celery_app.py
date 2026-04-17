@@ -55,9 +55,10 @@ celery_app.conf.beat_schedule = {
         'schedule': 300.0,  # 5 minutes
     },
     # Daily horoscope at 7:00 AM IST (runs daily)
+    # 1:30 AM UTC = 7:00 AM IST (India is UTC+5:30)
     'daily-horoscope-7am-ist': {
         'task': 'app.services.tasks.daily_horoscope_task',
-        'schedule': crontab(minute=0, hour=7),  # 7:00 AM daily
+        'schedule': crontab(minute=30, hour=1),  # 1:30 AM UTC = 7:00 AM IST
     },
 }
 
