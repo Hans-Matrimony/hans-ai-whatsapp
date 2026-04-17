@@ -592,8 +592,8 @@ def get_astrologer_personality(user_gender: str) -> dict:
         # User is female → Male astrologer (Aarav)
         return ASTROLOGER_PERSONALITIES["male"]
     else:
-        # Unknown gender → Default to neutral/male astrologer (Aarav)
-        return ASTROLOGER_PERSONALITIES["male"]
+        # Unknown gender → Default to Meera (Female astrologer) as per IDENTITY.md
+        return ASTROLOGER_PERSONALITIES["female"]
 
 
 def _get_gender_instruction(user_gender: str) -> str:
