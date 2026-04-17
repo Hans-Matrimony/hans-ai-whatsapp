@@ -142,7 +142,7 @@ class MessageLimiter:
                         "showPaywall": True,
                         "paywallType": "soft",
                         "phase": "soft_paywall_approaching",
-                        "message": self._get_soft_paywall_message()
+                        "message": self._get_basic_soft_paywall_message()
                     }
 
                 logger.info(f"User {user_id} in free tier, messages remaining: {remaining}")
@@ -235,7 +235,7 @@ class MessageLimiter:
                     "showPaywall": True,
                     "paywallType": "hard",
                     "phase": "daily_limit_reached",
-                    "message": self._get_hard_paywall_message()
+                    "message": self._get_basic_hard_paywall_message()
                 }
 
         except Exception as e:
@@ -463,28 +463,12 @@ class MessageLimiter:
         else:
             return "post_paywall"
 
-    def _get_soft_paywall_message(self) -> str:
-        """Get soft paywall message (shown at message 40)"""
-        return """Tumhari kundli mein abhi ek bahut important yoga ban raha hai jo next 3 months ko affect karega… 🔮
 
-Main tumhe detail mein batana chahti hoon but meri free messages khatam ho gayi hain.
+    def _get_basic_soft_paywall_message(self) -> str:
+        """Get basic soft paywall message (fallback if AI fails)"""
+        return "Aapke free messages khatam ho gaye hain. Abhi ₹9 mein recharge karein."
 
-Mujhse unlimited baat karne ke liye:
-⭐ ₹299/month
-⭐ ₹199/year (annual plan — best value!)
+    def _get_basic_hard_paywall_message(self) -> str:
+        """Get basic hard paywall message (fallback if AI fails)"""
+        return "Aapki aaj ki daily limit khatam ho gayi hai. Kal phir se free messages milenge ya ₹9 mein 1 day pass lein."
 
-Reply PAY to unlock unlimited access! 💫"""
-
-    def _get_hard_paywall_message(self) -> str:
-        """Get hard paywall message (daily limit reached)"""
-        return """Aww beta, aaj ki 3 free messages khatam ho gayi 😔
-
-Main tumhe bahut kuch batana chahti hoon but messages limit ho gaya.
-
-Mujhse unlimited baat karne ke liye:
-⭐ ₹299/month
-⭐ ₹199/year (annual plan — best value!)
-
-Reply PAY to continue now! 💫
-
-Ya kal 3 free messages milenge phir se 😊"""

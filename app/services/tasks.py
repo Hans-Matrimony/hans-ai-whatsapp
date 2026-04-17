@@ -2383,92 +2383,13 @@ Copy your code and share! 💫"""
                         except Exception as e:
                             logger.warning(f"[Enforcement] ⚠️ AI generation failed: {e}")
 
-                    # Fallback to hardcoded messages if AI failed
-                    if not limit_message and AI_ENFORCEMENT_FALLBACK:
-                        logger.info(f"[Enforcement] Using hardcoded enforcement message")
-                        # Generate personalized message from astrologer
-                        if user_language == "english":
-                            # English - personalized by astrologer
-                            if astrologer_name == "Meera":
-                                # Female astrologer (Meera) talking to male user
-                                limit_message = (
-                                    f"I'm really sorry, but your free messages and daily limit are done for today 😔\n\n"
-                                    f"I feel bad that I can't help you right now. It's a system limitation, and I feel terrible about it.\n\n"
-                                    f"Please use the payment button below to continue unlimited guidance. "
-                                    f"Or you can wait until tomorrow - you'll get 5 free messages tomorrow.\n\n"
-                                    f"Really sorry about this 🙏"
-                                )
-                            else:
-                                # Male astrologer (Aarav) talking to female user
-                                limit_message = (
-                                    f"Main bilkul maafi chahta hoon ki aaj aur aapke free messages khatam ho gaye 😔\n\n"
-                                    f"Mujhe bohot bura lag raha hai ki main aapki abhi madad nahi kar pa raha. "
-                                    f"System ki limitation hai yeh, main kar bhi kya sakta hoon?\n\n"
-                                    f"Agar aapko raasta chahiye toh payment button use karke subscription le sakti ho. "
-                                    f"Ya fir kal ka wait kar sakte ho - kal aapko 5 free messages mil jayengi.\n\n"
-                                    f"Maf kijiye ga 🙏"
-                                )
-                        else:
-                            # Hinglish (DEFAULT) - personalized by astrologer
-                            if astrologer_name == "Meera":
-                                # Female astrologer (Meera) talking to male user
-                                limit_message = (
-                                    f"I'm really sorry, but your free messages and daily limit are done for today 😔\n\n"
-                                    f"I feel bad that I can't help you right now. It's a system limitation, and I feel terrible about it.\n\n"
-                                    f"Please use the payment button below to continue unlimited guidance. "
-                                    f"Or you can wait until tomorrow - you'll get 5 free messages tomorrow.\n\n"
-                                    f"Really sorry about this 🙏"
-                                )
-
-                    # Fallback to hardcoded messages
-                    if not limit_message and AI_ENFORCEMENT_FALLBACK:
-                        logger.info(f"[Enforcement] Using hardcoded enforcement message")
-                        # Generate personalized message from astrologer
-                        if user_language == "english":
-                            # English - personalized by astrologer
-                            if astrologer_name == "Meera":
-                                # Female astrologer (Meera) talking to male user
-                                limit_message = (
-                                    f"I'm really sorry, but your free messages and daily limit are done for today 😔\n\n"
-                                    f"I feel bad that I can't help you right now. It's a system limitation, and I feel terrible about it.\n\n"
-                                    f"Please use the payment button below to continue unlimited guidance. "
-                                    f"Or you can wait until tomorrow - you'll get 5 free messages tomorrow.\n\n"
-                                    f"Really sorry about this 🙏"
-                                )
-                            else:
-                                # Male astrologer (Aarav) talking to female user
-                                limit_message = (
-                                    f"Main bilkul maafi chahta hoon ki aaj aur aapke free messages khatam ho gaye 😔\n\n"
-                                    f"Mujhe bohot bura lag raha hai ki main aapki abhi madad nahi kar pa raha. "
-                                    f"System ki limitation hai yeh, main kar bhi kya sakta hoon?\n\n"
-                                    f"Agar aapko raasta chahiye toh payment button use karke subscription le sakti ho. "
-                                    f"Ya fir kal ka wait kar sakte ho - kal aapko 5 free messages mil jayengi.\n\n"
-                                    f"Maf kijiye ga 🙏"
-                                )
-                        else:
-                            # Hinglish (DEFAULT) - personalized by astrologer
-                            if astrologer_name == "Meera":
-                                # Female astrologer (Meera) talking to male user
-                                limit_message = (
-                                    f"I'm really sorry, but your free messages and daily limit are done for today 😔\n\n"
-                                    f"I feel bad that I can't help you right now. It's a system limitation, and I feel terrible about it.\n\n"
-                                    f"Please use the payment button below to continue unlimited guidance. "
-                                    f"Or you can wait until tomorrow - you'll get 5 free messages tomorrow.\n\n"
-                                    f"Really sorry about this 🙏"
-                                )
-                            else:
-                                # Male astrologer (Aarav) talking to female user
-                                limit_message = (
-                                    f"I'm really sorry, but your free messages and daily limit are done for today 😔\n\n"
-                                    f"I feel bad that I can't help you right now. It's a system limitation, and I feel terrible about it.\n\n"
-                                    f"Please use the payment button below to continue unlimited guidance. "
-                                    f"Or you can wait until tomorrow - you'll get 5 free messages tomorrow.\n\n"
-                                    f"Really sorry about this 🙏"
-                                )
-
+                    # Fallback to basic hardcoded message if AI failed
                     if not limit_message:
-                        logger.error("[Enforcement] Failed to generate enforcement message")
-                        return {"status": "error", "error": "Failed to generate enforcement message"}
+                        logger.warning(f"[Enforcement] AI generation failed, using basic fallback message")
+                        if user_language == "hinglish":
+                            limit_message = "Aapki aaj ki message limit khatam ho gayi hai. Kal phir se free messages milenge. Ya abhi ₹9 mein 1 day pass lein."
+                        else:
+                            limit_message = "Your daily message limit is over. You'll get free messages tomorrow. Or get 1 day pass for just ₹9."
 
                     logger.info(f"[Enforcement] Generated enforcement message from {astrologer_name}:")
                     logger.info(f"[Enforcement] Message preview: {limit_message[:200]}...")
@@ -2613,27 +2534,10 @@ Copy your code and share! 💫"""
             except Exception as e:
                 logger.warning(f"[Subscription] AI generation failed: {e}")
 
-        # LAYER 3: Fallback to hardcoded messages
-        if not payment_message and AI_ENFORCEMENT_FALLBACK:
-            logger.info(f"[Subscription] Using hardcoded payment nudge message")
-            if astrologer_name == "Meera":
-                # Female astrologer (Meera) talking to male user
-                payment_message = (
-                    f"Hi! Aapke free messages khatam ho gaye hain 😔\n\n"
-                    f"Main continue kar na chahti hoon lekin system ne limit laga di hai. "
-                    f"Agar aapko chahiye toh 'PAY' type karke subscription le lo."
-                )
-            else:
-                # Male astrologer (Aarav) talking to female user
-                payment_message = (
-                    f"Hi! Aapke free messages khatam ho gaye hain 😔\n\n"
-                    f"Main continue kar na chahta hoon lekin system ne limit laga di hai. "
-                    f"Agar aapko chahiye toh 'PAY' type karke subscription le lo."
-                )
-
+        # Fallback to basic hardcoded message if AI failed
         if not payment_message:
-            logger.error("[Subscription] Failed to generate payment nudge message")
-            return {"status": "error", "error": "Failed to generate payment nudge"}
+            logger.warning(f"[Subscription] AI generation failed, using basic fallback message")
+            payment_message = "Aapke free messages khatam ho gaye hain. Abhi ₹9 mein 1 day pass lein - https://payment-link"
 
         logger.info(f"[Subscription] Payment message from {astrologer_name}: {payment_message[:150]}...")
 
@@ -2683,9 +2587,10 @@ Copy your code and share! 💫"""
                 if not limit_check.get("allowed"):
                     # User has hit limit - send paywall message and block
                     paywall_message = limit_check.get("message")
-                    async with httpx.AsyncClient(timeout=30.0) as client:
-                        await _send_whatsapp_message(client, phone, paywall_message)
-                    await _log_to_mongo(session_id, user_id, "assistant", paywall_message, "whatsapp", "text", None, nudge_level=1)
+                    if paywall_message:
+                        async with httpx.AsyncClient(timeout=30.0) as client:
+                            await _send_whatsapp_message(client, phone, paywall_message)
+                        await _log_to_mongo(session_id, user_id, "assistant", paywall_message, "whatsapp", "text", None, nudge_level=1)
                     logger.warning(f"[Message Limiter] User {user_id} hit message limit, blocking message")
                     return {"status": "blocked", "reason": "message_limit", "limit_check": limit_check}
 
