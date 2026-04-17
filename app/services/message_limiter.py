@@ -466,9 +466,9 @@ class MessageLimiter:
 
     def _get_basic_soft_paywall_message(self) -> str:
         """Get basic soft paywall message (fallback if AI fails)"""
-        return "Aapke free messages khatam ho gaye hain. Abhi ₹9 mein recharge karein."
+        return "Aapke free messages khatam ho gaye hain. Niche Pay Now button par click karke ₹9 mein recharge karein."
 
     def _get_basic_hard_paywall_message(self) -> str:
         """Get basic hard paywall message (fallback if AI fails)"""
-        return "Aapki aaj ki daily limit khatam ho gayi hai. Kal phir se free messages milenge ya ₹9 mein 1 day pass lein."
+        return "Aapki aaj ki daily limit khatam ho gayi hai. Niche Pay Now button par click karke ₹9 mein 1 day pass lein."
 

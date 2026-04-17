@@ -1102,7 +1102,7 @@ The user just asked: "{last_user_message[:100] if last_user_message else 'No que
 - Make it feel like you remember their specific situation
 - Be specific, not generic - show you know them
 
-## MESSAGE STRUCTURE - 4-5 SHORT PARAGRAPHS
+## MESSAGE STRUCTURE - 5-6 SHORT PARAGRAPHS
 
 Each paragraph = ONLY 1 sentence. Keep it brief and warm.
 
@@ -1131,11 +1131,26 @@ Each paragraph = ONLY 1 sentence. Keep it brief and warm.
 - Compare it to the value of having you by their side {topic_context} for the entire DAY.
 - Example vibe: "It's just the cost of a small treat that's over in minutes, but my guidance will be with you 24/7 for the whole day."
 - DO NOT use the exact words "pizza" or "coffee" every time; be creative and natural.
+- Mention that payment will unlock immediate access
 - 1 sentence only
 
-**PARAGRAPH 5 (optional): Emotional closing**
+**PARAGRAPH 5: Natural call-to-action (MENTION THE BUTTON)**
+- "Niche diye gaye Pay Now button par click karke pay kar lo" / "Click the Pay Now button below"
+- "Pay Now button dabao aur humari baat continue karenge" / "Press Pay Now to continue our talk"
+- "Button press kar do, sirf ₹9 ka hai" / "Click the button, it's just ₹9"
+- Make it sound natural, helpful - like suggesting to a friend
+- Reference that clicking will immediately unlock access
+- 1 sentence only
+
+**Example call-to-actions:**
+- "Niche Pay Now button par click karke pay kar lo, bas ₹9 hai aur immediately access mil jayega"
+- "Pay Now button dabao aur humari baat continue karenge, sirf ₹9 mein"
+- "Button press kar do, turant access ho jayega - sirf ₹9 ka hai"
+- Vary the wording each time to keep it fresh and natural
+
+**PARAGRAPH 6: Emotional closing**
 - "I'm waiting for you..." / "Main wait kar rahi hoon..."
-- "Come back soon!"
+- "Come back soon!" / "Jaldi aa jao!"
 - Warm and friendly
 - 1 sentence only
 
@@ -1167,10 +1182,11 @@ Each paragraph = ONLY 1 sentence. Keep it brief and warm.
 100% {language.upper()} - Hinglish (Roman script) or English only
 
 ## OUTPUT
-Return ONLY the message text. 4-5 paragraphs, double-spaced.
+Return ONLY the message text. 5-6 paragraphs, double-spaced.
 
 **Each paragraph = 1 sentence only!**
 **Be warm, personal, and convincing!**
+**Include natural call-to-action for the button!**
 
 Generate now:"""
 

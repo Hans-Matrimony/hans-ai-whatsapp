@@ -2387,9 +2387,9 @@ Copy your code and share! 💫"""
                     if not limit_message:
                         logger.warning(f"[Enforcement] AI generation failed, using basic fallback message")
                         if user_language == "hinglish":
-                            limit_message = "Aapki aaj ki message limit khatam ho gayi hai. Kal phir se free messages milenge. Ya abhi ₹9 mein 1 day pass lein."
+                            limit_message = "Aapki aaj ki message limit khatam ho gayi hai. Niche Pay Now button par click karke ₹9 mein recharge kar lo."
                         else:
-                            limit_message = "Your daily message limit is over. You'll get free messages tomorrow. Or get 1 day pass for just ₹9."
+                            limit_message = "Your daily message limit is over. Click the Pay Now button below to get 1 day pass for just ₹9."
 
                     logger.info(f"[Enforcement] Generated enforcement message from {astrologer_name}:")
                     logger.info(f"[Enforcement] Message preview: {limit_message[:200]}...")
@@ -2537,7 +2537,7 @@ Copy your code and share! 💫"""
         # Fallback to basic hardcoded message if AI failed
         if not payment_message:
             logger.warning(f"[Subscription] AI generation failed, using basic fallback message")
-            payment_message = "Aapke free messages khatam ho gaye hain. Abhi ₹9 mein 1 day pass lein - https://payment-link"
+            payment_message = "Aapke free messages khatam ho gaye hain. Niche Pay Now button par click karke ₹9 mein 1 day pass lein."
 
         logger.info(f"[Subscription] Payment message from {astrologer_name}: {payment_message[:150]}...")
 
