@@ -112,7 +112,12 @@ class KundliCalculatorWrapper:
                             "failed to generate",
                             "unable to respond",
                             "timeout",
-                            "rate limit"
+                            "rate limit",
+                            "an unknown error occurred",
+                            "unknown error",
+                            "request interrupted",
+                            "malformed response",
+                            "an error occurred"
                         ]
 
                         content_lower = content.lower()

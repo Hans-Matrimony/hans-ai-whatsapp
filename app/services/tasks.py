@@ -1394,7 +1394,11 @@ def _filter_error_messages(text: str) -> str:
         "technical error",
         "system error",
         "internal server error",
-        "gateway error"
+        "gateway error",
+        "an unknown error occurred",
+        "unknown error",
+        "request interrupted",
+        "malformed response"
     ]
 
     text_lower = text.lower()
@@ -1403,7 +1407,15 @@ def _filter_error_messages(text: str) -> str:
     if has_technical_error:
         # Check if the response is SHORT (likely just an error message)
         # OR if it starts with technical error language
-        if len(text.strip()) < 100 or text_lower.startswith(("error:", "no response", "failed:", "unable:", "api ")):
+        # OR if the error appears prominently in the text
+        is_short = len(text.strip()) < 100
+        starts_with_error = text_lower.startswith(("error:", "no response", "failed:", "unable:", "api "))
+        has_critical_error = any(
+            text_lower.count(error) >= 1 and len(text.strip()) < 500
+            for error in ["no response from openclaw", "error from openclaw", "service unavailable"]
+        )
+
+        if is_short or starts_with_error or has_critical_error:
             logger.warning(f"[ERROR_FILTER] Detected technical error: {text[:100]}")
             # Return a friendly generic message
             return "Sorry, I'm having some technical difficulties right now. Please try again in a moment. I'll be back to help you shortly! ⭐️"
@@ -2911,19 +2923,48 @@ Copy your code and share! 💫"""
             if "filename" in media_info:
                 payload["metadata"]["media_filename"] = media_info["filename"]
 
-        response = await client.post(
-            f"{OPENCLAW_URL}/v1/responses",
-            json=payload,
-            headers=headers,
-        )
+        # Wrap OpenClaw API call in try-except for timeout and network errors
+        try:
+            response = await client.post(
+                f"{OPENCLAW_URL}/v1/responses",
+                json=payload,
+                headers=headers,
+            )
+        except httpx.TimeoutException as e:
+            logger.error(f"[OpenClaw] Timeout error: {e}")
+            fallback_msg = "Things are a bit busy on my end right now! Give me a minute to catch up, and try again shortly. ⭐️"
+            await _send_whatsapp_message(client, phone, fallback_msg)
+            await _log_to_mongo(session_id, user_id, "assistant", fallback_msg, "whatsapp")
+            return {"error": "OpenClaw timeout"}
+        except httpx.NetworkError as e:
+            logger.error(f"[OpenClaw] Network error: {e}")
+            fallback_msg = "I'm having some connectivity issues right now. Please try again in a moment! ⭐️"
+            await _send_whatsapp_message(client, phone, fallback_msg)
+            await _log_to_mongo(session_id, user_id, "assistant", fallback_msg, "whatsapp")
+            return {"error": "OpenClaw network error"}
+        except Exception as e:
+            logger.error(f"[OpenClaw] Unexpected error: {e}")
+            fallback_msg = "Something went wrong on my end. Please try again! ⭐️"
+            await _send_whatsapp_message(client, phone, fallback_msg)
+            await _log_to_mongo(session_id, user_id, "assistant", fallback_msg, "whatsapp")
+            return {"error": f"OpenClaw error: {str(e)}"}
 
         if response.status_code != 200:
             logger.error(f"OpenClaw error {response.status_code}: {response.text}")
             fallback_msg = "Things are a bit busy on my end right now! Give me a minute to catch up, and try again shortly. ⭐️"
             await _send_whatsapp_message(client, phone, fallback_msg)
+            await _log_to_mongo(session_id, user_id, "assistant", fallback_msg, "whatsapp")
             return {"error": f"OpenClaw returned {response.status_code}"}
 
-        data = response.json()
+        # Parse JSON response safely
+        try:
+            data = response.json()
+        except Exception as e:
+            logger.error(f"[OpenClaw] Failed to parse JSON response: {e}")
+            fallback_msg = "I received an unclear response. Let's try that again! ⭐️"
+            await _send_whatsapp_message(client, phone, fallback_msg)
+            await _log_to_mongo(session_id, user_id, "assistant", fallback_msg, "whatsapp")
+            return {"error": "OpenClaw invalid JSON"}
 
         # [DEBUG] Log the entire response structure
         logger.info(f"[RESPONSE_DEBUG] Response keys: {list(data.keys())}")

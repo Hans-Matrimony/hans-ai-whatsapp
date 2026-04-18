@@ -238,7 +238,13 @@ class EnforcementMessageGenerator:
                     "unable to respond",
                     "api error",
                     "service unavailable",
-                    "an error occurred"
+                    "an error occurred",
+                    "an unknown error occurred",
+                    "unknown error",
+                    "request interrupted",
+                    "malformed response",
+                    "timeout",
+                    "rate limit"
                 ]
 
                 cached_lower = cached_message.lower()
@@ -1223,6 +1229,10 @@ Generate now:"""
                             "api error",
                             "service unavailable",
                             "an error occurred",
+                            "an unknown error occurred",
+                            "unknown error",
+                            "request interrupted",
+                            "malformed response",
                             "timeout",
                             "rate limit"
                         ]
@@ -1376,7 +1386,11 @@ def clear_bad_enforcement_cache(redis_url: str, dry_run: bool = True) -> int:
         "unable to respond",
         "api error",
         "service unavailable",
-        "an error occurred"
+        "an error occurred",
+        "an unknown error occurred",
+        "unknown error",
+        "request interrupted",
+        "malformed response"
     ]
 
     try:
