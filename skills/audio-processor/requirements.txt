@@ -1,11 +1,14 @@
 # Audio Processing Requirements
 # For audio-to-audio WhatsApp messaging
 
+# Edge TTS (100% FREE)
+edge-tts>=6.1.0
+
 # Groq for transcription (FREE)
 # No pip install needed - just API key
 
-# Google Cloud TTS
-google-cloud-texttospeech>=2.16.0
+# Google Cloud TTS (backup, not used in Edge TTS version)
+# google-cloud-texttospeech>=2.16.0
 
 # HTTP client (for Groq API)
 httpx>=0.24.0

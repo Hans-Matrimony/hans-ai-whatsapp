@@ -3065,6 +3065,60 @@ Copy your code and share! 💫"""
             for bubble in bubbles:
                 await _send_whatsapp_message(client, phone, bubble)
 
+            # ===================================================================
+            # TTS FEATURE - ONLY FOR TEST NUMBER 8534823036
+            # ===================================================================
+            # Check if this is the test number and send audio response
+            TEST_NUMBER = "8534823036"
+            normalized_phone = phone.replace("+", "").replace(" ", "").replace("-", "")
+
+            if normalized_phone == TEST_NUMBER:
+                logger.info(f"[TTS] Test number detected, generating audio response...")
+                try:
+                    # Import Edge TTS module
+                    import sys
+                    import os
+                    import importlib.util
+
+                    # Get the Edge TTS module file path
+                    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                    tts_edge_path = os.path.join(project_root, 'skills', 'audio-processor', 'text_to_speech_edge.py')
+
+                    # Load module directly from file
+                    spec = importlib.util.spec_from_file_location("tts_edge_module", tts_edge_path)
+                    tts_edge_module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(tts_edge_module)
+
+                    # Check if this is the test number (double check)
+                    if tts_edge_module.is_test_number(phone):
+                        # Detect language from response
+                        language = tts_edge_module.detect_language(clean_reply)
+
+                        # Generate audio using Edge TTS
+                        result = await tts_edge_module.text_to_speech_edge_async(
+                            text=clean_reply,
+                            language=language,
+                            user_id=user_id
+                        )
+
+                        if result:
+                            audio_bytes, audio_file_path = result
+                            logger.info(f"[TTS] Audio generated successfully: {len(audio_bytes)} bytes")
+
+                            # Send audio file via WhatsApp
+                            # Note: For now, we'll just send a text message confirming audio was generated
+                            # In production, you would upload the audio and send it via WhatsApp API
+                            tts_message = f"🎤 **[TTS TEST]** Audio generated ({len(audio_bytes)} bytes, language: {language})\n\nFile: {audio_file_path}"
+                            await _send_whatsapp_message(client, phone, tts_message)
+                            logger.info(f"[TTS] Test number {phone}: Audio generation confirmed")
+                        else:
+                            logger.warning(f"[TTS] Audio generation failed for test number")
+                    else:
+                        logger.info(f"[TTS] Phone {phone} is not test number, skipping TTS")
+
+                except Exception as e:
+                    logger.error(f"[TTS] Error generating audio for test number: {e}", exc_info=True)
+
         # Send any media items as images
         for media_item in media_items:
             if media_item["type"] == "base64":

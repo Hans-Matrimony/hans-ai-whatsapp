@@ -1,0 +1,2 @@
+# Edge TTS for Text-to-Speech (100% FREE)
+edge-tts>=6.1.0
