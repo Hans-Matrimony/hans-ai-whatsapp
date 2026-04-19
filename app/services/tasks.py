@@ -4677,13 +4677,14 @@ async def _send_daily_horoscope(today_date: str = None):
 async def _detect_language_for_user(user_id: str, client: httpx.AsyncClient) -> str:
     """
     Detect user's language from their MongoDB conversations.
+    Analyzes last 5 conversations/sessions to determine if user prefers Hinglish or English.
     Returns 'hinglish' or 'english'.
     """
     try:
-        # Fetch recent messages from MongoDB
+        # Fetch user data from MongoDB - returns nested sessions structure
         response = await client.get(
             f"{MONGO_LOGGER_URL}/messages",
-            params={"userId": user_id, "role": "user", "limit": 20}
+            params={"userId": user_id}
         )
 
         if response.status_code != 200:
@@ -4691,50 +4692,83 @@ async def _detect_language_for_user(user_id: str, client: httpx.AsyncClient) -> 
             return "english"  # Default to English
 
         data = response.json()
-        messages = data.get("messages", [])
+        sessions = data.get("sessions", [])
 
-        if not messages:
+        if not sessions:
             return "english"  # Default to English
 
-        # Hinglish keywords (Roman script Hindi)
+        # Get last 5 sessions sorted by lastMessageTime
+        last_5_sessions = sorted(sessions, key=lambda s: s.get("lastMessageTime", ""), reverse=True)[:5]
+
+        # Collect all user messages from these sessions
+        all_user_messages = []
+        for session in last_5_sessions:
+            messages = session.get("messages", [])
+            for msg in messages:
+                if msg.get("role") == "user":
+                    all_user_messages.append(msg.get("text", ""))
+
+        if not all_user_messages:
+            return "english"  # Default to English
+
+        # Hinglish keywords (Roman script Hindi) - Comprehensive set
         hinglish_keywords = {
-            'mai', 'me', 'main', 'mera', 'meri', 'mera', 'tera', 'teri', 'tum', 'tumhara',
-            'ap', 'aap', 'aapka', 'aapki', 'hamara', 'hamari', 'uska', 'uski',
-            'hai', 'hain', 'ho', 'hoga', 'hogi', 'hon', 'tha', 'thi', 'the',
+            # Pronouns
+            'mai', 'me', 'main', 'mera', 'meri', 'mere', 'tera', 'teri', 'tere',
+            'tum', 'tumhara', 'tumhari', 'ap', 'aap', 'aapka', 'aapki', 'aapke',
+            'hamara', 'hamari', 'hamare', 'uska', 'uski', 'uske', 'iska', 'iski',
+            # Being verbs
+            'hai', 'hain', 'ho', 'hoga', 'hogi', 'honge', 'hon', 'tha', 'thi',
+            'the', 'rah', 'rahe', 'rahi', 'raha',
+            # Verbs
             'kar', 'ke', 'ki', 'ko', 'se', 'mein', 'me', 'par', 'liye', 'wajahse',
-            'karta', 'karti', 'karte', 'sakta', 'sakti', 'sake', 'chahta', 'chahti',
-            'chaiye', 'lena', 'dene', 'de', 'diya', 'dijiye', 'kijiye', 'batana',
-            'bata', 'bolo', 'bol', 'aana', 'jana', 'ana', 'ja', 'raha', 'rahi', 'rahe',
-            'karunga', 'karegi', 'karenge', 'karun', 'kar', 'rakha', 'rakhi',
-            'abhi', 'ab', 'kal', 'aaj', 'aj', 'pehli', 'pichli', 'baad', 'mein',
-            'kabhi', 'kab', 'kahan', 'kaise', 'kitna', 'kitni', 'kitne', 'itna',
-            'itni', 'bahut', 'bohot', 'zyada', 'kam', 'thoda', 'kaafi',
-            'kya', 'kyun', 'kyunki', 'kisko', 'kiska', 'kaun', 'kaunsa', 'kahan',
-            'aur', 'or', 'lekin', 'magar', 'par', 'toh', 'to', 'bhi', 'hi', 'tak',
+            'karta', 'karti', 'karte', 'sakta', 'sakti', 'sake', 'sakunge', 'sakenge',
+            'chahta', 'chahti', 'chahte', 'chaiye', 'lena', 'dene', 'de', 'diya',
+            'dijiye', 'kijiye', 'batana', 'bata', 'bolo', 'bol', 'aana', 'jana',
+            'ana', 'ja', 'raha', 'rahi', 'rahe', 'karunga', 'karegi', 'karenge',
+            'karun', 'kare', 'rakha', 'rakhi', 'rakhe', 'poocha', 'pooch', 'bola',
+            # Time expressions
+            'abhi', 'ab', 'kal', 'aaj', 'aj', 'pehla', 'pehli', 'pichla', 'pichli',
+            'baad', 'mein', 'kabhi', 'kab', 'kahan', 'se', 'tak', 'abhi',
+            # Question words
+            'kaise', 'kitna', 'kitni', 'kitne', 'itna', 'itni', 'itne', 'kyun',
+            'kya', 'kyunki', 'kisko', 'kiska', 'kaun', 'kaunsi', 'kaunsa',
+            # Conjunctions
+            'aur', 'or', 'lekin', 'magar', 'par', 'toh', 'to', 'bhi', 'hi',
+            # Common words
             'acha', 'achha', 'theek', 'thik', 'sahi', 'galat', 'maza', 'dushman',
             'dost', 'pyaar', 'pyar', 'love', 'hate', 'ghussa', 'gussa', 'khush',
-            'udaas', 'naraaz', 'khushi', 'gussaa', 'dard', 'pain',
+            'udaas', 'naraaz', 'khushi', 'gussa', 'dard', 'pain', 'problem',
+            # Family
             'mummy', 'papa', 'mummyji', 'papaaji', 'maa', 'baap', 'beti', 'beta',
             'bhai', 'behen', 'didi', 'bhaiya', 'family', 'ghar', 'gharpe',
+            # Astrology terms
             'kundli', 'rashi', 'lagna', 'grah', 'nakshatra', 'dasha', 'mahadasha',
-            'vivah', 'shaadi', 'marriage', 'janam', 'patrika',
+            'vivah', 'shaadi', 'marriage', 'janam', 'patrika', 'bhavishya',
+            # Politeness
             'ji', 'jii', 'sahij', 'sahi', 'bilkul', 'pakka', 'shayad', 'hmm',
             'haan', 'haanji', 'hanji', 'na', 'nahi', 'nahee', 'ok', 'okay',
             'sorry', 'thank', 'thanks', 'welcome', 'please', 'kripaya',
+            # Commands
             'dekhna', 'dekho', 'sunna', 'suno', 'samajhna', 'samajh', 'samjho',
             'pata', 'maloom', 'chal', 'chalo', 'ruk', 'ruko', 'wait', 'karo',
+            # Numbers
             'ek', 'do', 'teen', 'char', 'paanch', 'cheh', 'saath', 'aath', 'nau', 'das',
+            # Emotions/feelings
+            'acha', 'accha', 'bura', 'badas', 'pasand', 'nahi', 'pasand',
+            'tariff', 'karoge', 'karungi', 'karen', 'karein', 'bataye', 'batana',
         }
 
-        # Analyze last 10 user messages
+        # Analyze all collected user messages
         hinglish_count = 0
         total_words = 0
+        message_count = 0
 
-        for msg in messages[-10:]:
-            content = msg.get("text", msg.get("content", ""))
-            if not content:
+        for content in all_user_messages[-20:]:  # Last 20 user messages across sessions
+            if not content or not isinstance(content, str):
                 continue
 
+            message_count += 1
             words = content.lower().split()
             total_words += len(words)
 
@@ -4745,17 +4779,18 @@ async def _detect_language_for_user(user_id: str, client: httpx.AsyncClient) -> 
                     hinglish_count += 1
 
         if total_words == 0:
+            logger.debug(f"[Daily Horoscope] No words found for language detection, defaulting to english")
             return "english"
 
-        # Calculate Hinglish ratio (8% threshold)
+        # Calculate Hinglish ratio - use 5% threshold (more sensitive)
         hinglish_ratio = hinglish_count / total_words
-        is_hinglish = hinglish_ratio > 0.08
+        is_hinglish = hinglish_ratio > 0.05
 
         detected = "hinglish" if is_hinglish else "english"
-        logger.debug(f"[Daily Horoscope] Language detection: {hinglish_count}/{total_words} = {hinglish_ratio:.2%} -> {detected}")
+        logger.info(f"[Daily Horoscope] Language detection for {user_id}: {hinglish_count}/{total_words} words ({hinglish_ratio:.1%}) from {message_count} messages across {len(last_5_sessions)} sessions -> {detected}")
 
         return detected
 
     except Exception as e:
-        logger.warning(f"[Daily Horoscope] Language detection error: {e}")
+        logger.warning(f"[Daily Horoscope] Language detection error for {user_id}: {e}")
         return "english"  # Default to English on error

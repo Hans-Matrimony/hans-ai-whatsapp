@@ -122,33 +122,7 @@ class HoroscopeService:
 
         phone_id = phone or "horoscope_service"
         try:
-            logger.info(f"[Horoscope] Requesting API horoscope for DOB={dob}, Place={place}, User={phone_id}")
-
-            # Create prompt for the OpenClaw agent to act as the Vedic Horoscope Engine
-            prompt = f"""You are the Vedic Horoscope Engine. 
-Generate a personalized daily horoscope (Dainik Rashifal) for today based on these birth details:
-DOB: {dob}
-TOB: {tob}
-Place: {place}
-Preferred Language: {language}
-
-Return your response in STRICT JSON format with these exact keys:
-{{
-  "date": "YYYY-MM-DD",
-  "birth_moon_sign": "English Name",
-  "birth_moon_sign_hindi": "Hindi Name",
-  "birth_nakshatra": "Nakshatra Name",
-  "transit_moon_house": "House Number (1-12)",
-  "prediction": "A detailed 3-4 sentence daily prediction focusing on career, health and luck.",
-  "lucky_color": "Color Name",
-  "lucky_numbers": [1, 2, 3],
-  "lucky_day": "Day of the Week"
-}}
-
-Rules:
-- Keep the prediction personal and encouraging.
-- If language is 'hinglish', use Hinglish for the 'prediction' field.
-- Ensure the JSON is valid and contains NO other text."""
+            logger.info(f"[Horoscope] Requesting API horoscope for DOB={dob}, Place={place}, User={phone_id}, Language={language}")
 
             headers = {
                 "Content-Type": "application/json",
@@ -158,7 +132,18 @@ Rules:
             if self.api_token:
                 headers["Authorization"] = f"Bearer {self.api_token}"
 
-            prompt = f"Generate a detailed daily Vedic horoscope for DOB: {dob}, TOB: {tob}, Place: {place}. Return ONLY a JSON object with keys: date, birth_moon_sign, birth_moon_sign_hindi, birth_nakshatra, transit_moon_house, prediction, lucky_color, lucky_numbers, lucky_day. Language: {language}."
+            # Build language-specific prompt
+            if language == "hinglish":
+                language_instruction = "Write the 'prediction' field in Hinglish (Roman script Hindi mixed with English, like how Indians naturally speak - e.g., 'Aaj ka din aapke liye achha rahega. Career mein progress milegi.')"
+            else:
+                language_instruction = "Write the 'prediction' field in clear, encouraging English."
+
+            prompt = f"""Generate a detailed daily Vedic horoscope for DOB: {dob}, TOB: {tob}, Place: {place}.
+
+{language_instruction}
+
+Return ONLY a JSON object with these keys:
+{{"date": "YYYY-MM-DD", "birth_moon_sign": "English Name", "birth_moon_sign_hindi": "Hindi Name", "birth_nakshatra": "Nakshatra Name", "transit_moon_house": "House Number (1-12)", "prediction": "3-4 sentence personalized prediction", "lucky_color": "Color Name", "lucky_numbers": [1, 2, 3], "lucky_day": "Day of Week"}}"""
 
             payload = {
                 "model": "agent:astrologer",
