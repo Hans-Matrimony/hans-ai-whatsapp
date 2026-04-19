@@ -3390,8 +3390,8 @@ async def _send_typing_indicator(client: httpx.AsyncClient, message_id: str):
         logger.warning(f"Failed to send typing indicator: {e}")
 
 
-async def _log_to_mongo(session_id: str, user_id: str, role: str, text: str, channel: str, message_type: str = "text", media_info: dict = None, nudge_level: int = None):
-    """Log chat message to MongoDB."""
+async def _log_to_mongo(session_id: str, user_id: str, role: str, text: str, channel: str, message_type: str = "text", media_info: dict = None, nudge_level: int = None, metadata: dict = None):
+    """Log chat message to MongoDB with optional metadata for delivery tracking."""
     if not MONGO_LOGGER_URL:
         return
 
@@ -3403,13 +3403,17 @@ async def _log_to_mongo(session_id: str, user_id: str, role: str, text: str, cha
         "channel": channel,
         "messageType": message_type
     }
-    
+
     if nudge_level:
         payload["nudgeLevel"] = nudge_level
 
     # Add media info if present
     if media_info:
         payload["mediaInfo"] = media_info
+
+    # Add metadata if present (for delivery tracking)
+    if metadata:
+        payload["metadata"] = metadata
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -3974,20 +3978,53 @@ async def _check_inactive_users():
 
                         # Send nudge via WhatsApp
                         phone = user_id.replace("+", "")
-                        await _send_whatsapp_message(client, phone, nudge_message)
-                        nudges_sent += 1
+                        send_result = await _send_whatsapp_message(client, phone, nudge_message)
 
-                        # Log nudge to MongoDB for conversation context
-                        await _log_to_mongo(
-                            session_id=session_id,
-                            user_id=user_id,
-                            role="assistant",
-                            text=nudge_message,
-                            channel="whatsapp",
-                            message_type="text",
-                            nudge_level=1
-                        )
-                        logger.info(f"[Proactive Nudge] Logged nudge to MongoDB for {user_id}")
+                        # Check if sent successfully
+                        if "error" in send_result:
+                            logger.error(f"[Proactive Nudge] {user_id}: ❌ Failed to send - {send_result['error']}")
+
+                            # Log failed delivery to MongoDB
+                            await _log_to_mongo(
+                                session_id=session_id,
+                                user_id=user_id,
+                                role="assistant",
+                                text=f"[ERROR] Failed to send proactive nudge: {send_result['error']}",
+                                channel="whatsapp",
+                                message_type="proactive_nudge_failed",
+                                nudge_level=target_nudge_level,
+                                metadata={
+                                    "delivery_status": "failed",
+                                    "error": send_result['error'],
+                                    "topic": detected_topic,
+                                    "language": detected_language,
+                                    "hours_inactive": hours_inactive,
+                                    "timestamp": datetime.now(ist).strftime('%Y-%m-%d %H:%M:%S')
+                                }
+                            )
+                        else:
+                            nudges_sent += 1
+                            logger.info(f"[Proactive Nudge] ✓ Nudge sent to {user_id} (topic: {detected_topic}, language: {detected_language})")
+
+                            # Log successful delivery to MongoDB
+                            await _log_to_mongo(
+                                session_id=session_id,
+                                user_id=user_id,
+                                role="assistant",
+                                text=nudge_message,
+                                channel="whatsapp",
+                                message_type="proactive_nudge",
+                                nudge_level=target_nudge_level,
+                                metadata={
+                                    "delivery_status": "success",
+                                    "message_id": send_result.get("message_id"),
+                                    "topic": detected_topic,
+                                    "language": detected_language,
+                                    "hours_inactive": hours_inactive,
+                                    "timestamp": datetime.now(ist).strftime('%Y-%m-%d %H:%M:%S')
+                                }
+                            )
+                            logger.info(f"[Proactive Nudge] ✅ Logged delivery status to MongoDB for {user_id}")
 
                         # DEDUP SET: Mark this user as nudged with 8-hour expiry
                         if _nudge_redis:
@@ -4511,19 +4548,49 @@ async def _send_daily_horoscope(today_date: str = None):
 
                 # Send via WhatsApp
                 logger.info(f"[Daily Horoscope] {user_id}: Sending horoscope...")
-                await _send_whatsapp_message(client, phone, horoscope_message)
-                sent_count += 1
-                logger.info(f"[Daily Horoscope] {user_id}: ✅ Horoscope sent successfully!")
+                send_result = await _send_whatsapp_message(client, phone, horoscope_message)
 
-                # Log horoscope to MongoDB for conversation context
-                await _log_to_mongo(
-                    session_id=session_id,
-                    user_id=user_id,
-                    role="assistant",
-                    text=horoscope_message,
-                    channel="whatsapp"
-                )
-                logger.info(f"[Daily Horoscope] Logged horoscope to MongoDB for {user_id}")
+                # Check if sent successfully
+                if "error" in send_result:
+                    logger.error(f"[Daily Horoscope] {user_id}: ❌ Failed to send - {send_result['error']}")
+
+                    # Log failed delivery to MongoDB
+                    await _log_to_mongo(
+                        session_id=session_id,
+                        user_id=user_id,
+                        role="assistant",
+                        text=f"[ERROR] Failed to send daily horoscope: {send_result['error']}",
+                        channel="whatsapp",
+                        message_type="daily_horoscope_failed",
+                        metadata={
+                            "delivery_status": "failed",
+                            "error": send_result['error'],
+                            "timestamp": datetime.now(ist).strftime('%Y-%m-%d %H:%M:%S'),
+                            "dob": dob,
+                            "language": detected_language
+                        }
+                    )
+                else:
+                    sent_count += 1
+                    logger.info(f"[Daily Horoscope] {user_id}: ✅ Horoscope sent successfully!")
+
+                    # Log successful delivery to MongoDB
+                    await _log_to_mongo(
+                        session_id=session_id,
+                        user_id=user_id,
+                        role="assistant",
+                        text=horoscope_message,
+                        channel="whatsapp",
+                        message_type="daily_horoscope",
+                        metadata={
+                            "delivery_status": "success",
+                            "message_id": send_result.get("message_id"),
+                            "timestamp": datetime.now(ist).strftime('%Y-%m-%d %H:%M:%S'),
+                            "dob": dob,
+                            "language": detected_language
+                        }
+                    )
+                    logger.info(f"[Daily Horoscope] ✅ Logged delivery status to MongoDB for {user_id}")
 
                 # Mark as sent in Redis (26-hour expiry - ensures it lasts until tomorrow)
                 if _nudge_redis:
