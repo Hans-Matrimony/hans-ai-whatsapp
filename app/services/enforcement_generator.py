@@ -35,6 +35,22 @@ class EnforcementMessageGenerator:
     - Enforcement type (soft_paywall, daily_limit, payment_nudge)
     """
 
+    # Hardcoded fallback messages for when AI generation fails
+    FALLBACK_MESSAGES = {
+        "soft_paywall": {
+            "english": "🙏 I really want to help you properly! For just ₹9, get 24 hours of unlimited guidance. That's less than your chai! 💫 Click Pay Now below!",
+            "hinglish": "🙏 Main sach mein aapki madad karna chahta hoon! Sirf ₹9 mein, 24 ghante ki unlimited guidance. Ye toh ek chai se bhi kam! 💫 Niche Pay Now karlo!"
+        },
+        "daily_limit": {
+            "english": "🙏 Don't worry, for just ₹9 message freely for 24 hours! Your answers are waiting. Less than a chai, invaluable guidance! 💫 Pay Now below!",
+            "hinglish": "🙏 Chinta mat karo, sirf ₹9 mein 24 ghante freely message karo! Aapke jawab intezaar kar rahe hain. Ek chai se bhi kam, priceless guidance! 💫 Niche Pay Now karlo!"
+        },
+        "payment_nudge": {
+            "english": "🙏 Your concerns matter! For ₹9, get complete guidance for 24 hours. Less than coffee - but clarity for your life! ☕💫 Pay Now below!",
+            "hinglish": "🙏 Aapki pareshaniyan important hain! ₹9 mein, 24 ghante ki complete guidance. Ek coffee se bhi kam - par life ka clarity! ☕💫 Niche Pay Now karlo!"
+        }
+    }
+
     # Personality templates for Meera and Aarav
     PERSONALITIES = {
         "Meera": {
@@ -287,9 +303,14 @@ class EnforcementMessageGenerator:
 
             if not message:
                 logger.warning(
-                    f"[Enforcement Generator] OpenClaw API returned empty message"
+                    f"[Enforcement Generator] OpenClaw API returned empty message, using fallback"
                 )
-                return None
+                # Return hardcoded fallback message
+                return self._get_fallback_message(
+                    enforcement_type=enforcement_type,
+                    language=language,
+                    astrologer_name=astrologer_name
+                )
 
             # Step 6: Cache the generated message
             self.redis.setex(cache_key, self.cache_ttl, message)
@@ -311,7 +332,12 @@ class EnforcementMessageGenerator:
                 f"[Enforcement Generator] Error generating message: {e}",
                 exc_info=True
             )
-            return None
+            # Return hardcoded fallback message on error
+            return self._get_fallback_message(
+                enforcement_type=enforcement_type,
+                language=language,
+                astrologer_name=astrologer_name
+            )
 
     async def _fetch_recent_conversation(
         self,
@@ -835,6 +861,53 @@ class EnforcementMessageGenerator:
                 f"[Enforcement Generator] Error fetching mem0 memories: {e}"
             )
             return {}
+
+    def _get_fallback_message(
+        self,
+        enforcement_type: str,
+        language: str,
+        astrologer_name: str = None
+    ) -> str:
+        """
+        Get hardcoded fallback message when AI generation fails
+
+        Args:
+            enforcement_type: Type of enforcement (soft_paywall, daily_limit, payment_nudge)
+            language: User's language (english or hinglish)
+            astrologer_name: Name of astrologer (not used - messages are gender-neutral)
+
+        Returns:
+            Hardcoded fallback message string
+        """
+        try:
+            # Normalize language (handle 'hindi' -> 'hinglish')
+            normalized_language = "hinglish" if language.lower() in ["hindi", "hinglish"] else "english"
+
+            # Get fallback message from dictionary
+            fallback = self.FALLBACK_MESSAGES.get(enforcement_type, {}).get(normalized_language)
+
+            if fallback:
+                logger.info(
+                    f"[Enforcement Generator] Using fallback message for {enforcement_type} "
+                    f"({normalized_language})"
+                )
+                return fallback
+            else:
+                logger.warning(
+                    f"[Enforcement Generator] No fallback message found for "
+                    f"{enforcement_type}/{normalized_language}, using default"
+                )
+                # Return default fallback (English soft_paywall)
+                return self.FALLBACK_MESSAGES.get("soft_paywall", {}).get("english",
+                    "🙏 Messages are over for now. Just ₹9 for 24 hours - click Pay Now below! 💫")
+
+        except Exception as e:
+            logger.error(
+                f"[Enforcement Generator] Error getting fallback message: {e}",
+                exc_info=True
+            )
+            # Ultimate fallback
+            return "🙏 Messages are over for now. Just ₹9 for 24 hours - click Pay Now below! 💫"
 
     def _generate_context_hash(
         self,
