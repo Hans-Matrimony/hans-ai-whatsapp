@@ -54,11 +54,11 @@ celery_app.conf.beat_schedule = {
         'task': 'app.services.tasks.proactive_nudge_task',
         'schedule': 300.0,  # 5 minutes
     },
-    # Daily horoscope at 8:50 AM IST (runs daily)
-    # 3:20 AM UTC = 8:50 AM IST (India is UTC+5:30)
-    'daily-horoscope-850am-ist': {
+    # Daily horoscope at 7:00 AM IST (runs daily)
+    # 1:30 AM UTC = 7:00 AM IST (India is UTC+5:30)
+    'daily-horoscope-7am-ist': {
         'task': 'app.services.tasks.daily_horoscope_task',
-        'schedule': crontab(minute=20, hour=3),  # 3:20 AM UTC = 8:50 AM IST
+        'schedule': crontab(minute=30, hour=1),  # 1:30 AM UTC = 7:00 AM IST
     },
 }
 

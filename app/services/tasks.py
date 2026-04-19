@@ -4301,13 +4301,13 @@ async def _get_recent_conversation_from_mongo(user_id: str, session_data: dict =
 
 
 # ===================================================================
-# Daily Horoscope Task - Runs at 8:50 AM IST daily
+# Daily Horoscope Task - Runs at 7:00 AM IST daily
 # ===================================================================
 
 @celery_app.task(bind=True, max_retries=2, default_retry_delay=300)
 def daily_horoscope_task(self):
     """
-    Send daily horoscope to all users with birth details at 8:50 AM IST.
+    Send daily horoscope to all users with birth details at 7:00 AM IST.
     ONLY RUNS ONCE PER DAY - uses Redis global lock for deduplication.
     Fetches birth details from user_metadata (primary) or Mem0 (fallback).
     Detects language from MongoDB conversations (Hinglish or English).
@@ -4338,15 +4338,15 @@ def daily_horoscope_task(self):
             except Exception as redis_err:
                 logger.warning(f"[Daily Horoscope] Redis global lock check failed: {redis_err}")
 
-        # STRICT TIME CHECK: Only run at exactly 8:50 AM IST (with 10-minute grace window)
+        # STRICT TIME CHECK: Only run at exactly 7:00 AM IST (with 15-minute grace window)
         # This ensures the task only runs once per day at the scheduled time
-        is_eight_fifty = (current_hour == 8 and 50 <= current_minute < 60)
+        is_seven_am = (current_hour == 7 and current_minute < 15)
 
         # Allow test mode to bypass time check
         test_mode = os.getenv("DAILY_HOROSCOPE_TEST_NUMBER")
 
-        if not is_eight_fifty and not test_mode:
-            logger.info(f"[Daily Horoscope] Not 8:50 AM (currently {current_hour}:{current_minute:02d} IST), skipping")
+        if not is_seven_am and not test_mode:
+            logger.info(f"[Daily Horoscope] Not 7:00 AM (currently {current_hour}:{current_minute:02d} IST), skipping")
             return {"status": "not_scheduled_time", "current_time": f"{current_hour}:{current_minute:02d}"}
 
         logger.info(f"[Daily Horoscope] ✅ Time check passed - running for {today_date}")
